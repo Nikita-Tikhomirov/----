@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-lead-funnel"
+version = "0.1.0"
+description = "Local Telegram lead funnel for simple web development orders."
+requires-python = ">=3.10"
+dependencies = [
+    "Telethon>=1.34,<2",
+    "python-dotenv>=1.0,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
