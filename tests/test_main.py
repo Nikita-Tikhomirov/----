@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from app.main import process_approvals, process_order_reviews, scan_once, submit_order
+from app.main import create_order_handoff, process_approvals, process_order_reviews, scan_once, submit_order
 from app.storage import Storage
 
 
@@ -223,3 +223,24 @@ def test_process_order_reviews_marks_order_done_after_approval(tmp_path):
 
     assert processed == 1
     assert storage.get_order(order_id).status == "done"
+
+
+def test_create_order_handoff_writes_codex_task_file(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    order_id = storage.create_order(
+        contact="@client_dev",
+        title="Лендинг",
+        brief="Сверстать HTML/CSS/JS лендинг",
+    )
+
+    handoff_path = create_order_handoff(
+        storage=storage,
+        order_id=order_id,
+        output_dir=tmp_path / "handoffs",
+    )
+
+    assert handoff_path.name == "order-1-handoff.md"
+    content = handoff_path.read_text(encoding="utf-8")
+    assert "Codex task: order #1" in content
+    assert "Сверстать HTML/CSS/JS лендинг" in content

@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from pathlib import Path
 from typing import Protocol
 
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
+from app.handoff import write_codex_handoff
 from app.lead_filter import evaluate_post
 from app.public_telegram_client import PublicTelegramClient
 from app.storage import Storage
@@ -144,6 +146,11 @@ def print_orders(storage: Storage, status: str | None = None) -> None:
         print(f"#{order.id} [{order.status}] {order.title} - {order.contact}")
 
 
+def create_order_handoff(storage: Storage, order_id: int, output_dir: str | Path) -> Path:
+    order = storage.get_order(order_id)
+    return write_codex_handoff(order, output_dir)
+
+
 def build_runtime(config: AppConfig):
     storage = Storage(config.database_path)
     storage.initialize()
@@ -201,6 +208,9 @@ def main() -> int:
     orders_submit = orders_subparsers.add_parser("submit")
     orders_submit.add_argument("order_id", type=int)
     orders_submit.add_argument("--deliverable", required=True)
+    orders_handoff = orders_subparsers.add_parser("handoff")
+    orders_handoff.add_argument("order_id", type=int)
+    orders_handoff.add_argument("--output-dir", default="handoffs")
     args = parser.parse_args()
 
     config = load_config()
@@ -239,6 +249,10 @@ def main() -> int:
         if args.order_command == "submit":
             submit_order(storage, email_client, args.order_id, args.deliverable)
             print(f"Submitted order #{args.order_id} for approval")
+            return 0
+        if args.order_command == "handoff":
+            handoff_path = create_order_handoff(storage, args.order_id, args.output_dir)
+            print(f"Created Codex handoff: {handoff_path}")
             return 0
 
     while True:

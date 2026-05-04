@@ -10,7 +10,7 @@
 
 - `python -m app.main scan` — один раз прочитать каналы, создать лиды и отправить email.
 - `python -m app.main approvals` — режим для будущей автоотправки через Telegram API. В public read-only режиме команда ничего не отправляет.
-- `python -m app.main orders ...` — вести заказ после отклика: принять, взять в работу, отправить результат на апрув.
+- `python -m app.main orders ...` — вести заказ после отклика: принять, взять в работу, отдать ТЗ в Codex, отправить результат на апрув.
 - `python -m app.main order-reviews` — прочитать email-команды по заказам: `DONE <order_id>` или `FIX <order_id>: правки`.
 - `python -m app.main watch` — циклически выполнять scan, approvals и order-reviews локально.
 
@@ -22,6 +22,11 @@ python -m pip install --use-feature=in-tree-build .[dev]
 ```
 
 Флаг `--use-feature=in-tree-build` нужен для старых версий pip и путей с кириллицей.
+Если запускаешь команды из рабочей папки без переустановки пакета после правок, добавь текущий `src` в `PYTHONPATH`:
+
+```powershell
+$env:PYTHONPATH="src"
+```
 
 ## Настройка
 
@@ -29,6 +34,7 @@ python -m pip install --use-feature=in-tree-build .[dev]
 2. Заполни `TELEGRAM_CHANNELS` списком публичных каналов:
    - `@channel_one,@channel_two`
    - или `https://t.me/channel_one,https://t.me/channel_two`
+   - текущая проверенная подборка: `@freelance_dev_work,@FreelancehuntProjects`
 3. Для режима без Telegram API оставь:
    - `TELEGRAM_API_ID=0`
    - `TELEGRAM_API_HASH=fill_later`
@@ -52,6 +58,7 @@ python -m pip install --use-feature=in-tree-build .[dev]
 ```powershell
 python -m app.main orders receive --contact "@client_dev" --title "Лендинг" --brief "Сверстать HTML/CSS/JS лендинг"
 python -m app.main orders start 1
+python -m app.main orders handoff 1
 python -m app.main orders submit 1 --deliverable "Готовая ссылка: https://example.com"
 python -m app.main order-reviews
 python -m app.main orders list
@@ -69,6 +76,24 @@ python -m app.main orders list
 
 - `DONE <order_id>` — принять работу и пометить заказ сделанным.
 - `FIX <order_id>: что поправить` — вернуть заказ в правки.
+
+## Передача заказа в Codex
+
+Команда handoff создает markdown-файл с готовым заданием для Codex:
+
+```powershell
+python -m app.main orders handoff 1
+```
+
+По умолчанию файл создается в `handoffs/order-1-handoff.md`. В него попадают:
+
+- ID, статус, контакт и даты заказа.
+- ТЗ заказчика.
+- Последние правки, если они есть.
+- Последний результат, если заказ уже отдавался на проверку.
+- Definition of Done и минимальная команда проверки.
+
+Папка `handoffs/` исключена из git, потому что эти файлы могут содержать пользовательские детали заказа.
 
 ## Smoke-проверка
 
