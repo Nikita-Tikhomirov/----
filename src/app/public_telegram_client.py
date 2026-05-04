@@ -16,6 +16,10 @@ TEXT_PATTERN = re.compile(
     r'<div class="tgme_widget_message_text js-message_text"[^>]*>(?P<text>[\s\S]*?)</div>',
     re.IGNORECASE,
 )
+INLINE_BUTTON_PATTERN = re.compile(
+    r'<a class="[^"]*\btgme_widget_message_inline_button\b[^"]*"[^>]*href="(?P<href>[^"]+)"',
+    re.IGNORECASE,
+)
 TAG_PATTERN = re.compile(r"<[^>]+>")
 
 
@@ -31,8 +35,9 @@ class PublicTelegramClient:
         for channel in self.channels:
             clean_channel = normalize_channel(channel)
             html_text = _fetch_channel_html(clean_channel)
-            posts.extend(parse_public_channel_posts(clean_channel, html_text))
-        return posts[: self.max_posts_per_channel * max(len(self.channels), 1)]
+            channel_posts = parse_public_channel_posts(clean_channel, html_text)
+            posts.extend(channel_posts[: self.max_posts_per_channel])
+        return posts
 
     def send_message(self, contact: str, text: str) -> str:
         raise RuntimeError(
@@ -55,6 +60,9 @@ def parse_public_channel_posts(channel: str, html_text: str) -> list[TelegramPos
         text = _clean_text(text_match.group("text"))
         if not text:
             continue
+        reply_url = _first_inline_reply_url(block)
+        if reply_url:
+            text = f"{text} Отклик: {reply_url}"
         time_match = TIME_PATTERN.search(block)
         posts.append(
             TelegramPost(
@@ -90,3 +98,8 @@ def _clean_text(raw: str) -> str:
     raw = raw.replace("<br/>", "\n").replace("<br>", "\n")
     without_tags = TAG_PATTERN.sub("", raw)
     return " ".join(html.unescape(without_tags).split())
+
+
+def _first_inline_reply_url(block: str) -> str:
+    match = INLINE_BUTTON_PATTERN.search(block)
+    return html.unescape(match.group("href")) if match else ""

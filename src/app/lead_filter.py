@@ -16,42 +16,49 @@ class LeadEvaluation:
 
 POSITIVE_PATTERNS = (
     ("HTML/CSS/JS", re.compile(r"\b(html|css|js|javascript)\b", re.IGNORECASE)),
-    ("верстка", re.compile(r"верст|адаптив|лендинг|landing|сайт", re.IGNORECASE)),
+    ("верстка", re.compile(r"верст|адаптив|лендинг|landing|доработать сайт|правки на сайт|создать сайт", re.IGNORECASE)),
     ("WordPress", re.compile(r"wordpress|wp|вордпресс", re.IGNORECASE)),
     ("форма", re.compile(r"форм|заявк|кнопк|поправ", re.IGNORECASE)),
 )
 
+CORE_WEB_LABELS = {"HTML/CSS/JS", "верстка", "WordPress"}
+
 BLOCKED_PATTERNS = (
     ("React", re.compile(r"\breact\b|next\.?js|gatsby", re.IGNORECASE)),
-    ("конструктор", re.compile(r"tilda|webflow|wix|битрикс|bitrix|taplink", re.IGNORECASE)),
+    ("конструктор", re.compile(r"tilda|webflow|wix|битрикс|bitrix|taplink|flexbe|creatium|canva", re.IGNORECASE)),
+    ("нецелевой stack", re.compile(r"shopify|learnworlds|asp\.?net|getcourse", re.IGNORECASE)),
+    ("вакансия", re.compile(r"ваканси|зарплат|руб/мес|full.?time|part.?time|senior|middle|junior|в команду", re.IGNORECASE)),
 )
 
 SMALL_TASK_PATTERN = re.compile(
-    r"1-2\s*дн|1\s*день|2\s*дн|за день|пару часов|быстро|небольш|прост",
+    r"1-2\s*дн|1\s*день|2\s*дн|за день|пару часов|быстро|небольш|прост|правк",
     re.IGNORECASE,
 )
+REPLY_URL_PATTERN = re.compile(r"Отклик:\s*(https?://\S+)", re.IGNORECASE)
 CONTACT_PATTERN = re.compile(r"@[A-Za-z0-9_]{5,}|https?://\S+", re.IGNORECASE)
 
 
 def evaluate_post(text: str) -> LeadEvaluation:
     normalized = " ".join(text.split())
-    positive = [label for label, pattern in POSITIVE_PATTERNS if pattern.search(normalized)]
-    blocked = [label for label, pattern in BLOCKED_PATTERNS if pattern.search(normalized)]
+    scored_text = re.sub(r"https?://\S+", "", normalized)
+    positive = [label for label, pattern in POSITIVE_PATTERNS if pattern.search(scored_text)]
+    blocked = [label for label, pattern in BLOCKED_PATTERNS if pattern.search(scored_text)]
     contact = _extract_contact(normalized)
+    has_core_web = any(label in CORE_WEB_LABELS for label in positive)
     reasons: list[str] = []
 
-    if not positive:
+    if not has_core_web:
         reasons.append("нет подходящего web-stack")
     reasons.extend(blocked)
     if not contact:
         reasons.append("нет контакта")
 
-    small_task = bool(SMALL_TASK_PATTERN.search(normalized)) or len(normalized) <= 220
+    small_task = bool(SMALL_TASK_PATTERN.search(scored_text)) or len(scored_text) <= 260
     if not small_task:
         reasons.append("похоже больше 1-2 дней")
 
-    score = _score(positive, blocked, contact, small_task)
-    accepted = score >= 70 and not blocked and contact != "" and bool(positive)
+    score = _score(positive, blocked, contact, small_task, has_core_web)
+    accepted = score >= 70 and not blocked and contact != "" and has_core_web
     if not accepted and not reasons:
         reasons.append("score ниже порога")
 
@@ -66,13 +73,28 @@ def evaluate_post(text: str) -> LeadEvaluation:
 
 
 def _extract_contact(text: str) -> str:
+    reply_match = REPLY_URL_PATTERN.search(text)
+    if reply_match:
+        return _clean_contact(reply_match.group(1))
     match = CONTACT_PATTERN.search(text)
-    return match.group(0).rstrip(").,;") if match else ""
+    return _clean_contact(match.group(0)) if match else ""
 
 
-def _score(positive: list[str], blocked: list[str], contact: str, small_task: bool) -> int:
-    score = 20
-    score += min(len(positive), 3) * 20
+def _clean_contact(contact: str) -> str:
+    return contact.rstrip(").,;")
+
+
+def _score(
+    positive: list[str],
+    blocked: list[str],
+    contact: str,
+    small_task: bool,
+    has_core_web: bool,
+) -> int:
+    score = 15
+    score += min(len(positive), 3) * 18
+    if has_core_web:
+        score += 20
     if "WordPress" in positive:
         score += 10
     if contact:
