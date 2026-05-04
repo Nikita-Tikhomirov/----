@@ -15,6 +15,8 @@ class TelegramPost:
 
 
 class TelegramLeadClient:
+    can_send_replies = True
+
     def __init__(
         self,
         api_id: int,

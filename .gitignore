@@ -2,6 +2,7 @@
 *.session
 *.session-journal
 *.sqlite3
+harness/
 __pycache__/
 .pytest_cache/
 .mypy_cache/

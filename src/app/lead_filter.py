@@ -30,7 +30,7 @@ SMALL_TASK_PATTERN = re.compile(
     r"1-2\s*дн|1\s*день|2\s*дн|за день|пару часов|быстро|небольш|прост",
     re.IGNORECASE,
 )
-CONTACT_PATTERN = re.compile(r"@[A-Za-z0-9_]{5,}|https?://t\.me/[A-Za-z0-9_]+", re.IGNORECASE)
+CONTACT_PATTERN = re.compile(r"@[A-Za-z0-9_]{5,}|https?://\S+", re.IGNORECASE)
 
 
 def evaluate_post(text: str) -> LeadEvaluation:
@@ -67,7 +67,7 @@ def evaluate_post(text: str) -> LeadEvaluation:
 
 def _extract_contact(text: str) -> str:
     match = CONTACT_PATTERN.search(text)
-    return match.group(0) if match else ""
+    return match.group(0).rstrip(").,;") if match else ""
 
 
 def _score(positive: list[str], blocked: list[str], contact: str, small_task: bool) -> int:

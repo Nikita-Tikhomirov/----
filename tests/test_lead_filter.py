@@ -29,3 +29,13 @@ def test_rejects_without_contact_or_reply_path():
 
     assert result.accepted is False
     assert "нет контакта" in result.reasons
+
+
+def test_accepts_public_order_link_as_reply_path():
+    result = evaluate_post(
+        "Подборка заказов по тегу #wordpress: исправление ошибок на сайте "
+        "за 1 200 руб. https://u.habr.com/example"
+    )
+
+    assert result.accepted is True
+    assert result.contact == "https://u.habr.com/example"

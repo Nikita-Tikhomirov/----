@@ -8,6 +8,7 @@ from typing import Protocol
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
 from app.lead_filter import evaluate_post
+from app.public_telegram_client import PublicTelegramClient
 from app.storage import Storage
 from app.telegram_client import TelegramLeadClient
 
@@ -27,6 +28,12 @@ class LeadMailer(Protocol):
         ...
 
     def fetch_approvals(self, seen_message_ids: set[str]) -> list[tuple[int, str]]:
+        ...
+
+    def send_order_for_approval(self, order) -> str:
+        ...
+
+    def fetch_order_reviews(self, seen_message_ids: set[str]):
         ...
 
 
@@ -72,6 +79,10 @@ def process_approvals(
     email_client: LeadMailer,
     max_sends: int = 5,
 ) -> int:
+    if not getattr(telegram_client, "can_send_replies", True):
+        logger.info("Skipping approvals because Telegram client is read-only")
+        return 0
+
     sent = 0
     approvals = email_client.fetch_approvals(storage.seen_approval_message_ids())
     for lead_id, approval_message_id in approvals:
@@ -95,16 +106,63 @@ def process_approvals(
     return sent
 
 
+def submit_order(
+    storage: Storage,
+    email_client: LeadMailer,
+    order_id: int,
+    deliverable: str,
+) -> str:
+    storage.submit_order_for_approval(order_id, deliverable)
+    order = storage.get_order(order_id)
+    email_message_id = email_client.send_order_for_approval(order)
+    logger.info("Submitted order %s for approval via %s", order_id, email_message_id)
+    return email_message_id
+
+
+def process_order_reviews(storage: Storage, email_client: LeadMailer) -> int:
+    processed = 0
+    reviews = email_client.fetch_order_reviews(storage.seen_order_review_message_ids())
+    for review in reviews:
+        if review.decision == "approved":
+            changed = storage.approve_order(review.order_id, review.message_id)
+        elif review.decision == "revision":
+            changed = storage.request_order_revision(
+                review.order_id,
+                review.message_id,
+                review.notes,
+            )
+        else:
+            logger.warning("Unknown order review decision: %s", review.decision)
+            changed = False
+        if changed:
+            processed += 1
+    return processed
+
+
+def print_orders(storage: Storage, status: str | None = None) -> None:
+    for order in storage.list_orders(status=status):
+        print(f"#{order.id} [{order.status}] {order.title} - {order.contact}")
+
+
 def build_runtime(config: AppConfig):
     storage = Storage(config.database_path)
     storage.initialize()
-    telegram_client = TelegramLeadClient(
-        api_id=config.telegram_api_id,
-        api_hash=config.telegram_api_hash,
-        session_name=config.telegram_session_name,
-        channels=config.telegram_channels,
-        max_posts_per_channel=config.max_posts_per_channel,
-    )
+    if config.telegram_api_id > 0 and config.telegram_api_hash != "fill_later":
+        manual_reply_only = False
+        telegram_client = TelegramLeadClient(
+            api_id=config.telegram_api_id,
+            api_hash=config.telegram_api_hash,
+            session_name=config.telegram_session_name,
+            channels=config.telegram_channels,
+            max_posts_per_channel=config.max_posts_per_channel,
+        )
+    else:
+        manual_reply_only = True
+        logger.warning("Telegram API is not configured; using public read-only fallback")
+        telegram_client = PublicTelegramClient(
+            channels=config.telegram_channels,
+            max_posts_per_channel=config.max_posts_per_channel,
+        )
     email_client = EmailClient(
         smtp_host=config.smtp_host,
         smtp_port=config.smtp_port,
@@ -116,6 +174,7 @@ def build_runtime(config: AppConfig):
         imap_port=config.imap_port,
         imap_user=config.imap_user,
         imap_password=config.imap_password,
+        manual_reply_only=manual_reply_only,
     )
     return storage, telegram_client, email_client
 
@@ -123,7 +182,25 @@ def build_runtime(config: AppConfig):
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Telegram lead funnel")
-    parser.add_argument("command", choices=("scan", "watch", "approvals"))
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("scan")
+    subparsers.add_parser("watch")
+    subparsers.add_parser("approvals")
+    subparsers.add_parser("order-reviews")
+
+    orders_parser = subparsers.add_parser("orders")
+    orders_subparsers = orders_parser.add_subparsers(dest="order_command", required=True)
+    orders_list = orders_subparsers.add_parser("list")
+    orders_list.add_argument("--status")
+    orders_receive = orders_subparsers.add_parser("receive")
+    orders_receive.add_argument("--contact", required=True)
+    orders_receive.add_argument("--title", required=True)
+    orders_receive.add_argument("--brief", required=True)
+    orders_start = orders_subparsers.add_parser("start")
+    orders_start.add_argument("order_id", type=int)
+    orders_submit = orders_subparsers.add_parser("submit")
+    orders_submit.add_argument("order_id", type=int)
+    orders_submit.add_argument("--deliverable", required=True)
     args = parser.parse_args()
 
     config = load_config()
@@ -140,6 +217,29 @@ def main() -> int:
             max_sends=config.max_sends_per_run,
         )
         return 0
+    if args.command == "order-reviews":
+        process_order_reviews(storage, email_client)
+        return 0
+    if args.command == "orders":
+        if args.order_command == "list":
+            print_orders(storage, status=args.status)
+            return 0
+        if args.order_command == "receive":
+            order_id = storage.create_order(
+                contact=args.contact,
+                title=args.title,
+                brief=args.brief,
+            )
+            print(f"Created order #{order_id}")
+            return 0
+        if args.order_command == "start":
+            storage.start_order(args.order_id)
+            print(f"Started order #{args.order_id}")
+            return 0
+        if args.order_command == "submit":
+            submit_order(storage, email_client, args.order_id, args.deliverable)
+            print(f"Submitted order #{args.order_id} for approval")
+            return 0
 
     while True:
         scan_once(storage, telegram_client, email_client)
@@ -149,6 +249,7 @@ def main() -> int:
             email_client,
             max_sends=config.max_sends_per_run,
         )
+        process_order_reviews(storage, email_client)
         time.sleep(config.scan_interval_seconds)
 
 

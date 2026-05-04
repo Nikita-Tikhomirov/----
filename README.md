@@ -2,13 +2,17 @@
 
 Локальный MVP для поиска простых заказов на web-разработку в Telegram-каналах.
 
-Инструмент читает заданные публичные Telegram-каналы через user session, отбирает простые задачи по HTML/CSS/JS и WordPress без React и конструкторов, отправляет лиды на email и отправляет отклик заказчику только после подтверждения ответом `OK <lead_id>`.
+Инструмент читает заданные публичные Telegram-каналы, отбирает простые задачи по HTML/CSS/JS и WordPress без React и конструкторов, отправляет лиды на email и дает готовый текст отклика для ручной отправки.
+
+Если позже появятся `TELEGRAM_API_ID` и `TELEGRAM_API_HASH`, можно включить режим автоотправки после подтверждения `OK <lead_id>`. Без этих данных работает публичный read-only режим через `https://t.me/s/...`.
 
 ## Что умеет MVP
 
 - `python -m app.main scan` — один раз прочитать каналы, создать лиды и отправить email.
-- `python -m app.main approvals` — прочитать email-ответы `OK <lead_id>` и отправить одобренные отклики в Telegram.
-- `python -m app.main watch` — циклически выполнять scan и approvals локально.
+- `python -m app.main approvals` — режим для будущей автоотправки через Telegram API. В public read-only режиме команда ничего не отправляет.
+- `python -m app.main orders ...` — вести заказ после отклика: принять, взять в работу, отправить результат на апрув.
+- `python -m app.main order-reviews` — прочитать email-команды по заказам: `DONE <order_id>` или `FIX <order_id>: правки`.
+- `python -m app.main watch` — циклически выполнять scan, approvals и order-reviews локально.
 
 ## Установка
 
@@ -22,30 +26,56 @@ python -m pip install --use-feature=in-tree-build .[dev]
 ## Настройка
 
 1. Скопируй `.env.example` в `.env`.
-2. Заполни Telegram API credentials:
-   - `TELEGRAM_API_ID`
-   - `TELEGRAM_API_HASH`
-   - `TELEGRAM_SESSION_NAME`
-   - `TELEGRAM_CHANNELS`
-3. Заполни SMTP/IMAP доступы к почте.
-4. Не коммить `.env`: файл уже исключен через `.gitignore`.
+2. Заполни `TELEGRAM_CHANNELS` списком публичных каналов:
+   - `@channel_one,@channel_two`
+   - или `https://t.me/channel_one,https://t.me/channel_two`
+3. Для режима без Telegram API оставь:
+   - `TELEGRAM_API_ID=0`
+   - `TELEGRAM_API_HASH=fill_later`
+4. Заполни SMTP/IMAP доступы к почте.
+5. Не коммить `.env`: файл уже исключен через `.gitignore`.
 
 ## Безопасный поток
 
 1. Инструмент находит подходящий пост.
 2. Создает лид в SQLite.
-3. Отправляет письмо с резюме, контактом, ссылкой и черновиком отклика.
-4. Ты отвечаешь на письмо строкой `OK <lead_id>`.
-5. Только после этого инструмент отправляет отклик в Telegram.
+3. Отправляет письмо с резюме, контактом, ссылкой и готовым текстом отклика.
+4. Ты открываешь ссылку на пост или контакт.
+5. Копируешь блок `СКОПИРОВАТЬ ОТКЛИК` и отправляешь его вручную.
 
-Повторная отправка по одному lead id блокируется таблицей `sent_messages`.
+В public read-only режиме инструмент не может писать в Telegram сам и не пытается обрабатывать `OK`.
+
+## Поток выполнения заказов
+
+После успешной автоотправки отклика через Telegram API лид автоматически становится заказом. В ручном режиме заказ можно добавить самому:
+
+```powershell
+python -m app.main orders receive --contact "@client_dev" --title "Лендинг" --brief "Сверстать HTML/CSS/JS лендинг"
+python -m app.main orders start 1
+python -m app.main orders submit 1 --deliverable "Готовая ссылка: https://example.com"
+python -m app.main order-reviews
+python -m app.main orders list
+```
+
+Статусы заказа:
+
+- `received` — заказ получен.
+- `in_progress` — заказ взят в работу.
+- `ready_for_approval` — результат отправлен на проверку.
+- `revision_requested` — пришли правки, нужно доработать и снова выполнить `orders submit`.
+- `done` — заказ одобрен командой `DONE <order_id>`.
+
+Команды в ответе на письмо с результатом:
+
+- `DONE <order_id>` — принять работу и пометить заказ сделанным.
+- `FIX <order_id>: что поправить` — вернуть заказ в правки.
 
 ## Smoke-проверка
 
 ```powershell
 python -m pytest -q
 python -m app.main scan
-python -m app.main approvals
+python -m app.main orders list
 ```
 
-Первый запуск Telethon может запросить авторизацию Telegram-аккаунта в терминале.
+Если `TELEGRAM_API_ID=0`, авторизация Telethon не нужна.
