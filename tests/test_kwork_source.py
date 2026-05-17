@@ -40,9 +40,17 @@ def test_parse_kwork_project_cards_skips_cards_without_offer_count():
     assert parse_kwork_project_cards(html, max_responses=5) == []
 
 
-def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path):
+def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch):
     from app.main import scan_once
+    import app.ai_reply
     from app.storage import Storage
+
+    ai_calls = []
+    monkeypatch.setattr(
+        app.ai_reply,
+        "generate_reply",
+        lambda **kwargs: ai_calls.append(kwargs["text"]) or "AI reply",
+    )
 
     class FakeSource:
         def fetch_recent_posts(self):
@@ -71,7 +79,8 @@ def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path):
     storage.initialize()
     email = FakeEmail()
 
-    assert scan_once(storage, FakeSource(), email) == 1
-    assert scan_once(storage, FakeSource(), email) == 0
+    assert scan_once(storage, FakeSource(), email, deepseek_api_key="sk-test") == 1
+    assert scan_once(storage, FakeSource(), email, deepseek_api_key="sk-test") == 0
     assert len(storage.list_leads()) == 1
     assert email.sent == [1]
+    assert len(ai_calls) == 1

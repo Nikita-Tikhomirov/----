@@ -163,6 +163,11 @@ class Storage:
                 (email_message_id, lead_id),
             )
 
+    def has_lead_for_post(self, post_id: int) -> bool:
+        with self._connect() as conn:
+            row = conn.execute("SELECT 1 FROM leads WHERE post_id = ?", (post_id,)).fetchone()
+        return row is not None
+
     def record_approval(self, lead_id: int, email_message_id: str) -> bool:
         with self._connect() as conn:
             lead = conn.execute(

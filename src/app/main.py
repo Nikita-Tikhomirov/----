@@ -64,6 +64,9 @@ def scan_once(
             text=post.text,
             posted_at=post.posted_at,
         )
+        if storage.has_lead_for_post(post_id):
+            logger.info("Skipping existing lead for post %s/%s", post.channel, post.message_id)
+            continue
         evaluation = evaluate_post(post.text)
         if not evaluation.accepted:
             logger.info("Rejected post %s/%s: %s", post.channel, post.message_id, evaluation.reasons)
@@ -211,6 +214,8 @@ def build_runtime(config: AppConfig):
             max_posts=config.max_posts_per_channel,
             max_responses=config.kwork_max_responses,
             cookie=config.kwork_cookie,
+            use_browser=config.kwork_use_browser,
+            cdp_url=config.kwork_cdp_url,
         )
     elif config.telegram_api_id > 0 and config.telegram_api_hash != "fill_later":
         manual_reply_only = False

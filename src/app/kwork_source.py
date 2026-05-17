@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
+import os
 import re
 import ssl
+import subprocess
+import time
 import urllib.request
 from urllib.parse import urljoin
 from urllib.request import Request
@@ -40,16 +44,27 @@ class KworkWebSource:
         max_responses: int = 5,
         cookie: str = "",
         timeout_seconds: float = 30.0,
+        use_browser: bool = True,
+        cdp_url: str = "http://127.0.0.1:9222",
     ):
         self.projects_url = projects_url
         self.max_posts = max_posts
         self.max_responses = max_responses
         self.cookie = cookie
         self.timeout_seconds = timeout_seconds
+        self.use_browser = use_browser
+        self.cdp_url = cdp_url.rstrip("/")
 
     def fetch_recent_posts(self) -> list[TelegramPost]:
+        html_text = ""
+        if self.use_browser:
+            try:
+                html_text = _fetch_rendered_html(self.projects_url, self.cdp_url, self.timeout_seconds)
+            except Exception as exc:
+                logger.warning("Failed to fetch rendered Kwork projects page via Chrome: %s", exc)
         try:
-            html_text = _fetch_html(self.projects_url, self.timeout_seconds, self.cookie)
+            if not html_text:
+                html_text = _fetch_html(self.projects_url, self.timeout_seconds, self.cookie)
         except Exception as exc:
             logger.warning("Failed to fetch Kwork projects page %s: %s", self.projects_url, exc)
             return []
@@ -126,6 +141,137 @@ def _fetch_html(url: str, timeout_seconds: float, cookie: str = "") -> str:
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_ctx))
     with opener.open(request, timeout=timeout_seconds) as response:
         return response.read().decode("utf-8", errors="replace")
+
+
+def _fetch_rendered_html(url: str, cdp_url: str, timeout_seconds: float) -> str:
+    _ensure_chrome_cdp(cdp_url, url)
+    page = _find_or_create_page(cdp_url, url)
+
+    import websocket
+
+    ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=timeout_seconds)
+    try:
+        _wait_for_cards(ws, timeout_seconds)
+        return _evaluate(ws, 'Array.from(document.querySelectorAll(".want-card")).map(x=>x.outerHTML).join("\\n")')
+    finally:
+        ws.close()
+
+
+def _ensure_chrome_cdp(cdp_url: str, url: str) -> None:
+    if _cdp_json(cdp_url, "/json/version", timeout=2):
+        return
+
+    chrome = _chrome_path()
+    if not chrome:
+        raise RuntimeError("Chrome executable not found")
+    user_data = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data")
+    args = [
+        chrome,
+        f"--user-data-dir={user_data}",
+        "--profile-directory=Default",
+        f"--remote-debugging-port={_cdp_port(cdp_url)}",
+        "--remote-allow-origins=*",
+        "--restore-last-session",
+        url,
+    ]
+    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        if _cdp_json(cdp_url, "/json/version", timeout=2):
+            return
+        time.sleep(0.5)
+    raise RuntimeError(
+        "Chrome DevTools port is not available. Close Chrome and run watch again, "
+        "or start Chrome with --remote-debugging-port."
+    )
+
+
+def _find_or_create_page(cdp_url: str, url: str) -> dict[str, str]:
+    pages = _cdp_json(cdp_url, "/json/list", timeout=5) or []
+    for page in pages:
+        if page.get("type") == "page" and page.get("url", "").startswith(url.split("?", 1)[0]):
+            if page.get("webSocketDebuggerUrl"):
+                return page
+
+    version = _cdp_json(cdp_url, "/json/version", timeout=5)
+    if not version:
+        raise RuntimeError("Chrome DevTools version endpoint is unavailable")
+
+    import websocket
+
+    ws = websocket.create_connection(version["webSocketDebuggerUrl"], timeout=10)
+    try:
+        _send_cdp(ws, "Target.createTarget", {"url": url})
+    finally:
+        ws.close()
+
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        pages = _cdp_json(cdp_url, "/json/list", timeout=5) or []
+        for page in pages:
+            if page.get("type") == "page" and page.get("url", "").startswith(url.split("?", 1)[0]):
+                if page.get("webSocketDebuggerUrl"):
+                    return page
+        time.sleep(0.5)
+    raise RuntimeError("Kwork page did not appear in Chrome DevTools targets")
+
+
+def _wait_for_cards(ws, timeout_seconds: float) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_count = 0
+    while time.monotonic() < deadline:
+        count = _evaluate(ws, 'document.querySelectorAll(".want-card").length')
+        last_count = int(count or 0)
+        if last_count > 0:
+            return
+        time.sleep(0.75)
+    raise RuntimeError(f"Kwork page rendered no project cards; last count={last_count}")
+
+
+def _evaluate(ws, expression: str):
+    response = _send_cdp(
+        ws,
+        "Runtime.evaluate",
+        {"expression": expression, "returnByValue": True},
+    )
+    result = response.get("result", {}).get("result", {})
+    if "exceptionDetails" in response:
+        raise RuntimeError(str(response["exceptionDetails"]))
+    return result.get("value")
+
+
+def _send_cdp(ws, method: str, params: dict) -> dict:
+    _send_cdp.counter += 1
+    request_id = _send_cdp.counter
+    ws.send(json.dumps({"id": request_id, "method": method, "params": params}))
+    while True:
+        message = json.loads(ws.recv())
+        if message.get("id") == request_id:
+            return message
+
+
+_send_cdp.counter = 0
+
+
+def _cdp_json(cdp_url: str, path: str, timeout: float):
+    try:
+        with urllib.request.urlopen(f"{cdp_url}{path}", timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def _cdp_port(cdp_url: str) -> str:
+    return cdp_url.rsplit(":", 1)[-1].strip("/")
+
+
+def _chrome_path() -> str:
+    candidates = [
+        os.path.join(os.environ.get("PROGRAMFILES", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
+    ]
+    return next((path for path in candidates if path and os.path.exists(path)), "")
 
 
 def _first_group(pattern: re.Pattern[str], text: str, group: str) -> str:
