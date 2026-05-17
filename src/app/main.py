@@ -231,7 +231,7 @@ def build_runtime(config: AppConfig):
         imap_password=config.imap_password,
         manual_reply_only=manual_reply_only,
     )
-    kwork_project_client = KworkProjectClient()
+    kwork_project_client = KworkProjectClient(cookie=config.kwork_cookie)
     return storage, telegram_client, email_client, kwork_project_client
 
 
