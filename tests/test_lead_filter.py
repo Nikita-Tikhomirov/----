@@ -76,3 +76,15 @@ def test_does_not_treat_html_url_suffix_as_stack_signal():
 
     assert result.accepted is False
     assert "нет подходящего web-stack" in result.reasons
+
+
+def test_generates_contextual_customer_reply_from_order_text():
+    result = evaluate_post(
+        "Нужно сверстать лендинг HTML/CSS/JS, поправить адаптив и форму. "
+        "Срок 1 день. Бюджет 5000 руб. Пишите @client_dev"
+    )
+
+    assert "сверстать лендинг" in result.draft_reply
+    assert "настроить форму" in result.draft_reply
+    assert "Срок 1 день" in result.draft_reply
+    assert "Бюджет 5000 руб" in result.draft_reply

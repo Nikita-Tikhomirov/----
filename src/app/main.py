@@ -43,6 +43,8 @@ def scan_once(
     storage: Storage,
     telegram_client: PostSource,
     email_client: LeadMailer,
+    deepseek_api_key: str = "",
+    deepseek_model: str = "deepseek-chat",
 ) -> int:
     created = 0
     for post in telegram_client.fetch_recent_posts():
@@ -53,7 +55,11 @@ def scan_once(
             text=post.text,
             posted_at=post.posted_at,
         )
-        evaluation = evaluate_post(post.text)
+        evaluation = evaluate_post(
+            post.text,
+            deepseek_api_key=deepseek_api_key,
+            deepseek_model=deepseek_model,
+        )
         if not evaluation.accepted:
             logger.info("Rejected post %s/%s: %s", post.channel, post.message_id, evaluation.reasons)
             continue
@@ -217,7 +223,11 @@ def main() -> int:
     storage, telegram_client, email_client = build_runtime(config)
 
     if args.command == "scan":
-        scan_once(storage, telegram_client, email_client)
+        scan_once(
+            storage, telegram_client, email_client,
+            deepseek_api_key=config.deepseek_api_key,
+            deepseek_model=config.deepseek_model,
+        )
         return 0
     if args.command == "approvals":
         process_approvals(
@@ -256,7 +266,11 @@ def main() -> int:
             return 0
 
     while True:
-        scan_once(storage, telegram_client, email_client)
+        scan_once(
+            storage, telegram_client, email_client,
+            deepseek_api_key=config.deepseek_api_key,
+            deepseek_model=config.deepseek_model,
+        )
         process_approvals(
             storage,
             telegram_client,

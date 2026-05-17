@@ -94,3 +94,28 @@ def test_order_reviews_are_ignored_outside_approval_state(tmp_path):
     assert storage.request_order_revision(order_id, "<fix@example.com>", "Поправить") is False
     assert storage.approve_order(order_id, "<done@example.com>") is False
     assert storage.seen_order_review_message_ids() == set()
+
+
+def test_order_created_from_lead_keeps_original_order_text(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_text = "Нужно сверстать лендинг HTML/CSS/JS, поправить форму. Контакт @client_dev"
+    post_id = storage.save_post(
+        channel="jobs",
+        message_id=43,
+        post_url="https://t.me/jobs/43",
+        text=post_text,
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=85,
+        summary="HTML/CSS лендинг",
+        draft_reply="Здравствуйте! Готов помочь.",
+        contact="@client_dev",
+    )
+
+    order_id = storage.create_order_from_lead(lead_id)
+
+    assert storage.get_lead(lead_id).post_text == post_text
+    assert storage.get_order(order_id).brief == post_text

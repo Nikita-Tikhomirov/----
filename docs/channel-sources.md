@@ -4,6 +4,9 @@
 
 - `@freelance_dev_work` — Kwork-проекты по разработке. В постах есть кнопка "Связаться с заказчиком"; парсер вытаскивает ее как ссылку для отклика. Самый полезный источник для простых WordPress/HTML/CSS/JS правок.
 - `@FreelancehuntProjects` — свежие проекты Freelancehunt. В постах есть кнопка "Зробити ставку"; подходит для задач по верстке, WordPress и ускорению сайтов.
+- `@freelance_wordpress` — подборка заказов для WordPress-разработчиков с различных бирж. Целевые заказы по верстке, доработкам, плагинам.
+- `@Easy_wrk` — Easy Work | Фриланс заказы | Удаленная работа. Разноплановые IT-заказы.
+- `@freelance_work` — канал с проектами, заказами и удаленной работой на дому. Широкий спектр задач.
 
 Проверенные, но пока не добавленные:
 
@@ -13,5 +16,5 @@
 Текущий дефолт в `.env.example`:
 
 ```text
-TELEGRAM_CHANNELS=@freelance_dev_work,@FreelancehuntProjects
+TELEGRAM_CHANNELS=@freelance_dev_work,@FreelancehuntProjects,@freelance_wordpress,@Easy_wrk,@freelance_work
 ```

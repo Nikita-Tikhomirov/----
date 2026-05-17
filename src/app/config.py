@@ -16,6 +16,7 @@ class AppConfig:
     telegram_api_hash: str
     telegram_session_name: str
     telegram_channels: tuple[str, ...]
+    telegram_proxy: str
     smtp_host: str
     smtp_port: int
     smtp_user: str
@@ -30,6 +31,8 @@ class AppConfig:
     scan_interval_seconds: int = 300
     max_posts_per_channel: int = 20
     max_sends_per_run: int = 5
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
 
 
 def load_config(env_path: str | Path = ".env") -> AppConfig:
@@ -41,6 +44,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         telegram_api_hash=_required("TELEGRAM_API_HASH"),
         telegram_session_name=os.getenv("TELEGRAM_SESSION_NAME", "lead_funnel"),
         telegram_channels=_channels(os.getenv("TELEGRAM_CHANNELS", "")),
+        telegram_proxy=os.getenv("TELEGRAM_PROXY", ""),
         smtp_host=_required("SMTP_HOST"),
         smtp_port=_int_env("SMTP_PORT", 587),
         smtp_user=_required("SMTP_USER"),
@@ -55,6 +59,8 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         scan_interval_seconds=_int_env("SCAN_INTERVAL_SECONDS", 300),
         max_posts_per_channel=_int_env("MAX_POSTS_PER_CHANNEL", 20),
         max_sends_per_run=_int_env("MAX_SENDS_PER_RUN", 5),
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+        deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     )
 
 

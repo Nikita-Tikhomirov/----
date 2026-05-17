@@ -172,27 +172,69 @@ def build_order_approval_email(
     message["To"] = to_address
     message["Subject"] = f"Заказ #{order.id} готов к проверке: {order.title}"
     message["Message-ID"] = f"<order-{order.id}@telegram-lead-funnel.local>"
-    message.set_content(
-        "\n".join(
-            [
-                f"Order ID: {order.id}",
-                f"Статус: {order.status}",
-                f"Контакт: {order.contact}",
-                f"Название: {order.title}",
-                "",
-                "Задача:",
-                order.brief,
-                "",
-                "Результат:",
-                order.deliverable,
-                "",
-                f"Если готово, ответь строкой: DONE {order.id}",
-                f"Если нужны правки, ответь строкой: FIX {order.id}: что поправить",
-            ]
-        ),
-        charset="utf-8",
-    )
+    message.set_content(_order_approval_email_body(order), charset="utf-8")
     return message
+
+
+def _order_approval_email_body(order: Order) -> str:
+    proposal = build_customer_proposal(order)
+    return "\n".join(
+        [
+            f"Order ID: {order.id}",
+            f"Статус: {order.status}",
+            f"Контакт: {order.contact}",
+            f"Название: {order.title}",
+            "",
+            "Задача:",
+            order.brief,
+            "",
+            "Результат:",
+            order.deliverable,
+            "",
+            "ПРЕДЛОЖЕНИЕ / ПИСЬМО ЗАКАЗЧИКУ:",
+            "-----",
+            proposal,
+            "-----",
+            "",
+            f"Если готово, ответь строкой: DONE {order.id}",
+            f"Если нужны правки, ответь строкой: FIX {order.id}: что поправить",
+        ]
+    )
+
+
+def build_customer_proposal(order: Order) -> str:
+    task_summary = _shorten(_clean_text(order.brief), limit=260)
+    deliverable = _clean_text(order.deliverable)
+    revision_notes = _clean_text(order.revision_notes)
+
+    lines = [
+        "Здравствуйте!",
+        "",
+        f"Подготовил результат по задаче «{order.title}».",
+    ]
+    if task_summary:
+        lines.extend(["", "Что учел по задаче:", task_summary])
+    if revision_notes:
+        lines.extend(["", "Также учел последние правки:", revision_notes])
+    if deliverable:
+        lines.extend(["", "Результат:", deliverable])
+    lines.extend(
+        [
+            "",
+            "Пожалуйста, посмотрите и напишите, все ли ок. Если нужны небольшие правки — пришлите список, оперативно поправлю.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _clean_text(text: str) -> str:
+    return "\n".join(line.strip() for line in text.strip().splitlines() if line.strip())
+
+
+def _shorten(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
 
 
 def parse_approval_messages(

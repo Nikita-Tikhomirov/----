@@ -1,10 +1,39 @@
 from __future__ import annotations
 
 import html
+import logging
+import os
 import re
+import ssl
 import urllib.request
+from typing import Any
+from urllib.request import Request
 
 from app.telegram_client import TelegramPost
+
+
+logger = logging.getLogger(__name__)
+
+
+def _build_proxy_handler() -> Any | None:
+    """Return a urllib ProxyHandler if proxy env vars are set, or None."""
+    proxy_url = (
+        os.getenv("TELEGRAM_PROXY")
+        or os.getenv("HTTPS_PROXY")
+        or os.getenv("HTTP_PROXY")
+        or os.getenv("https_proxy")
+        or os.getenv("http_proxy")
+    )
+    if proxy_url:
+        logger.info("Using proxy: %s", proxy_url.split("@")[-1] if "@" in proxy_url else proxy_url)
+        from urllib.request import ProxyHandler
+
+        return ProxyHandler({"https": proxy_url, "http": proxy_url})
+    if os.getenv("TELEGRAM_PROXY_SOCKS5"):
+        logger.warning(
+            "TELEGRAM_PROXY_SOCKS5 requires 'pysocks' package: pip install pysocks"
+        )
+    return None
 
 
 MESSAGE_START_PATTERN = re.compile(
@@ -34,8 +63,16 @@ class PublicTelegramClient:
         posts: list[TelegramPost] = []
         for channel in self.channels:
             clean_channel = normalize_channel(channel)
-            html_text = _fetch_channel_html(clean_channel)
-            channel_posts = parse_public_channel_posts(clean_channel, html_text)
+            try:
+                html_text = _fetch_channel_html(clean_channel)
+            except Exception as exc:
+                logger.warning("Skipping channel %s: %s", channel, exc)
+                continue
+            try:
+                channel_posts = parse_public_channel_posts(clean_channel, html_text)
+            except Exception as exc:
+                logger.warning("Failed to parse posts from %s: %s", channel, exc)
+                continue
             posts.extend(channel_posts[: self.max_posts_per_channel])
         return posts
 
@@ -81,11 +118,21 @@ def normalize_channel(channel: str) -> str:
 
 
 def _fetch_channel_html(channel: str) -> str:
-    request = urllib.request.Request(
+    proxy_handler = _build_proxy_handler()
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    if proxy_handler:
+        opener = urllib.request.build_opener(proxy_handler, urllib.request.HTTPSHandler(context=ssl_ctx))
+    else:
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_ctx))
+
+    request = Request(
         f"https://t.me/s/{channel}",
-        headers={"User-Agent": "Mozilla/5.0"},
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with opener.open(request, timeout=30) as response:
         return response.read().decode("utf-8", errors="replace")
 
 

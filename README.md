@@ -8,9 +8,12 @@
 
 ## Что умеет MVP
 
+- `lead-funnel.cmd scan` — удобный запуск из Windows без переустановки пакета.
+- `scan-now.cmd` — двойной клик для одного сканирования.
+- `watch.cmd` — двойной клик для непрерывного мониторинга.
 - `python -m app.main scan` — один раз прочитать каналы, создать лиды и отправить email.
 - `python -m app.main approvals` — режим для будущей автоотправки через Telegram API. В public read-only режиме команда ничего не отправляет.
-- `python -m app.main orders ...` — вести заказ после отклика: принять, взять в работу, отдать ТЗ в Codex, отправить результат на апрув.
+- `python -m app.main orders ...` — вести заказ после отклика: принять, взять в работу, отдать ТЗ в Codex, отправить результат на апрув вместе с готовым письмом заказчику.
 - `python -m app.main order-reviews` — прочитать email-команды по заказам: `DONE <order_id>` или `FIX <order_id>: правки`.
 - `python -m app.main watch` — циклически выполнять scan, approvals и order-reviews локально.
 
@@ -18,15 +21,30 @@
 
 ```powershell
 python -m pip install --upgrade pip
-python -m pip install --use-feature=in-tree-build .[dev]
+python -m pip install .[dev]
 ```
 
-Флаг `--use-feature=in-tree-build` нужен для старых версий pip и путей с кириллицей.
 Если запускаешь команды из рабочей папки без переустановки пакета после правок, добавь текущий `src` в `PYTHONPATH`:
 
 ```powershell
 $env:PYTHONPATH="src"
 ```
+
+## Запуск из терминала
+
+Самый удобный вариант на Windows:
+
+```powershell
+.\lead-funnel.cmd scan
+.\lead-funnel.cmd watch
+.\lead-funnel.cmd approvals
+.\lead-funnel.cmd orders list
+```
+
+Для запуска двойным кликом:
+
+- `scan-now.cmd` — один раз проверить источники и отправить новые лиды на почту.
+- `watch.cmd` — оставить мониторинг включенным в открытом окне терминала.
 
 ## Настройка
 
@@ -68,7 +86,7 @@ python -m app.main orders list
 
 - `received` — заказ получен.
 - `in_progress` — заказ взят в работу.
-- `ready_for_approval` — результат отправлен на проверку.
+- `ready_for_approval` — результат отправлен на проверку; письмо содержит предложение/сообщение заказчику, собранное из ТЗ, результата и последних правок.
 - `revision_requested` — пришли правки, нужно доработать и снова выполнить `orders submit`.
 - `done` — заказ одобрен командой `DONE <order_id>`.
 

@@ -1,9 +1,16 @@
 .env
+.deepseek/
 *.session
 *.session-journal
 *.sqlite3
+data/
 harness/
 handoffs/
+_check_*.py
+_test_*.py
+_test_*.ps1
+check_env.py
+run_scan.py
 __pycache__/
 .pytest_cache/
 .mypy_cache/

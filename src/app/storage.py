@@ -17,6 +17,7 @@ class Lead:
     contact: str
     status: str
     post_url: str
+    post_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -204,7 +205,7 @@ class Storage:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT leads.*, posts.post_url
+                SELECT leads.*, posts.post_url, posts.raw_text
                 FROM leads
                 JOIN posts ON posts.id = leads.post_id
                 WHERE leads.id = ?
@@ -217,7 +218,7 @@ class Storage:
 
     def list_leads(self, status: str | None = None) -> list[Lead]:
         sql = """
-            SELECT leads.*, posts.post_url
+            SELECT leads.*, posts.post_url, posts.raw_text
             FROM leads
             JOIN posts ON posts.id = leads.post_id
         """
@@ -260,7 +261,7 @@ class Storage:
             lead_id=lead.id,
             contact=lead.contact,
             title=lead.summary,
-            brief=lead.draft_reply,
+            brief=lead.post_text or lead.draft_reply,
         )
 
     def start_order(self, order_id: int) -> None:
@@ -405,6 +406,7 @@ class Storage:
 
 
 def _lead_from_row(row: sqlite3.Row) -> Lead:
+    keys = set(row.keys())
     return Lead(
         id=int(row["id"]),
         post_id=int(row["post_id"]),
@@ -414,6 +416,7 @@ def _lead_from_row(row: sqlite3.Row) -> Lead:
         contact=str(row["contact"]),
         status=str(row["status"]),
         post_url=str(row["post_url"]),
+        post_text=str(row["raw_text"]) if "raw_text" in keys else "",
     )
 
 

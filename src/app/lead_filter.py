@@ -36,9 +36,29 @@ SMALL_TASK_PATTERN = re.compile(
 )
 REPLY_URL_PATTERN = re.compile(r"Отклик:\s*(https?://\S+)", re.IGNORECASE)
 CONTACT_PATTERN = re.compile(r"@[A-Za-z0-9_]{5,}|https?://\S+", re.IGNORECASE)
+DEADLINE_PATTERN = re.compile(
+    r"(срок(?:и)?\s*[:—-]?\s*[^.!,;]{1,40}|за\s+(?:1|2|один|два)\s+д(?:ень|ня)|1-2\s*дн(?:я|ей)?)",
+    re.IGNORECASE,
+)
+BUDGET_PATTERN = re.compile(
+    r"((?:бюджет|оплата|цена|стоимость)\s*[:—-]?\s*[^.!,;]{1,50}|\d[\d\s]*(?:₽|руб|р\b|usd|\$))",
+    re.IGNORECASE,
+)
+TASK_HINTS = (
+    ("сверстать лендинг", re.compile(r"сверст|верстк|лендинг|landing", re.IGNORECASE)),
+    ("доработать сайт", re.compile(r"доработ|правк|поправ|исправ", re.IGNORECASE)),
+    ("настроить форму или заявки", re.compile(r"форм|заявк", re.IGNORECASE)),
+    ("поправить адаптив", re.compile(r"адаптив|мобил", re.IGNORECASE)),
+    ("помочь с WordPress", re.compile(r"wordpress|wp|вордпресс", re.IGNORECASE)),
+    ("добавить JavaScript-логику", re.compile(r"js|javascript|скрипт", re.IGNORECASE)),
+)
 
 
-def evaluate_post(text: str) -> LeadEvaluation:
+def evaluate_post(
+    text: str,
+    deepseek_api_key: str = "",
+    deepseek_model: str = "deepseek-chat",
+) -> LeadEvaluation:
     normalized = " ".join(text.split())
     scored_text = re.sub(r"https?://\S+", "", normalized)
     positive = [label for label, pattern in POSITIVE_PATTERNS if pattern.search(scored_text)]
@@ -66,7 +86,13 @@ def evaluate_post(text: str) -> LeadEvaluation:
         accepted=accepted,
         score=score,
         summary=_summary(positive, small_task),
-        draft_reply=_draft_reply(contact),
+        draft_reply=_draft_reply(
+            normalized, positive, small_task,
+            deadline=_first_match(DEADLINE_PATTERN, normalized),
+            budget=_first_match(BUDGET_PATTERN, normalized),
+            api_key=deepseek_api_key,
+            model=deepseek_model,
+        ),
         contact=contact,
         reasons=", ".join(reasons),
     )
@@ -111,10 +137,60 @@ def _summary(positive: list[str], small_task: bool) -> str:
     return f"{stack} задача, {size}"
 
 
-def _draft_reply(contact: str) -> str:
-    greeting = "Здравствуйте!"
+def _draft_reply(
+    text: str,
+    positive: list[str],
+    small_task: bool,
+    deadline: str = "",
+    budget: str = "",
+    api_key: str = "",
+    model: str = "deepseek-chat",
+) -> str:
+    if api_key:
+        from app.ai_reply import generate_reply
+
+        ai_reply = generate_reply(
+            text=text,
+            positive=positive,
+            small_task=small_task,
+            deadline=deadline,
+            budget=budget,
+            api_key=api_key,
+            model=model,
+        )
+        if ai_reply:
+            return ai_reply
+
+    task = _task_description(text, positive)
+    details: list[str] = []
+
+    if deadline:
+        details.append(f"вижу срок: {deadline}")
+    elif small_task:
+        details.append("по объему похоже на небольшую задачу")
+
+    if budget:
+        details.append(f"учту бюджет: {budget}")
+
+    details_sentence = f" Также {', '.join(details)}." if details else ""
     return (
-        f"{greeting} Готов помочь с задачей по сайту: HTML/CSS/JS или WordPress, "
-        "могу быстро оценить объем и приступить. Пришлите, пожалуйста, детали и доступы, "
-        "если задача еще актуальна."
+        f"Здравствуйте! Вижу задачу: {task}. "
+        "Готов помочь: аккуратно оценю объем, задам только необходимые вопросы "
+        "и смогу быстро приступить."
+        f"{details_sentence} "
+        "Если задача актуальна, пришлите, пожалуйста, ссылку/макет, доступы и важные требования."
     )
+
+
+def _task_description(text: str, positive: list[str]) -> str:
+    hints = [label for label, pattern in TASK_HINTS if pattern.search(text)]
+    if hints:
+        return ", ".join(dict.fromkeys(hints[:3]))
+    if positive:
+        return "задача по " + "/".join(dict.fromkeys(positive))
+    return "задача по сайту"
+
+
+def _first_match(pattern: re.Pattern[str], text: str) -> str:
+    match = pattern.search(text)
+    return " ".join(match.group(1).split()) if match else ""
