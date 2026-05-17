@@ -24,10 +24,7 @@ POSITIVE_PATTERNS = (
 CORE_WEB_LABELS = {"HTML/CSS/JS", "верстка", "WordPress"}
 
 BLOCKED_PATTERNS = (
-    ("React", re.compile(r"\breact\b|next\.?js|gatsby", re.IGNORECASE)),
-    ("конструктор", re.compile(r"tilda|webflow|wix|битрикс|bitrix|taplink|flexbe|creatium|canva", re.IGNORECASE)),
-    ("нецелевой stack", re.compile(r"shopify|learnworlds|asp\.?net|getcourse", re.IGNORECASE)),
-    ("вакансия", re.compile(r"ваканси|зарплат|руб/мес|full.?time|part.?time|senior|middle|junior|в команду", re.IGNORECASE)),
+    ("Bitrix", re.compile(r"битрикс|bitrix", re.IGNORECASE)),
 )
 
 SMALL_TASK_PATTERN = re.compile(
@@ -67,18 +64,14 @@ def evaluate_post(
     has_core_web = any(label in CORE_WEB_LABELS for label in positive)
     reasons: list[str] = []
 
-    if not has_core_web:
-        reasons.append("нет подходящего web-stack")
     reasons.extend(blocked)
     if not contact:
         reasons.append("нет контакта")
 
     small_task = bool(SMALL_TASK_PATTERN.search(scored_text)) or len(scored_text) <= 260
-    if not small_task:
-        reasons.append("похоже больше 1-2 дней")
 
     score = _score(positive, blocked, contact, small_task, has_core_web)
-    accepted = score >= 70 and not blocked and contact != "" and has_core_web
+    accepted = not blocked and contact != ""
     if not accepted and not reasons:
         reasons.append("score ниже порога")
 
@@ -117,7 +110,7 @@ def _score(
     small_task: bool,
     has_core_web: bool,
 ) -> int:
-    score = 15
+    score = 35
     score += min(len(positive), 3) * 18
     if has_core_web:
         score += 20
@@ -127,13 +120,13 @@ def _score(
         score += 15
     if small_task:
         score += 15
-    score -= len(blocked) * 45
+    score -= len(blocked) * 100
     return max(0, min(score, 100))
 
 
 def _summary(positive: list[str], small_task: bool) -> str:
-    stack = "/".join(dict.fromkeys(positive)) if positive else "web"
-    size = "до 1-2 дней" if small_task else "нужно уточнить срок"
+    stack = "/".join(dict.fromkeys(positive)) if positive else "Kwork разработка"
+    size = "быстрый отклик" if small_task else "нужно оценить по ссылке"
     return f"{stack} задача, {size}"
 
 
@@ -175,10 +168,10 @@ def _draft_reply(
     details_sentence = f" Также {', '.join(details)}." if details else ""
     return (
         f"Здравствуйте! Вижу задачу: {task}. "
-        "Готов помочь: аккуратно оценю объем, задам только необходимые вопросы "
-        "и смогу быстро приступить."
+        "Готов взяться и быстро приступить без лишней переписки. "
+        "Сделаю аккуратно, проверю результат и буду держать вас в курсе по ходу работы."
         f"{details_sentence} "
-        "Если задача актуальна, пришлите, пожалуйста, ссылку/макет, доступы и важные требования."
+        "Могу начать в ближайшее время."
     )
 
 

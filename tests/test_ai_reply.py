@@ -66,8 +66,8 @@ def test_successful_call_passes_correct_prompt():
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs["model"] == "deepseek-chat"
-        assert call_kwargs["temperature"] == 0.7
-        assert call_kwargs["max_tokens"] == 600
+        assert call_kwargs["temperature"] == 0.35
+        assert call_kwargs["max_tokens"] == 350
 
         messages = call_kwargs["messages"]
         assert messages[0]["role"] == "system"
@@ -154,4 +154,18 @@ def test_build_prompt_without_optional_fields():
         deadline="",
         budget="",
     )
-    assert "нужно уточнить сроки" in prompt
+    assert "срок не определён" in prompt
+
+
+def test_prompt_forbids_clarification_questions():
+    prompt = _build_prompt(
+        text="Нужно настроить сайт",
+        positive=[],
+        small_task=True,
+        deadline="",
+        budget="",
+    )
+
+    assert "Не задавай вопросов" in prompt
+    assert "уточня" not in prompt.lower()
+    assert "Не проси" in _SYSTEM_PROMPT
