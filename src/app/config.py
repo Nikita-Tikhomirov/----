@@ -33,6 +33,8 @@ class AppConfig:
     max_sends_per_run: int = 5
     kwork_max_responses: int = 5
     kwork_cookie: str = ""
+    kwork_source: str = "web"
+    kwork_projects_url: str = "https://kwork.ru/projects?c=11"
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
 
@@ -63,6 +65,8 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         max_sends_per_run=_int_env("MAX_SENDS_PER_RUN", 5),
         kwork_max_responses=_int_env("KWORK_MAX_RESPONSES", 5),
         kwork_cookie=os.getenv("KWORK_COOKIE", ""),
+        kwork_source=os.getenv("KWORK_SOURCE", "web"),
+        kwork_projects_url=os.getenv("KWORK_PROJECTS_URL", "https://kwork.ru/projects?c=11"),
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     )

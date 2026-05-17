@@ -10,6 +10,7 @@ from app.config import AppConfig, load_config
 from app.email_client import EmailClient
 from app.handoff import write_codex_handoff
 from app.kwork_client import KworkProjectClient
+from app.kwork_source import KworkWebSource
 from app.lead_filter import evaluate_post
 from app.public_telegram_client import PublicTelegramClient
 from app.storage import Storage
@@ -70,7 +71,7 @@ def scan_once(
 
         project_text = post.text
         project_summary_suffix = ""
-        if kwork_project_client is not None:
+        if kwork_project_client is not None and post.channel != "kwork-web":
             project_info = kwork_project_client.inspect(evaluation.contact)
             if not project_info.has_response_count:
                 logger.info(
@@ -202,7 +203,16 @@ def create_order_handoff(storage: Storage, order_id: int, output_dir: str | Path
 def build_runtime(config: AppConfig):
     storage = Storage(config.database_path)
     storage.initialize()
-    if config.telegram_api_id > 0 and config.telegram_api_hash != "fill_later":
+    if config.kwork_source == "web":
+        manual_reply_only = True
+        logger.warning("Using Kwork web source in read-only manual reply mode")
+        telegram_client = KworkWebSource(
+            projects_url=config.kwork_projects_url,
+            max_posts=config.max_posts_per_channel,
+            max_responses=config.kwork_max_responses,
+            cookie=config.kwork_cookie,
+        )
+    elif config.telegram_api_id > 0 and config.telegram_api_hash != "fill_later":
         manual_reply_only = False
         telegram_client = TelegramLeadClient(
             api_id=config.telegram_api_id,
