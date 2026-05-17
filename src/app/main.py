@@ -9,6 +9,7 @@ from typing import Protocol
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
 from app.handoff import write_codex_handoff
+from app.kwork_client import KworkProjectClient
 from app.lead_filter import evaluate_post
 from app.public_telegram_client import PublicTelegramClient
 from app.storage import Storage
@@ -39,12 +40,19 @@ class LeadMailer(Protocol):
         ...
 
 
+class ProjectInspector(Protocol):
+    def inspect(self, contact: str):
+        ...
+
+
 def scan_once(
     storage: Storage,
     telegram_client: PostSource,
     email_client: LeadMailer,
     deepseek_api_key: str = "",
     deepseek_model: str = "deepseek-chat",
+    kwork_project_client: ProjectInspector | None = None,
+    kwork_max_responses: int = 5,
 ) -> int:
     created = 0
     for post in telegram_client.fetch_recent_posts():
@@ -55,19 +63,53 @@ def scan_once(
             text=post.text,
             posted_at=post.posted_at,
         )
-        evaluation = evaluate_post(
-            post.text,
-            deepseek_api_key=deepseek_api_key,
-            deepseek_model=deepseek_model,
-        )
+        evaluation = evaluate_post(post.text)
         if not evaluation.accepted:
             logger.info("Rejected post %s/%s: %s", post.channel, post.message_id, evaluation.reasons)
             continue
 
+        project_text = post.text
+        project_summary_suffix = ""
+        if kwork_project_client is not None:
+            project_info = kwork_project_client.inspect(evaluation.contact)
+            if not project_info.has_response_count:
+                logger.info(
+                    "Rejected post %s/%s: cannot verify Kwork responses (%s)",
+                    post.channel,
+                    post.message_id,
+                    project_info.reason,
+                )
+                continue
+            if project_info.response_count > kwork_max_responses:
+                logger.info(
+                    "Rejected post %s/%s: Kwork responses %s > %s",
+                    post.channel,
+                    post.message_id,
+                    project_info.response_count,
+                    kwork_max_responses,
+                )
+                continue
+            project_summary_suffix = f", откликов: {project_info.response_count}"
+            if project_info.title or project_info.description:
+                project_text = "\n\n".join(
+                    part
+                    for part in [
+                        post.text,
+                        f"Kwork title: {project_info.title}" if project_info.title else "",
+                        f"Kwork description: {project_info.description}" if project_info.description else "",
+                    ]
+                    if part
+                )
+
+        evaluation = evaluate_post(
+            project_text,
+            deepseek_api_key=deepseek_api_key,
+            deepseek_model=deepseek_model,
+        )
         lead_id = storage.create_lead(
             post_id=post_id,
             score=evaluation.score,
-            summary=evaluation.summary,
+            summary=f"{evaluation.summary}{project_summary_suffix}",
             draft_reply=evaluation.draft_reply,
             contact=evaluation.contact,
         )
@@ -189,7 +231,8 @@ def build_runtime(config: AppConfig):
         imap_password=config.imap_password,
         manual_reply_only=manual_reply_only,
     )
-    return storage, telegram_client, email_client
+    kwork_project_client = KworkProjectClient()
+    return storage, telegram_client, email_client, kwork_project_client
 
 
 def main() -> int:
@@ -220,13 +263,15 @@ def main() -> int:
     args = parser.parse_args()
 
     config = load_config()
-    storage, telegram_client, email_client = build_runtime(config)
+    storage, telegram_client, email_client, kwork_project_client = build_runtime(config)
 
     if args.command == "scan":
         scan_once(
             storage, telegram_client, email_client,
             deepseek_api_key=config.deepseek_api_key,
             deepseek_model=config.deepseek_model,
+            kwork_project_client=kwork_project_client,
+            kwork_max_responses=config.kwork_max_responses,
         )
         return 0
     if args.command == "approvals":
@@ -270,6 +315,8 @@ def main() -> int:
             storage, telegram_client, email_client,
             deepseek_api_key=config.deepseek_api_key,
             deepseek_model=config.deepseek_model,
+            kwork_project_client=kwork_project_client,
+            kwork_max_responses=config.kwork_max_responses,
         )
         process_approvals(
             storage,

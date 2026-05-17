@@ -31,6 +31,7 @@ class AppConfig:
     scan_interval_seconds: int = 300
     max_posts_per_channel: int = 20
     max_sends_per_run: int = 5
+    kwork_max_responses: int = 5
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
 
@@ -59,6 +60,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         scan_interval_seconds=_int_env("SCAN_INTERVAL_SECONDS", 300),
         max_posts_per_channel=_int_env("MAX_POSTS_PER_CHANNEL", 20),
         max_sends_per_run=_int_env("MAX_SENDS_PER_RUN", 5),
+        kwork_max_responses=_int_env("KWORK_MAX_RESPONSES", 5),
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     )

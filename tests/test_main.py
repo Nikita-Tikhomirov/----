@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.main import create_order_handoff, process_approvals, process_order_reviews, scan_once, submit_order
+from app.kwork_client import KworkProjectInfo
 from app.storage import Storage
 
 
@@ -51,6 +52,23 @@ class FakeEmailClient:
         return self.approvals
 
 
+class FakeKworkProjectClient:
+    def __init__(self, response_count=3, reason=""):
+        self.response_count = response_count
+        self.reason = reason
+        self.inspected = []
+
+    def inspect(self, contact):
+        self.inspected.append(contact)
+        return KworkProjectInfo(
+            url=contact,
+            response_count=self.response_count,
+            title="Kwork project",
+            description="Детали задачи со страницы Kwork",
+            reason=self.reason,
+        )
+
+
 class FakeOrderEmailClient(FakeEmailClient):
     def __init__(self, reviews=None):
         super().__init__()
@@ -86,6 +104,42 @@ def test_scan_once_creates_lead_and_sends_email(tmp_path):
     leads = storage.list_leads(status="emailed")
     assert len(leads) == 1
     assert email_client.sent_leads == [leads[0].id]
+
+
+def test_scan_once_skips_kwork_projects_with_too_many_responses(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=FakeKworkProjectClient(response_count=7),
+        kwork_max_responses=5,
+    )
+
+    assert created == 0
+    assert storage.list_leads() == []
+    assert email_client.sent_leads == []
+
+
+def test_scan_once_skips_kwork_projects_without_response_count(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=FakeKworkProjectClient(response_count=None, reason="нет workerCount"),
+        kwork_max_responses=5,
+    )
+
+    assert created == 0
+    assert storage.list_leads() == []
+    assert email_client.sent_leads == []
 
 
 def test_process_approvals_sends_only_approved_once(tmp_path):
