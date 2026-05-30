@@ -8,6 +8,7 @@ from typing import Protocol
 
 from app.ai_lead_judge import LeadJudgeResult, judge_lead
 from app.attachments import build_attachment_context
+from app.chrome_cookies import chrome_cookie_header
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
 from app.handoff import write_codex_handoff
@@ -263,8 +264,9 @@ def create_order_handoff(storage: Storage, order_id: int, output_dir: str | Path
 def build_runtime(config: AppConfig):
     storage = Storage(config.database_path)
     storage.initialize()
+    kwork_cookie = _resolve_kwork_cookie(config)
     kwork_project_client = KworkProjectClient(
-        cookie=config.kwork_cookie,
+        cookie=kwork_cookie,
         use_browser=config.kwork_use_browser,
         cdp_url=config.kwork_cdp_url,
         browser_profile_dir=config.kwork_browser_profile_dir,
@@ -276,7 +278,7 @@ def build_runtime(config: AppConfig):
             projects_url=config.kwork_projects_url,
             max_posts=config.max_posts_per_channel,
             max_responses=config.kwork_max_responses,
-            cookie=config.kwork_cookie,
+            cookie=kwork_cookie,
             use_browser=config.kwork_use_browser,
             cdp_url=config.kwork_cdp_url,
             browser_profile_dir=config.kwork_browser_profile_dir,
@@ -311,6 +313,19 @@ def build_runtime(config: AppConfig):
         manual_reply_only=manual_reply_only,
     )
     return storage, telegram_client, email_client, kwork_project_client
+
+
+def _resolve_kwork_cookie(config: AppConfig) -> str:
+    if config.kwork_cookie.strip():
+        return config.kwork_cookie.strip()
+    if not config.kwork_auto_chrome_cookies:
+        return ""
+    cookie = chrome_cookie_header(".kwork.ru")
+    if cookie:
+        logger.info("Imported Kwork cookies from the current Chrome profile")
+    else:
+        logger.warning("Kwork Chrome cookies were not imported; private files may require manual login")
+    return cookie
 
 
 def main() -> int:
@@ -350,7 +365,7 @@ def main() -> int:
             deepseek_model=config.deepseek_model,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
-            kwork_cookie=config.kwork_cookie,
+            kwork_cookie=_resolve_kwork_cookie(config),
             kwork_use_browser=config.kwork_use_browser,
             kwork_cdp_url=config.kwork_cdp_url,
             kwork_browser_profile_dir=config.kwork_browser_profile_dir,
@@ -399,7 +414,7 @@ def main() -> int:
             deepseek_model=config.deepseek_model,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
-            kwork_cookie=config.kwork_cookie,
+            kwork_cookie=_resolve_kwork_cookie(config),
             kwork_use_browser=config.kwork_use_browser,
             kwork_cdp_url=config.kwork_cdp_url,
             kwork_browser_profile_dir=config.kwork_browser_profile_dir,

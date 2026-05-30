@@ -38,6 +38,7 @@ class AppConfig:
     kwork_use_browser: bool = True
     kwork_cdp_url: str = "http://127.0.0.1:9222"
     kwork_browser_profile_dir: str = ""
+    kwork_auto_chrome_cookies: bool = True
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
 
@@ -73,6 +74,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         kwork_use_browser=_bool_env("KWORK_USE_BROWSER", True),
         kwork_cdp_url=os.getenv("KWORK_CDP_URL", "http://127.0.0.1:9222"),
         kwork_browser_profile_dir=os.getenv("KWORK_BROWSER_PROFILE_DIR", ""),
+        kwork_auto_chrome_cookies=_bool_env("KWORK_AUTO_CHROME_COOKIES", True),
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     )
