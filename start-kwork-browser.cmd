@@ -10,7 +10,6 @@ if not exist "%CHROME%" (
 
 powershell -NoProfile -Command "try { Invoke-RestMethod -Uri 'http://127.0.0.1:9222/json/version' -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }"
 if "%ERRORLEVEL%"=="0" (
-  start "" "%CHROME%" "https://kwork.ru/projects?c=11"
   echo Chrome DevTools already running for Kwork monitoring.
   endlocal
   exit /b 0

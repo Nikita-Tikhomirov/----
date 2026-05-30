@@ -12,6 +12,8 @@ import urllib.request
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request
 
+import websocket
+
 from app.telegram_client import TelegramPost
 
 logger = logging.getLogger(__name__)
@@ -152,9 +154,7 @@ def _fetch_html(url: str, timeout_seconds: float, cookie: str = "") -> str:
 
 def _fetch_rendered_html(url: str, cdp_url: str, timeout_seconds: float, browser_profile_dir: str = "") -> str:
     _ensure_chrome_cdp(cdp_url, url, browser_profile_dir)
-    page = _find_or_create_page(cdp_url, url)
-
-    import websocket
+    page = _find_or_create_page(cdp_url, url, tab_kind="list")
 
     ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=timeout_seconds)
     try:
@@ -232,18 +232,16 @@ def _ensure_chrome_cdp(cdp_url: str, url: str, browser_profile_dir: str = "") ->
     )
 
 
-def _find_or_create_page(cdp_url: str, url: str) -> dict[str, str]:
+def _find_or_create_page(cdp_url: str, url: str, tab_kind: str = "any") -> dict[str, str]:
     pages = _cdp_json(cdp_url, "/json/list", timeout=5) or []
     for page in pages:
-        if page.get("type") == "page" and _is_kwork_tab(page.get("url", "")):
+        if page.get("type") == "page" and _matches_tab_kind(page.get("url", ""), tab_kind):
             if page.get("webSocketDebuggerUrl"):
                 return page
 
     version = _cdp_json(cdp_url, "/json/version", timeout=5)
     if not version:
         raise RuntimeError("Chrome DevTools version endpoint is unavailable")
-
-    import websocket
 
     ws = websocket.create_connection(version["webSocketDebuggerUrl"], timeout=10)
     try:
@@ -255,7 +253,7 @@ def _find_or_create_page(cdp_url: str, url: str) -> dict[str, str]:
     while time.monotonic() < deadline:
         pages = _cdp_json(cdp_url, "/json/list", timeout=5) or []
         for page in pages:
-            if page.get("type") == "page" and page.get("url", "").startswith(url.split("?", 1)[0]):
+            if page.get("type") == "page" and _matches_created_tab(page.get("url", ""), url, tab_kind):
                 if page.get("webSocketDebuggerUrl"):
                     return page
         time.sleep(0.5)
@@ -340,6 +338,32 @@ def _chrome_last_profile(user_data: str) -> str:
 def _is_kwork_tab(url: str) -> bool:
     parsed = urlsplit(url)
     return parsed.netloc.lower().endswith("kwork.ru")
+
+
+def _is_kwork_list_tab(url: str) -> bool:
+    parsed = urlsplit(url)
+    return parsed.netloc.lower().endswith("kwork.ru") and parsed.path.rstrip("/") == "/projects"
+
+
+def _is_kwork_project_tab(url: str) -> bool:
+    parsed = urlsplit(url)
+    return parsed.netloc.lower().endswith("kwork.ru") and re.match(r"^/projects/\d+(?:/view)?/?$", parsed.path) is not None
+
+
+def _matches_tab_kind(url: str, tab_kind: str) -> bool:
+    if tab_kind == "list":
+        return _is_kwork_list_tab(url)
+    if tab_kind == "project":
+        return _is_kwork_project_tab(url)
+    return _is_kwork_tab(url)
+
+
+def _matches_created_tab(actual_url: str, expected_url: str, tab_kind: str) -> bool:
+    if tab_kind == "project":
+        return _is_same_kwork_page(expected_url, actual_url)
+    if tab_kind == "list":
+        return _is_kwork_list_tab(actual_url)
+    return _matches_tab_kind(actual_url, tab_kind)
 
 
 def _first_group(pattern: re.Pattern[str], text: str, group: str) -> str:

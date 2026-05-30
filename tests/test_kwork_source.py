@@ -67,7 +67,7 @@ def test_fetch_rendered_html_refreshes_page_before_reading(monkeypatch):
     monkeypatch.setattr(
         source,
         "_find_or_create_page",
-        lambda cdp_url, url: {"webSocketDebuggerUrl": "ws://fake"},
+        lambda cdp_url, url, tab_kind="any": {"webSocketDebuggerUrl": "ws://fake"},
     )
     monkeypatch.setattr(websocket, "create_connection", lambda url, timeout=30: FakeWebSocket())
     monkeypatch.setattr(source, "_send_cdp", fake_send_cdp)
@@ -93,7 +93,68 @@ def test_kwork_fresh_location_accepts_view_redirect_and_cache_strip():
     )
 
 
-def test_find_or_create_page_reuses_existing_kwork_tab_for_project(monkeypatch):
+def test_find_or_create_page_does_not_reuse_list_tab_for_project(monkeypatch):
+    import websocket
+    import app.kwork_source as source
+
+    calls = []
+
+    class FakeWebSocket:
+        def close(self):
+            pass
+
+    def fake_send_cdp(ws, method, params):
+        calls.append((method, params))
+        return {}
+
+    lists = [
+        [
+            {
+                "type": "page",
+                "url": "https://kwork.ru/projects?c=11",
+                "webSocketDebuggerUrl": "ws://list",
+            }
+        ],
+        [
+            {
+                "type": "page",
+                "url": "https://kwork.ru/projects?c=11",
+                "webSocketDebuggerUrl": "ws://list",
+            },
+            {
+                "type": "page",
+                "url": "https://kwork.ru/projects/3187247/view",
+                "webSocketDebuggerUrl": "ws://project",
+            },
+        ],
+    ]
+
+    def fake_cdp_json(cdp_url, path, timeout):
+        if path == "/json/list":
+            return lists.pop(0) if lists else lists[-1]
+        if path == "/json/version":
+            return {"webSocketDebuggerUrl": "ws://browser"}
+        return None
+
+    monkeypatch.setattr(
+        source,
+        "_cdp_json",
+        fake_cdp_json,
+    )
+    monkeypatch.setattr(websocket, "create_connection", lambda url, timeout=10: FakeWebSocket())
+    monkeypatch.setattr(source, "_send_cdp", fake_send_cdp)
+
+    page = source._find_or_create_page(
+        "http://127.0.0.1:9222",
+        "https://kwork.ru/projects/3187247/view",
+        tab_kind="project",
+    )
+
+    assert page["webSocketDebuggerUrl"] == "ws://project"
+    assert calls == [("Target.createTarget", {"url": "https://kwork.ru/projects/3187247/view"})]
+
+
+def test_find_or_create_page_reuses_list_tab_for_list(monkeypatch):
     import app.kwork_source as source
 
     monkeypatch.setattr(
@@ -103,16 +164,20 @@ def test_find_or_create_page_reuses_existing_kwork_tab_for_project(monkeypatch):
             {
                 "type": "page",
                 "url": "https://kwork.ru/projects?c=11",
-                "webSocketDebuggerUrl": "ws://existing",
+                "webSocketDebuggerUrl": "ws://list",
             }
         ]
         if path == "/json/list"
         else None,
     )
 
-    page = source._find_or_create_page("http://127.0.0.1:9222", "https://kwork.ru/projects/3187247/view")
+    page = source._find_or_create_page(
+        "http://127.0.0.1:9222",
+        "https://kwork.ru/projects?c=11",
+        tab_kind="list",
+    )
 
-    assert page["webSocketDebuggerUrl"] == "ws://existing"
+    assert page["webSocketDebuggerUrl"] == "ws://list"
 
 
 def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch):
