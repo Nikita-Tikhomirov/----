@@ -28,6 +28,32 @@ def test_build_attachment_context_reads_text_attachment(monkeypatch):
     assert "brief text from customer" in context
 
 
+def test_build_attachment_context_can_download_with_browser_session(monkeypatch):
+    direct_calls = []
+    browser_calls = []
+
+    def fake_direct(url, cookie="", max_bytes=2_000_000):
+        direct_calls.append(url)
+        raise PermissionError("HTTP Error 403: Forbidden")
+
+    def fake_browser(url, cdp_url, browser_profile_dir="", max_bytes=2_000_000):
+        browser_calls.append((url, cdp_url))
+        return b"private brief from logged account"
+
+    monkeypatch.setattr("app.attachments.download_attachment", fake_direct)
+    monkeypatch.setattr("app.attachments.download_attachment_via_browser", fake_browser)
+
+    context = build_attachment_context(
+        ("private.txt: https://kwork.ru/files/private.txt",),
+        use_browser=True,
+        cdp_url="http://127.0.0.1:9222",
+    )
+
+    assert direct_calls == ["https://kwork.ru/files/private.txt"]
+    assert browser_calls == [("https://kwork.ru/files/private.txt", "http://127.0.0.1:9222")]
+    assert "private brief from logged account" in context
+
+
 def test_build_attachment_context_reports_unsupported_images(monkeypatch):
     monkeypatch.setattr(
         "app.attachments.download_attachment",

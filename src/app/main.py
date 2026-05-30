@@ -59,6 +59,9 @@ def scan_once(
     lead_judge=judge_lead,
     attachment_context_builder=build_attachment_context,
     kwork_cookie: str = "",
+    kwork_use_browser: bool = True,
+    kwork_cdp_url: str = "http://127.0.0.1:9222",
+    kwork_browser_profile_dir: str = "",
 ) -> int:
     created = 0
     for post in telegram_client.fetch_recent_posts():
@@ -102,7 +105,13 @@ def scan_once(
             if project_info.has_response_count:
                 project_summary_suffix = f", откликов: {project_info.response_count}"
             if project_info.attachments:
-                attachment_context = attachment_context_builder(project_info.attachments, cookie=kwork_cookie)
+                attachment_context = attachment_context_builder(
+                    project_info.attachments,
+                    cookie=kwork_cookie,
+                    use_browser=kwork_use_browser,
+                    cdp_url=kwork_cdp_url,
+                    browser_profile_dir=kwork_browser_profile_dir,
+                )
             if project_info.title or project_info.description or project_info.page_text or project_info.attachments:
                 project_text = "\n\n".join(
                     part
@@ -342,6 +351,9 @@ def main() -> int:
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
             kwork_cookie=config.kwork_cookie,
+            kwork_use_browser=config.kwork_use_browser,
+            kwork_cdp_url=config.kwork_cdp_url,
+            kwork_browser_profile_dir=config.kwork_browser_profile_dir,
         )
         return 0
     if args.command == "approvals":
@@ -388,6 +400,9 @@ def main() -> int:
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
             kwork_cookie=config.kwork_cookie,
+            kwork_use_browser=config.kwork_use_browser,
+            kwork_cdp_url=config.kwork_cdp_url,
+            kwork_browser_profile_dir=config.kwork_browser_profile_dir,
         )
         process_approvals(
             storage,

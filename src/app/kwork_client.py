@@ -133,7 +133,7 @@ def _fetch_rendered_project_html(
     cdp_url: str,
     browser_profile_dir: str,
 ) -> str:
-    from app.kwork_source import _ensure_chrome_cdp, _evaluate, _find_or_create_page
+    from app.kwork_source import _ensure_chrome_cdp, _evaluate, _find_or_create_page, _refresh_page
 
     _ensure_chrome_cdp(cdp_url, url, browser_profile_dir)
     page = _find_or_create_page(cdp_url, url)
@@ -142,6 +142,7 @@ def _fetch_rendered_project_html(
 
     ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=timeout_seconds)
     try:
+        _refresh_page(ws, url, timeout_seconds)
         deadline_text = _evaluate(ws, "document.body && document.body.innerText")
         if not deadline_text:
             return ""

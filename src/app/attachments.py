@@ -34,6 +34,9 @@ def build_attachment_context(
     cookie: str = "",
     max_files: int = 3,
     max_bytes: int = 2_000_000,
+    use_browser: bool = False,
+    cdp_url: str = "http://127.0.0.1:9222",
+    browser_profile_dir: str = "",
 ) -> str:
     """Download small readable attachments and return text for AI context."""
     if not attachments:
@@ -43,7 +46,14 @@ def build_attachment_context(
     for raw in attachments[:max_files]:
         ref = parse_attachment(raw)
         try:
-            content = download_attachment(ref.url, cookie=cookie, max_bytes=max_bytes)
+            content = _download_with_fallback(
+                ref.url,
+                cookie=cookie,
+                max_bytes=max_bytes,
+                use_browser=use_browser,
+                cdp_url=cdp_url,
+                browser_profile_dir=browser_profile_dir,
+            )
             status, extracted = inspect_attachment(ref, content, max_bytes=max_bytes)
         except Exception as exc:
             logger.warning("Failed to read attachment %s: %s", ref.url, exc)
@@ -94,6 +104,87 @@ def download_attachment(url: str, cookie: str = "", max_bytes: int = 2_000_000) 
             if total > max_bytes:
                 raise ValueError(f"файл больше лимита {max_bytes} байт")
         return b"".join(chunks)
+
+
+def download_attachment_via_browser(
+    url: str,
+    cdp_url: str,
+    browser_profile_dir: str = "",
+    max_bytes: int = 2_000_000,
+) -> bytes:
+    """Download a private attachment through the logged-in Chrome session."""
+    from app.kwork_source import _ensure_chrome_cdp, _evaluate, _find_or_create_page
+
+    _ensure_chrome_cdp(cdp_url, "https://kwork.ru/projects", browser_profile_dir)
+    page = _find_or_create_page(cdp_url, "https://kwork.ru/projects")
+
+    import base64
+    import json
+    import websocket
+
+    ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=45)
+    try:
+        payload = _evaluate(
+            ws,
+            f"""
+            (async () => {{
+              const response = await fetch({json.dumps(url)}, {{ credentials: 'include' }});
+              const buffer = await response.arrayBuffer();
+              const bytes = new Uint8Array(buffer);
+              if (bytes.length > {int(max_bytes)}) {{
+                throw new Error('файл больше лимита {int(max_bytes)} байт');
+              }}
+              let binary = '';
+              const chunkSize = 32768;
+              for (let i = 0; i < bytes.length; i += chunkSize) {{
+                binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+              }}
+              return JSON.stringify({{
+                ok: response.ok,
+                status: response.status,
+                contentType: response.headers.get('content-type') || '',
+                body: btoa(binary)
+              }});
+            }})()
+            """,
+        )
+    finally:
+        ws.close()
+    if not payload:
+        raise RuntimeError("Chrome не вернул файл")
+    data = json.loads(payload)
+    if not data.get("ok"):
+        status = data.get("status", "unknown")
+        raise PermissionError(f"Chrome не смог скачать файл, HTTP {status}. Проверь вход в Kwork.")
+    return base64.b64decode(data.get("body", ""))
+
+
+def _download_with_fallback(
+    url: str,
+    cookie: str,
+    max_bytes: int,
+    use_browser: bool,
+    cdp_url: str,
+    browser_profile_dir: str,
+) -> bytes:
+    try:
+        return download_attachment(url, cookie=cookie, max_bytes=max_bytes)
+    except Exception as direct_exc:
+        if not use_browser:
+            raise
+        logger.info("Direct attachment download failed, trying Chrome session for %s: %s", url, direct_exc)
+        try:
+            return download_attachment_via_browser(
+                url,
+                cdp_url=cdp_url,
+                browser_profile_dir=browser_profile_dir,
+                max_bytes=max_bytes,
+            )
+        except Exception as browser_exc:
+            raise RuntimeError(
+                f"прямое скачивание не прошло ({direct_exc}); Chrome-сессия тоже не скачала файл ({browser_exc}). "
+                "Проверь, что в отдельном Kwork Chrome выполнен вход в аккаунт."
+            ) from browser_exc
 
 
 def extract_attachment_text(ref: AttachmentRef, content: bytes) -> str:

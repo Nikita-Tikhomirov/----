@@ -245,7 +245,9 @@ def test_scan_once_passes_downloaded_attachment_text_to_ai_judge(tmp_path):
             draft_reply="Здравствуйте! Сделаю по ТЗ за 3 дня.",
         )
 
-    def fake_attachment_context(attachments, cookie=""):
+    def fake_attachment_context(attachments, cookie="", **kwargs):
+        assert kwargs["use_browser"] is True
+        assert kwargs["cdp_url"] == "http://127.0.0.1:9222"
         return "Attachment text: сделать форму, калькулятор и адаптив"
 
     scan_once(
@@ -258,6 +260,8 @@ def test_scan_once_passes_downloaded_attachment_text_to_ai_judge(tmp_path):
         ),
         lead_judge=fake_judge,
         attachment_context_builder=fake_attachment_context,
+        kwork_use_browser=True,
+        kwork_cdp_url="http://127.0.0.1:9222",
     )
 
     assert "Attachment text: сделать форму" in seen_texts[0]
@@ -283,7 +287,7 @@ def test_scan_once_includes_attachment_report_in_email_summary(tmp_path):
             draft_reply="Здравствуйте! Сделаю по ТЗ за 3 дня.",
         )
 
-    def fake_attachment_context(attachments, cookie=""):
+    def fake_attachment_context(attachments, cookie="", **kwargs):
         return "ФАЙЛЫ/ТЗ:\n- ТЗ.zip\n  Статус: скачан, архив открыт\n  Кратко: внутри brief.txt, нужна форма"
 
     scan_once(

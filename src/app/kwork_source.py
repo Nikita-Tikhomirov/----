@@ -9,7 +9,7 @@ import ssl
 import subprocess
 import time
 import urllib.request
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request
 
 from app.telegram_client import TelegramPost
@@ -158,10 +158,48 @@ def _fetch_rendered_html(url: str, cdp_url: str, timeout_seconds: float, browser
 
     ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=timeout_seconds)
     try:
+        _refresh_page(ws, url, timeout_seconds)
         _wait_for_cards(ws, timeout_seconds)
         return _evaluate(ws, 'Array.from(document.querySelectorAll(".want-card")).map(x=>x.outerHTML).join("\\n")')
     finally:
         ws.close()
+
+
+def _refresh_page(ws, url: str, timeout_seconds: float) -> None:
+    fresh_url = _cache_busted_url(url)
+    _send_cdp(ws, "Page.enable", {})
+    _send_cdp(ws, "Page.navigate", {"url": fresh_url})
+    _wait_for_location(ws, fresh_url, timeout_seconds)
+
+
+def _wait_for_location(ws, expected_url: str, timeout_seconds: float) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_location = ""
+    while time.monotonic() < deadline:
+        last_location = str(_evaluate(ws, "location.href") or "")
+        if _is_same_kwork_page(expected_url, last_location):
+            return
+        time.sleep(0.25)
+    raise RuntimeError(f"Kwork page did not navigate to fresh URL; last location={last_location}")
+
+
+def _cache_busted_url(url: str) -> str:
+    parts = urlsplit(url)
+    query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key != "_lf_refresh"]
+    query.append(("_lf_refresh", str(int(time.time() * 1000))))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _is_same_kwork_page(expected_url: str, actual_url: str) -> bool:
+    expected = urlsplit(expected_url)
+    actual = urlsplit(actual_url)
+    if expected.netloc.lower() != actual.netloc.lower():
+        return False
+    expected_path = expected.path.rstrip("/")
+    actual_path = actual.path.rstrip("/")
+    if actual_path == expected_path:
+        return True
+    return actual_path == f"{expected_path}/view"
 
 
 def _ensure_chrome_cdp(cdp_url: str, url: str, browser_profile_dir: str = "") -> None:

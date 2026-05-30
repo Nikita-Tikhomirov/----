@@ -40,6 +40,59 @@ def test_parse_kwork_project_cards_skips_cards_without_offer_count():
     assert parse_kwork_project_cards(html, max_responses=5) == []
 
 
+def test_fetch_rendered_html_refreshes_page_before_reading(monkeypatch):
+    import websocket
+    import app.kwork_source as source
+
+    calls = []
+    navigated_url = ""
+
+    class FakeWebSocket:
+        def close(self):
+            calls.append(("close", {}))
+
+    def fake_send_cdp(ws, method, params):
+        nonlocal navigated_url
+        calls.append((method, params))
+        if method == "Page.navigate":
+            navigated_url = params["url"]
+            return {}
+        if method == "Runtime.evaluate":
+            if params.get("expression") == "location.href":
+                return {"result": {"result": {"value": navigated_url}}}
+            return {"result": {"result": {"value": "<div class='want-card'></div>"}}}
+        return {}
+
+    monkeypatch.setattr(source, "_ensure_chrome_cdp", lambda cdp_url, url, browser_profile_dir="": None)
+    monkeypatch.setattr(
+        source,
+        "_find_or_create_page",
+        lambda cdp_url, url: {"webSocketDebuggerUrl": "ws://fake"},
+    )
+    monkeypatch.setattr(websocket, "create_connection", lambda url, timeout=30: FakeWebSocket())
+    monkeypatch.setattr(source, "_send_cdp", fake_send_cdp)
+    monkeypatch.setattr(source, "_wait_for_cards", lambda ws, timeout_seconds: None)
+
+    source._fetch_rendered_html(
+        "https://kwork.ru/projects?c=11",
+        "http://127.0.0.1:9222",
+        30,
+    )
+
+    methods = [method for method, _ in calls]
+    assert "Page.navigate" in methods
+    assert methods.index("Page.navigate") < methods.index("Runtime.evaluate")
+
+
+def test_kwork_fresh_location_accepts_view_redirect_and_cache_strip():
+    import app.kwork_source as source
+
+    assert source._is_same_kwork_page(
+        "https://kwork.ru/projects/3187247?_lf_refresh=1",
+        "https://kwork.ru/projects/3187247/view",
+    )
+
+
 def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch):
     from app.main import scan_once
     from app.ai_lead_judge import LeadJudgeResult
