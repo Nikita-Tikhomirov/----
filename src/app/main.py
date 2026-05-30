@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from app.ai_lead_judge import LeadJudgeResult, judge_lead
+from app.attachments import build_attachment_context
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
 from app.handoff import write_codex_handoff
@@ -56,6 +57,8 @@ def scan_once(
     kwork_project_client: ProjectInspector | None = None,
     kwork_max_responses: int = 5,
     lead_judge=judge_lead,
+    attachment_context_builder=build_attachment_context,
+    kwork_cookie: str = "",
 ) -> int:
     created = 0
     for post in telegram_client.fetch_recent_posts():
@@ -97,6 +100,9 @@ def scan_once(
                 continue
             if project_info.has_response_count:
                 project_summary_suffix = f", откликов: {project_info.response_count}"
+            attachment_context = ""
+            if project_info.attachments:
+                attachment_context = attachment_context_builder(project_info.attachments, cookie=kwork_cookie)
             if project_info.title or project_info.description or project_info.page_text or project_info.attachments:
                 project_text = "\n\n".join(
                     part
@@ -106,6 +112,7 @@ def scan_once(
                         f"Kwork description: {project_info.description}" if project_info.description else "",
                         f"Kwork page text: {project_info.page_text}" if project_info.page_text else "",
                         "Kwork attachments:\n" + "\n".join(project_info.attachments) if project_info.attachments else "",
+                        f"Kwork attachment contents:\n{attachment_context}" if attachment_context else "",
                     ]
                     if part
                 )
@@ -323,6 +330,7 @@ def main() -> int:
             deepseek_model=config.deepseek_model,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
+            kwork_cookie=config.kwork_cookie,
         )
         return 0
     if args.command == "approvals":
@@ -368,6 +376,7 @@ def main() -> int:
             deepseek_model=config.deepseek_model,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
+            kwork_cookie=config.kwork_cookie,
         )
         process_approvals(
             storage,
