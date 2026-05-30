@@ -263,6 +263,47 @@ def test_scan_once_passes_downloaded_attachment_text_to_ai_judge(tmp_path):
     assert "Attachment text: сделать форму" in seen_texts[0]
 
 
+def test_scan_once_includes_attachment_report_in_email_summary(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+
+    def fake_judge(text, api_key="", model="deepseek-chat"):
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=91,
+            complexity="medium",
+            estimated_days=3,
+            price_rub=15000,
+            summary="Сделать сайт по ТЗ",
+            reasons=["ТЗ прочитано"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте! Сделаю по ТЗ за 3 дня.",
+        )
+
+    def fake_attachment_context(attachments, cookie=""):
+        return "ФАЙЛЫ/ТЗ:\n- ТЗ.zip\n  Статус: скачан, архив открыт\n  Кратко: внутри brief.txt, нужна форма"
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=FakeKworkProjectClient(
+            response_count=1,
+            attachments=("ТЗ.zip: https://kwork.ru/files/tz.zip",),
+        ),
+        lead_judge=fake_judge,
+        attachment_context_builder=fake_attachment_context,
+    )
+
+    lead = storage.list_leads()[0]
+    assert "ФАЙЛЫ/ТЗ" in lead.summary
+    assert "архив открыт" in lead.summary
+    assert "внутри brief.txt" in lead.summary
+
+
 def test_scan_once_skips_ai_rejected_lead(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

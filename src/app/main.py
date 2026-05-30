@@ -79,6 +79,7 @@ def scan_once(
 
         project_text = post.text
         project_summary_suffix = ""
+        attachment_context = ""
         if kwork_project_client is not None:
             project_info = kwork_project_client.inspect(evaluation.contact)
             if not project_info.has_response_count and post.channel != "kwork-web":
@@ -100,7 +101,6 @@ def scan_once(
                 continue
             if project_info.has_response_count:
                 project_summary_suffix = f", откликов: {project_info.response_count}"
-            attachment_context = ""
             if project_info.attachments:
                 attachment_context = attachment_context_builder(project_info.attachments, cookie=kwork_cookie)
             if project_info.title or project_info.description or project_info.page_text or project_info.attachments:
@@ -131,10 +131,14 @@ def scan_once(
             )
             continue
 
+        summary = f"{_summary_from_judge(judge_result)}{project_summary_suffix}"
+        if attachment_context:
+            summary = "\n\n".join([summary, _shorten_attachment_report(attachment_context)])
+
         lead_id = storage.create_lead(
             post_id=post_id,
             score=judge_result.score,
-            summary=f"{_summary_from_judge(judge_result)}{project_summary_suffix}",
+            summary=summary,
             draft_reply=judge_result.draft_reply,
             contact=evaluation.contact,
         )
@@ -162,6 +166,13 @@ def _summary_from_judge(result: LeadJudgeResult) -> str:
     if result.questions:
         lines.append("Уточнение: " + "; ".join(result.questions))
     return "\n".join(lines)
+
+
+def _shorten_attachment_report(report: str, limit: int = 1800) -> str:
+    report = report.strip()
+    if len(report) <= limit:
+        return report
+    return report[: limit - 1].rstrip() + "…"
 
 
 def process_approvals(
