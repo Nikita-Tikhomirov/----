@@ -42,15 +42,26 @@ def test_parse_kwork_project_cards_skips_cards_without_offer_count():
 
 def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch):
     from app.main import scan_once
-    import app.ai_reply
+    from app.ai_lead_judge import LeadJudgeResult
     from app.storage import Storage
 
-    ai_calls = []
-    monkeypatch.setattr(
-        app.ai_reply,
-        "generate_reply",
-        lambda **kwargs: ai_calls.append(kwargs["text"]) or "AI reply",
-    )
+    judge_calls = []
+
+    def fake_judge(text, api_key="", model="deepseek-chat"):
+        judge_calls.append(text)
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=80,
+            complexity="simple",
+            estimated_days=1,
+            price_rub=5000,
+            summary="Проект",
+            reasons=["подходит"],
+            risks=[],
+            questions=[],
+            draft_reply="AI reply",
+        )
 
     class FakeSource:
         def fetch_recent_posts(self):
@@ -79,8 +90,8 @@ def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch
     storage.initialize()
     email = FakeEmail()
 
-    assert scan_once(storage, FakeSource(), email, deepseek_api_key="sk-test") == 1
-    assert scan_once(storage, FakeSource(), email, deepseek_api_key="sk-test") == 0
+    assert scan_once(storage, FakeSource(), email, deepseek_api_key="sk-test", lead_judge=fake_judge) == 1
+    assert scan_once(storage, FakeSource(), email, deepseek_api_key="sk-test", lead_judge=fake_judge) == 0
     assert len(storage.list_leads()) == 1
     assert email.sent == [1]
-    assert len(ai_calls) == 1
+    assert len(judge_calls) == 1

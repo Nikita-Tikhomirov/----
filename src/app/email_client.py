@@ -125,7 +125,7 @@ def _lead_email_body(lead: Lead, manual_reply_only: bool) -> str:
     lines.extend(
         [
             "",
-            "Резюме:",
+            "AI-ОЦЕНКА:",
             lead.summary,
             "",
             "СКОПИРОВАТЬ ОТКЛИК:",
@@ -148,6 +148,7 @@ def _lead_email_body(lead: Lead, manual_reply_only: bool) -> str:
         lines.extend(
             [
                 "",
+                "АПРУВ:",
                 f"Чтобы отправить отклик автоматически, ответь на это письмо строкой: OK {lead.id}",
             ]
         )

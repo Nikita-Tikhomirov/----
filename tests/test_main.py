@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.main import create_order_handoff, process_approvals, process_order_reviews, scan_once, submit_order
+from app.ai_lead_judge import LeadJudgeResult
 from app.kwork_client import KworkProjectInfo
 from app.storage import Storage
 
@@ -135,6 +136,77 @@ def test_scan_once_skips_kwork_projects_without_response_count(tmp_path):
         email_client=email_client,
         kwork_project_client=FakeKworkProjectClient(response_count=None, reason="нет workerCount"),
         kwork_max_responses=5,
+    )
+
+    assert created == 0
+    assert storage.list_leads() == []
+    assert email_client.sent_leads == []
+
+
+def test_scan_once_uses_ai_judge_for_summary_reply_and_score(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+
+    def fake_judge(text, api_key="", model="deepseek-chat"):
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=88,
+            complexity="medium",
+            estimated_days=5,
+            price_rub=18000,
+            summary="Сделать калькулятор на сайте",
+            reasons=["понятный результат"],
+            risks=["нужно сверить формулы"],
+            questions=["Формулы готовы?"],
+            draft_reply="Здравствуйте! Сделаю калькулятор за 5 дней, цена 18000 руб.",
+        )
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        lead_judge=fake_judge,
+        deepseek_api_key="sk-test",
+    )
+
+    assert created == 1
+    lead = storage.list_leads(status="emailed")[0]
+    assert lead.score == 88
+    assert "AI: accept" in lead.summary
+    assert "Срок: 5 дн." in lead.summary
+    assert "Цена: 18000 руб." in lead.summary
+    assert "понятный результат" in lead.summary
+    assert "калькулятор" in lead.draft_reply
+
+
+def test_scan_once_skips_ai_rejected_lead(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+
+    def fake_judge(text, api_key="", model="deepseek-chat"):
+        return LeadJudgeResult(
+            accepted=False,
+            decision="reject",
+            score=20,
+            complexity="too_complex",
+            estimated_days=7,
+            price_rub=0,
+            summary="Сложная CRM",
+            reasons=["больше недели"],
+            risks=["высокий риск"],
+            questions=[],
+            draft_reply="",
+        )
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        lead_judge=fake_judge,
+        deepseek_api_key="sk-test",
     )
 
     assert created == 0

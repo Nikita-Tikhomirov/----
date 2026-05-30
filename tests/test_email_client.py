@@ -32,6 +32,7 @@ def test_build_lead_email_contains_reply_instruction():
     assert "OK 12" in message.get_content()
     assert "https://t.me/jobs/42" in message.get_content()
     assert "Здравствуйте!" in message.get_content()
+    assert "АПРУВ" in message.get_content()
 
 
 def test_build_manual_lead_email_contains_copyable_reply_and_no_ok_instruction():

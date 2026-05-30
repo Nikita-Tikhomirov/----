@@ -46,6 +46,7 @@ class KworkWebSource:
         timeout_seconds: float = 30.0,
         use_browser: bool = True,
         cdp_url: str = "http://127.0.0.1:9222",
+        browser_profile_dir: str = "",
     ):
         self.projects_url = projects_url
         self.max_posts = max_posts
@@ -54,12 +55,18 @@ class KworkWebSource:
         self.timeout_seconds = timeout_seconds
         self.use_browser = use_browser
         self.cdp_url = cdp_url.rstrip("/")
+        self.browser_profile_dir = browser_profile_dir
 
     def fetch_recent_posts(self) -> list[TelegramPost]:
         html_text = ""
         if self.use_browser:
             try:
-                html_text = _fetch_rendered_html(self.projects_url, self.cdp_url, self.timeout_seconds)
+                html_text = _fetch_rendered_html(
+                    self.projects_url,
+                    self.cdp_url,
+                    self.timeout_seconds,
+                    self.browser_profile_dir,
+                )
             except Exception as exc:
                 logger.warning("Failed to fetch rendered Kwork projects page via Chrome: %s", exc)
         try:
@@ -143,8 +150,8 @@ def _fetch_html(url: str, timeout_seconds: float, cookie: str = "") -> str:
         return response.read().decode("utf-8", errors="replace")
 
 
-def _fetch_rendered_html(url: str, cdp_url: str, timeout_seconds: float) -> str:
-    _ensure_chrome_cdp(cdp_url, url)
+def _fetch_rendered_html(url: str, cdp_url: str, timeout_seconds: float, browser_profile_dir: str = "") -> str:
+    _ensure_chrome_cdp(cdp_url, url, browser_profile_dir)
     page = _find_or_create_page(cdp_url, url)
 
     import websocket
@@ -157,21 +164,22 @@ def _fetch_rendered_html(url: str, cdp_url: str, timeout_seconds: float) -> str:
         ws.close()
 
 
-def _ensure_chrome_cdp(cdp_url: str, url: str) -> None:
+def _ensure_chrome_cdp(cdp_url: str, url: str, browser_profile_dir: str = "") -> None:
     if _cdp_json(cdp_url, "/json/version", timeout=2):
         return
 
     chrome = _chrome_path()
     if not chrome:
         raise RuntimeError("Chrome executable not found")
-    user_data = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data")
+    user_data = browser_profile_dir or os.path.join(os.environ.get("LOCALAPPDATA", ""), "KworkLeadChrome")
+    os.makedirs(user_data, exist_ok=True)
     args = [
         chrome,
         f"--user-data-dir={user_data}",
-        "--profile-directory=Default",
         f"--remote-debugging-port={_cdp_port(cdp_url)}",
         "--remote-allow-origins=*",
-        "--restore-last-session",
+        "--no-first-run",
+        "--disable-default-apps",
         url,
     ]
     subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

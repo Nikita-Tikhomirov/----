@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Protocol
 
+from app.ai_lead_judge import LeadJudgeResult, judge_lead
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
 from app.handoff import write_codex_handoff
@@ -54,6 +55,7 @@ def scan_once(
     deepseek_model: str = "deepseek-chat",
     kwork_project_client: ProjectInspector | None = None,
     kwork_max_responses: int = 5,
+    lead_judge=judge_lead,
 ) -> int:
     created = 0
     for post in telegram_client.fetch_recent_posts():
@@ -105,16 +107,25 @@ def scan_once(
                     if part
                 )
 
-        evaluation = evaluate_post(
+        judge_result = lead_judge(
             project_text,
-            deepseek_api_key=deepseek_api_key,
-            deepseek_model=deepseek_model,
+            api_key=deepseek_api_key,
+            model=deepseek_model,
         )
+        if not judge_result.accepted:
+            logger.info(
+                "Rejected post %s/%s by AI judge: %s",
+                post.channel,
+                post.message_id,
+                "; ".join(judge_result.reasons),
+            )
+            continue
+
         lead_id = storage.create_lead(
             post_id=post_id,
-            score=evaluation.score,
-            summary=f"{evaluation.summary}{project_summary_suffix}",
-            draft_reply=evaluation.draft_reply,
+            score=judge_result.score,
+            summary=f"{_summary_from_judge(judge_result)}{project_summary_suffix}",
+            draft_reply=judge_result.draft_reply,
             contact=evaluation.contact,
         )
         lead = storage.get_lead(lead_id)
@@ -125,6 +136,22 @@ def scan_once(
         logger.info("Emailed lead %s from %s", lead_id, post.url)
         created += 1
     return created
+
+
+def _summary_from_judge(result: LeadJudgeResult) -> str:
+    lines = [
+        f"AI: {result.decision}, сложность: {result.complexity}",
+        f"Срок: {result.estimated_days} дн.",
+        f"Цена: {result.price_rub} руб." if result.price_rub else "Цена: не определена",
+        f"Задача: {result.summary}",
+    ]
+    if result.reasons:
+        lines.append("Почему подходит: " + "; ".join(result.reasons))
+    if result.risks:
+        lines.append("Риски: " + "; ".join(result.risks))
+    if result.questions:
+        lines.append("Уточнение: " + "; ".join(result.questions))
+    return "\n".join(lines)
 
 
 def process_approvals(
@@ -216,6 +243,7 @@ def build_runtime(config: AppConfig):
             cookie=config.kwork_cookie,
             use_browser=config.kwork_use_browser,
             cdp_url=config.kwork_cdp_url,
+            browser_profile_dir=config.kwork_browser_profile_dir,
         )
     elif config.telegram_api_id > 0 and config.telegram_api_hash != "fill_later":
         manual_reply_only = False
