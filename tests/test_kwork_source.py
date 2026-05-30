@@ -93,6 +93,28 @@ def test_kwork_fresh_location_accepts_view_redirect_and_cache_strip():
     )
 
 
+def test_find_or_create_page_reuses_existing_kwork_tab_for_project(monkeypatch):
+    import app.kwork_source as source
+
+    monkeypatch.setattr(
+        source,
+        "_cdp_json",
+        lambda cdp_url, path, timeout: [
+            {
+                "type": "page",
+                "url": "https://kwork.ru/projects?c=11",
+                "webSocketDebuggerUrl": "ws://existing",
+            }
+        ]
+        if path == "/json/list"
+        else None,
+    )
+
+    page = source._find_or_create_page("http://127.0.0.1:9222", "https://kwork.ru/projects/3187247/view")
+
+    assert page["webSocketDebuggerUrl"] == "ws://existing"
+
+
 def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch):
     from app.main import scan_once
     from app.ai_lead_judge import LeadJudgeResult

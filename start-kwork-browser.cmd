@@ -22,7 +22,10 @@ taskkill /IM chrome.exe /F >nul 2>nul
 timeout /t 1 /nobreak >nul
 
 set PROFILE=%LOCALAPPDATA%\Google\Chrome\User Data
-start "" "%CHROME%" --user-data-dir="%PROFILE%" --profile-directory=Default --remote-debugging-port=9222 --remote-allow-origins=* --no-first-run "https://kwork.ru/projects?c=11"
+set PROFILE_DIR=Default
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$localState=Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Local State'; if (Test-Path $localState) { try { $data=Get-Content $localState -Raw | ConvertFrom-Json; if ($data.profile.last_used) { $data.profile.last_used } else { 'Default' } } catch { 'Default' } } else { 'Default' }"`) do set PROFILE_DIR=%%P
+echo Using Chrome profile: %PROFILE_DIR%
+start "" "%CHROME%" --user-data-dir="%PROFILE%" --profile-directory="%PROFILE_DIR%" --remote-debugging-port=9222 --remote-allow-origins=* --no-first-run "https://kwork.ru/projects?c=11"
 
 powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(12); do { try { Invoke-RestMethod -Uri 'http://127.0.0.1:9222/json/version' -TimeoutSec 2 | Out-Null; exit 0 } catch { Start-Sleep -Milliseconds 500 } } while ((Get-Date) -lt $deadline); exit 1"
 if not "%ERRORLEVEL%"=="0" (

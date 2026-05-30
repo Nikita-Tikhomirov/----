@@ -209,15 +209,15 @@ def _ensure_chrome_cdp(cdp_url: str, url: str, browser_profile_dir: str = "") ->
     chrome = _chrome_path()
     if not chrome:
         raise RuntimeError("Chrome executable not found")
-    user_data = browser_profile_dir or os.path.join(os.environ.get("LOCALAPPDATA", ""), "KworkLeadChrome")
+    user_data = browser_profile_dir or _chrome_user_data_dir()
     os.makedirs(user_data, exist_ok=True)
     args = [
         chrome,
         f"--user-data-dir={user_data}",
+        f"--profile-directory={_chrome_last_profile(user_data)}",
         f"--remote-debugging-port={_cdp_port(cdp_url)}",
         "--remote-allow-origins=*",
         "--no-first-run",
-        "--disable-default-apps",
         url,
     ]
     subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -235,7 +235,7 @@ def _ensure_chrome_cdp(cdp_url: str, url: str, browser_profile_dir: str = "") ->
 def _find_or_create_page(cdp_url: str, url: str) -> dict[str, str]:
     pages = _cdp_json(cdp_url, "/json/list", timeout=5) or []
     for page in pages:
-        if page.get("type") == "page" and page.get("url", "").startswith(url.split("?", 1)[0]):
+        if page.get("type") == "page" and _is_kwork_tab(page.get("url", "")):
             if page.get("webSocketDebuggerUrl"):
                 return page
 
@@ -318,6 +318,28 @@ def _chrome_path() -> str:
         os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
     ]
     return next((path for path in candidates if path and os.path.exists(path)), "")
+
+
+def _chrome_user_data_dir() -> str:
+    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data")
+
+
+def _chrome_last_profile(user_data: str) -> str:
+    local_state = os.path.join(user_data, "Local State")
+    try:
+        with open(local_state, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        last_used = data.get("profile", {}).get("last_used", "")
+        if last_used:
+            return str(last_used)
+    except Exception:
+        pass
+    return "Default"
+
+
+def _is_kwork_tab(url: str) -> bool:
+    parsed = urlsplit(url)
+    return parsed.netloc.lower().endswith("kwork.ru")
 
 
 def _first_group(pattern: re.Pattern[str], text: str, group: str) -> str:
