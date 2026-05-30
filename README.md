@@ -35,11 +35,20 @@ $env:PYTHONPATH="src"
 Самый удобный вариант на Windows:
 
 ```powershell
+.\lead-funnel-gui.cmd
 .\lead-funnel.cmd scan
 .\lead-funnel.cmd watch
 .\lead-funnel.cmd approvals
 .\lead-funnel.cmd orders list
 ```
+
+`lead-funnel-gui.cmd` открывает простое окно:
+
+- `Запустить Kwork Chrome` — открыть Kwork в отдельном Chrome-профиле с DevTools-портом.
+- `Сканировать сейчас` — один проход по свежим заказам.
+- `Старт мониторинга` — постоянная проверка по интервалу из `.env`.
+- `Стоп мониторинга` — остановить фоновый процесс.
+- нижний блок показывает живой лог.
 
 Если `scan/watch` пишет, что Chrome DevTools port недоступен, запусти:
 

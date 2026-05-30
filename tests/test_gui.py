@@ -1,0 +1,19 @@
+from pathlib import Path
+
+from app.gui import build_app_command, build_script_command
+
+
+def test_build_app_command_runs_module_with_src_pythonpath(tmp_path):
+    command, env = build_app_command("scan", root_dir=tmp_path)
+
+    assert command[-3:] == ["-m", "app.main", "scan"]
+    assert env["PYTHONPATH"] == str(tmp_path / "src")
+
+
+def test_build_script_command_uses_cmd_runner(tmp_path):
+    script = tmp_path / "start-kwork-browser.cmd"
+    script.write_text("@echo off", encoding="utf-8")
+
+    command = build_script_command(script)
+
+    assert command == ["cmd", "/c", str(script)]
