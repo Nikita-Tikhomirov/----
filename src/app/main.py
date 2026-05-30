@@ -323,6 +323,8 @@ def _resolve_kwork_cookie(config: AppConfig) -> str:
     cookie = chrome_cookie_header(".kwork.ru")
     if cookie:
         logger.info("Imported Kwork cookies from the current Chrome profile")
+    elif config.kwork_use_browser:
+        logger.info("Kwork HTTP cookies were not imported; logged-in Chrome session will be used for private pages and files")
     else:
         logger.warning("Kwork Chrome cookies were not imported; private files may require manual login")
     return cookie
