@@ -41,6 +41,9 @@ class LeadFunnelGui:
         self.start_watch_button = Button(root, text="3. Старт мониторинга", command=self.start_watch)
         self.start_watch_button.pack(fill="x", padx=10, pady=3)
 
+        self.approvals_button = Button(root, text="4. Проверить OK и отправить отклики", command=self.process_approvals)
+        self.approvals_button.pack(fill="x", padx=10, pady=3)
+
         self.stop_watch_button = Button(root, text="Стоп мониторинга", command=self.stop_watch, state=DISABLED)
         self.stop_watch_button.pack(fill="x", padx=10, pady=3)
 
@@ -58,6 +61,10 @@ class LeadFunnelGui:
     def scan_once(self) -> None:
         command, env = build_app_command("scan")
         self._run_once(command, env, "Сканирование")
+
+    def process_approvals(self) -> None:
+        command, env = build_app_command("approvals")
+        self._run_once(command, env, "Проверка OK")
 
     def start_watch(self) -> None:
         if self.watch_process and self.watch_process.poll() is None:

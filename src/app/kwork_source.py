@@ -14,6 +14,7 @@ from urllib.request import Request
 
 import websocket
 
+from app.kwork_sender import KworkReplySender
 from app.telegram_client import TelegramPost
 
 logger = logging.getLogger(__name__)
@@ -37,8 +38,6 @@ TAG_PATTERN = re.compile(r"<[^>]+>")
 
 
 class KworkWebSource:
-    can_send_replies = False
-
     def __init__(
         self,
         projects_url: str = DEFAULT_KWORK_PROJECTS_URL,
@@ -49,6 +48,7 @@ class KworkWebSource:
         use_browser: bool = True,
         cdp_url: str = "http://127.0.0.1:9222",
         browser_profile_dir: str = "",
+        enable_replies: bool = False,
     ):
         self.projects_url = projects_url
         self.max_posts = max_posts
@@ -58,6 +58,11 @@ class KworkWebSource:
         self.use_browser = use_browser
         self.cdp_url = cdp_url.rstrip("/")
         self.browser_profile_dir = browser_profile_dir
+        self.enable_replies = enable_replies
+
+    @property
+    def can_send_replies(self) -> bool:
+        return self.enable_replies
 
     def fetch_recent_posts(self) -> list[TelegramPost]:
         html_text = ""
@@ -85,7 +90,14 @@ class KworkWebSource:
         return posts[: self.max_posts]
 
     def send_message(self, contact: str, text: str) -> str:
-        raise RuntimeError("Kwork web source is read-only; replies are sent manually.")
+        if not self.enable_replies:
+            raise RuntimeError("Kwork web source is read-only; replies are sent manually.")
+        sender = KworkReplySender(
+            timeout_seconds=self.timeout_seconds,
+            cdp_url=self.cdp_url,
+            browser_profile_dir=self.browser_profile_dir,
+        )
+        return sender.send_message(contact, text)
 
 
 def parse_kwork_project_cards(

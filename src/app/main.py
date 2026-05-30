@@ -284,8 +284,11 @@ def build_runtime(config: AppConfig):
         browser_profile_dir=config.kwork_browser_profile_dir,
     )
     if config.kwork_source == "web":
-        manual_reply_only = True
-        logger.warning("Using Kwork web source in read-only manual reply mode")
+        manual_reply_only = not config.kwork_auto_reply
+        if config.kwork_auto_reply:
+            logger.warning("Using Kwork web source with email-approved browser replies enabled")
+        else:
+            logger.warning("Using Kwork web source in read-only manual reply mode")
         telegram_client = KworkWebSource(
             projects_url=config.kwork_projects_url,
             max_posts=config.max_posts_per_channel,
@@ -294,6 +297,7 @@ def build_runtime(config: AppConfig):
             use_browser=config.kwork_use_browser,
             cdp_url=config.kwork_cdp_url,
             browser_profile_dir=config.kwork_browser_profile_dir,
+            enable_replies=config.kwork_auto_reply,
         )
     elif config.telegram_api_id > 0 and config.telegram_api_hash != "fill_later":
         manual_reply_only = False

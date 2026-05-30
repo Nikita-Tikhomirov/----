@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from dataclasses import dataclass
+from urllib.parse import urlparse
+
+import websocket
+
+logger = logging.getLogger(__name__)
+
+PRICE_PATTERN = re.compile(
+    r"(?:цена|бюджет|стоимост[ьи]|ориентир|за)\D{0,24}(\d[\d\s]{2,9})(?:\s*(?:руб|р\b|₽))",
+    re.IGNORECASE,
+)
+DAYS_PATTERN = re.compile(r"(?:за|срок|сделаю|готов(?:о)?)\D{0,24}(\d{1,2})\s*(?:дн|день|дня|дней)", re.IGNORECASE)
+PHONE_LIKE_PATTERN = re.compile(r"(?:\+?\d[\s-]?){10,}")
+
+
+@dataclass(frozen=True)
+class ReplyTerms:
+    price_rub: int | None = None
+    days: int | None = None
+
+
+class KworkReplySender:
+    can_send_replies = True
+
+    def __init__(
+        self,
+        timeout_seconds: float = 30.0,
+        cdp_url: str = "http://127.0.0.1:9222",
+        browser_profile_dir: str = "",
+    ):
+        self.timeout_seconds = timeout_seconds
+        self.cdp_url = cdp_url.rstrip("/")
+        self.browser_profile_dir = browser_profile_dir
+
+    def send_message(self, contact: str, text: str) -> str:
+        if not _is_kwork_project_url(contact):
+            raise ValueError("Kwork sender requires a Kwork project URL")
+        clean_text = text.strip()
+        if not clean_text:
+            raise ValueError("Kwork reply text must not be empty")
+
+        from app import kwork_source
+
+        kwork_source._ensure_chrome_cdp(self.cdp_url, contact, self.browser_profile_dir)
+        page = kwork_source._find_or_create_page(self.cdp_url, contact, tab_kind="project")
+        ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=self.timeout_seconds)
+        try:
+            kwork_source._refresh_page(ws, contact, self.timeout_seconds)
+            self._wait_for_page_text(ws)
+            self._open_reply_form(ws)
+            self._wait_for_reply_field(ws)
+            page_text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
+            has_field = bool(kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT))
+            login_message = _login_required_message(page_text, has_reply_field=has_field)
+            if login_message:
+                raise RuntimeError(login_message)
+            terms = _extract_reply_terms(clean_text)
+            submit_result = self._fill_and_submit(ws, clean_text, terms)
+            if not submit_result.get("submitted"):
+                reason = submit_result.get("reason") or "Kwork submit button was not found"
+                raise RuntimeError(str(reason))
+            self._wait_after_submit(ws)
+            project_id = _project_id(contact)
+            return f"kwork-project-{project_id}"
+        finally:
+            ws.close()
+
+    def _wait_for_page_text(self, ws) -> None:
+        from app import kwork_source
+
+        deadline = time.monotonic() + self.timeout_seconds
+        while time.monotonic() < deadline:
+            text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
+            if len(text.strip()) > 100:
+                return
+            time.sleep(0.4)
+        raise RuntimeError("Kwork project page did not render readable text")
+
+    def _open_reply_form(self, ws) -> None:
+        from app import kwork_source
+
+        kwork_source._evaluate(ws, _OPEN_REPLY_FORM_SCRIPT)
+
+    def _wait_for_reply_field(self, ws) -> None:
+        from app import kwork_source
+
+        deadline = time.monotonic() + self.timeout_seconds
+        while time.monotonic() < deadline:
+            if kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT):
+                return
+            text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
+            if _login_required_message(text, has_reply_field=False):
+                return
+            time.sleep(0.5)
+
+    def _fill_and_submit(self, ws, text: str, terms: ReplyTerms) -> dict:
+        from app import kwork_source
+
+        payload = json.dumps(
+            {
+                "text": text,
+                "price": "" if terms.price_rub is None else str(terms.price_rub),
+                "days": "" if terms.days is None else str(terms.days),
+            },
+            ensure_ascii=False,
+        )
+        result = kwork_source._evaluate(ws, f"({_FILL_AND_SUBMIT_SCRIPT})({payload})")
+        if isinstance(result, str):
+            return json.loads(result)
+        return {"submitted": False, "reason": "Kwork submit script returned no result"}
+
+    def _wait_after_submit(self, ws) -> None:
+        from app import kwork_source
+
+        deadline = time.monotonic() + min(self.timeout_seconds, 10)
+        while time.monotonic() < deadline:
+            text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
+            lowered = text.lower()
+            if any(marker in lowered for marker in ("предложение отправлено", "ваше предложение", "отклик отправлен")):
+                return
+            if any(marker in lowered for marker in ("обязательное поле", "заполните", "ошибка")):
+                raise RuntimeError("Kwork did not accept the reply; check required fields in the opened project tab")
+            time.sleep(0.5)
+
+
+def _extract_reply_terms(text: str) -> ReplyTerms:
+    without_phones = PHONE_LIKE_PATTERN.sub(" ", text)
+    price = _first_int(PRICE_PATTERN, without_phones)
+    days = _first_int(DAYS_PATTERN, without_phones)
+    if price is not None and price < 500:
+        price = None
+    if days is not None and not 1 <= days <= 30:
+        days = None
+    return ReplyTerms(price_rub=price, days=days)
+
+
+def _first_int(pattern: re.Pattern[str], text: str) -> int | None:
+    match = pattern.search(text)
+    if not match:
+        return None
+    value = re.sub(r"\D", "", match.group(1))
+    return int(value) if value else None
+
+
+def _login_required_message(page_text: str, has_reply_field: bool) -> str:
+    lowered = page_text.lower()
+    if has_reply_field:
+        return ""
+    if "вход" in lowered and "регистрация" in lowered and "предложить услугу" in lowered:
+        return "Kwork Chrome is not logged in; open the bot Chrome window and sign in to Kwork once."
+    return ""
+
+
+def _is_kwork_project_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.netloc.lower().endswith("kwork.ru") and re.match(r"^/projects/\d+(?:/view)?/?$", parsed.path) is not None
+
+
+def _project_id(url: str) -> str:
+    match = re.search(r"/projects/(\d+)", url)
+    return match.group(1) if match else "unknown"
+
+
+_OPEN_REPLY_FORM_SCRIPT = r"""
+(() => {
+  const norm = value => (value || '').replace(/\s+/g, ' ').trim();
+  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const cookie = Array.from(document.querySelectorAll('button,a')).find(el => /^(окей|ok|понятно)$/i.test(norm(el.innerText || el.value)));
+  if (cookie && visible(cookie)) cookie.click();
+  const opener = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit]')).find(el => {
+    const text = norm(el.innerText || el.value || el.getAttribute('aria-label'));
+    return visible(el) && /(предложить услугу|откликнуться|оставить предложение|предложить)$/i.test(text);
+  });
+  if (opener) opener.click();
+  return true;
+})()
+"""
+
+_HAS_REPLY_FIELD_SCRIPT = r"""
+(() => {
+  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  return Array.from(document.querySelectorAll('textarea,[contenteditable="true"],input:not([type]),input[type=text]')).some(visible);
+})()
+"""
+
+_FILL_AND_SUBMIT_SCRIPT = r"""
+(payload) => {
+  const norm = value => (value || '').replace(/\s+/g, ' ').trim();
+  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const setValue = (el, value) => {
+    if (!el) return false;
+    el.focus();
+    if (el.isContentEditable) {
+      el.innerText = value;
+      el.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
+      el.dispatchEvent(new Event('change', {bubbles: true}));
+      return true;
+    }
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(el, value); else el.value = value;
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+    el.dispatchEvent(new Event('change', {bubbles: true}));
+    return true;
+  };
+  const meta = el => norm([
+    el.name,
+    el.id,
+    el.className,
+    el.placeholder,
+    el.getAttribute('aria-label'),
+    el.closest('label')?.innerText,
+    el.parentElement?.innerText?.slice(0, 160)
+  ].filter(Boolean).join(' ')).toLowerCase();
+  const fields = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],input:not([type]),input[type=text],input[type=number]')).filter(visible);
+  const messageField = fields.find(el => /сообщ|опис|коммент|текст|message|comment|description|cover|letter/.test(meta(el)))
+    || fields.find(el => el.tagName === 'TEXTAREA' || el.isContentEditable);
+  if (!messageField) return JSON.stringify({submitted: false, reason: 'Kwork reply field was not found'});
+  setValue(messageField, payload.text);
+  const priceField = fields.find(el => /цен|стоим|бюдж|price|cost|amount|budget|sum/.test(meta(el)));
+  if (priceField && payload.price) setValue(priceField, payload.price);
+  const daysField = fields.find(el => /срок|дн|day|days|duration|deadline/.test(meta(el)));
+  if (daysField && payload.days) setValue(daysField, payload.days);
+  const form = messageField.closest('form') || document;
+  const buttons = Array.from(form.querySelectorAll('button,input[type=submit],input[type=button],a')).filter(visible);
+  const submit = buttons.find(el => /отправить|предложить|оставить предложение|разместить|подать/i.test(norm(el.innerText || el.value || el.getAttribute('aria-label'))));
+  if (!submit) return JSON.stringify({submitted: false, reason: 'Kwork submit button was not found'});
+  submit.click();
+  return JSON.stringify({submitted: true, priceFilled: Boolean(priceField && payload.price), daysFilled: Boolean(daysField && payload.days)});
+}
+"""

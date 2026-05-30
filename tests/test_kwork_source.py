@@ -243,3 +243,40 @@ def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch
     assert len(storage.list_leads()) == 1
     assert email.sent == [1]
     assert len(judge_calls) == 1
+
+
+def test_kwork_web_source_can_send_when_replies_enabled(monkeypatch):
+    import app.kwork_source as source
+
+    sent = []
+
+    class FakeSender:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def send_message(self, contact, text):
+            sent.append((contact, text, self.kwargs["cdp_url"]))
+            return "kwork-project-123"
+
+    monkeypatch.setattr(source, "KworkReplySender", FakeSender)
+    client = source.KworkWebSource(
+        enable_replies=True,
+        cdp_url="http://127.0.0.1:9222",
+    )
+
+    assert client.can_send_replies is True
+    assert client.send_message("https://kwork.ru/projects/123/view", "Здравствуйте!") == "kwork-project-123"
+    assert sent == [
+        ("https://kwork.ru/projects/123/view", "Здравствуйте!", "http://127.0.0.1:9222")
+    ]
+
+
+def test_kwork_web_source_stays_read_only_when_replies_disabled():
+    import pytest
+    import app.kwork_source as source
+
+    client = source.KworkWebSource(enable_replies=False)
+
+    assert client.can_send_replies is False
+    with pytest.raises(RuntimeError, match="read-only"):
+        client.send_message("https://kwork.ru/projects/123/view", "Здравствуйте!")

@@ -454,6 +454,40 @@ def test_process_approvals_skips_sending_in_read_only_fallback(tmp_path):
     assert storage.get_lead(lead_id).status == "emailed"
 
 
+def test_process_approvals_sends_kwork_web_reply_after_ok(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=3186746,
+        post_url="https://kwork.ru/projects/3186746/view",
+        text="Нужно поправить WordPress. Предложений: 4",
+        posted_at="",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=86,
+        summary="WordPress задача",
+        draft_reply="Здравствуйте! Сделаю за 3 дня, цена 10000 руб.",
+        contact="https://kwork.ru/projects/3186746/view",
+    )
+    storage.mark_lead_emailed(lead_id, "<lead@example.com>")
+    telegram_client = FakeTelegramClient()
+    email_client = FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")])
+
+    sent = process_approvals(
+        storage=storage,
+        telegram_client=telegram_client,
+        email_client=email_client,
+    )
+
+    assert sent == 1
+    assert telegram_client.sent == [
+        ("https://kwork.ru/projects/3186746/view", "Здравствуйте! Сделаю за 3 дня, цена 10000 руб.")
+    ]
+    assert storage.get_lead(lead_id).status == "sent"
+
+
 def test_submit_order_sends_for_approval_and_review_can_request_revision(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

@@ -106,7 +106,7 @@ def build_lead_email(
     message = EmailMessage()
     message["From"] = from_address
     message["To"] = to_address
-    message["Subject"] = f"Новый Telegram-заказ #{lead.id}: score {lead.score}"
+    message["Subject"] = f"Новый заказ #{lead.id}: score {lead.score}"
     message["Message-ID"] = f"<lead-{lead.id}@telegram-lead-funnel.local>"
     message.set_content(_lead_email_body(lead, manual_reply_only), charset="utf-8")
     return message

@@ -28,7 +28,7 @@ def test_build_lead_email_contains_reply_instruction():
         to_address="me@example.com",
     )
 
-    assert message["Subject"] == "Новый Telegram-заказ #12: score 86"
+    assert message["Subject"] == "Новый заказ #12: score 86"
     assert "OK 12" in message.get_content()
     assert "https://t.me/jobs/42" in message.get_content()
     assert "Здравствуйте!" in message.get_content()
