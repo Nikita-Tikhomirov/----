@@ -17,3 +17,15 @@ def test_build_script_command_uses_cmd_runner(tmp_path):
     command = build_script_command(script)
 
     assert command == ["cmd", "/c", str(script)]
+
+
+def test_kwork_browser_script_always_restarts_default_chrome_profile():
+    script = (Path(__file__).resolve().parents[1] / "start-kwork-browser.cmd").read_text(encoding="utf-8")
+
+    assert "Chrome DevTools already running" not in script
+    assert "taskkill /IM chrome.exe /F" in script
+    assert "KworkLeadChromeUserData" in script
+    assert "robocopy" in script
+    assert "--user-data-dir=\"%BOT_PROFILE%\"" in script
+    assert "--remote-debugging-address=127.0.0.1" in script
+    assert "--remote-debugging-port=9222" in script
