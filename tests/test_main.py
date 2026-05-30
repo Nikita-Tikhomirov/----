@@ -54,9 +54,11 @@ class FakeEmailClient:
 
 
 class FakeKworkProjectClient:
-    def __init__(self, response_count=3, reason=""):
+    def __init__(self, response_count=3, reason="", page_text="", attachments=()):
         self.response_count = response_count
         self.reason = reason
+        self.page_text = page_text
+        self.attachments = attachments
         self.inspected = []
 
     def inspect(self, contact):
@@ -66,6 +68,8 @@ class FakeKworkProjectClient:
             response_count=self.response_count,
             title="Kwork project",
             description="Детали задачи со страницы Kwork",
+            page_text=self.page_text,
+            attachments=tuple(self.attachments),
             reason=self.reason,
         )
 
@@ -179,6 +183,44 @@ def test_scan_once_uses_ai_judge_for_summary_reply_and_score(tmp_path):
     assert "Цена: 18000 руб." in lead.summary
     assert "понятный результат" in lead.summary
     assert "калькулятор" in lead.draft_reply
+
+
+def test_scan_once_passes_kwork_page_details_and_attachments_to_ai_judge(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+    seen_texts = []
+
+    def fake_judge(text, api_key="", model="deepseek-chat"):
+        seen_texts.append(text)
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=90,
+            complexity="medium",
+            estimated_days=4,
+            price_rub=20000,
+            summary="Сделать сайт по ТЗ",
+            reasons=["ТЗ приложено"],
+            risks=["нужно прочитать вложение"],
+            questions=[],
+            draft_reply="Здравствуйте! Изучу приложенное ТЗ и сделаю сайт за 4 дня.",
+        )
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=FakeKworkProjectClient(
+            response_count=2,
+            page_text="Полное описание проекта со страницы",
+            attachments=("ТЗ.pdf: https://kwork.ru/files/tz.pdf",),
+        ),
+        lead_judge=fake_judge,
+    )
+
+    assert "Полное описание проекта со страницы" in seen_texts[0]
+    assert "ТЗ.pdf" in seen_texts[0]
 
 
 def test_scan_once_skips_ai_rejected_lead(tmp_path):

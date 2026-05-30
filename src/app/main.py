@@ -76,9 +76,9 @@ def scan_once(
 
         project_text = post.text
         project_summary_suffix = ""
-        if kwork_project_client is not None and post.channel != "kwork-web":
+        if kwork_project_client is not None:
             project_info = kwork_project_client.inspect(evaluation.contact)
-            if not project_info.has_response_count:
+            if not project_info.has_response_count and post.channel != "kwork-web":
                 logger.info(
                     "Rejected post %s/%s: cannot verify Kwork responses (%s)",
                     post.channel,
@@ -86,7 +86,7 @@ def scan_once(
                     project_info.reason,
                 )
                 continue
-            if project_info.response_count > kwork_max_responses:
+            if project_info.has_response_count and project_info.response_count > kwork_max_responses:
                 logger.info(
                     "Rejected post %s/%s: Kwork responses %s > %s",
                     post.channel,
@@ -95,14 +95,17 @@ def scan_once(
                     kwork_max_responses,
                 )
                 continue
-            project_summary_suffix = f", откликов: {project_info.response_count}"
-            if project_info.title or project_info.description:
+            if project_info.has_response_count:
+                project_summary_suffix = f", откликов: {project_info.response_count}"
+            if project_info.title or project_info.description or project_info.page_text or project_info.attachments:
                 project_text = "\n\n".join(
                     part
                     for part in [
                         post.text,
                         f"Kwork title: {project_info.title}" if project_info.title else "",
                         f"Kwork description: {project_info.description}" if project_info.description else "",
+                        f"Kwork page text: {project_info.page_text}" if project_info.page_text else "",
+                        "Kwork attachments:\n" + "\n".join(project_info.attachments) if project_info.attachments else "",
                     ]
                     if part
                 )
@@ -233,6 +236,12 @@ def create_order_handoff(storage: Storage, order_id: int, output_dir: str | Path
 def build_runtime(config: AppConfig):
     storage = Storage(config.database_path)
     storage.initialize()
+    kwork_project_client = KworkProjectClient(
+        cookie=config.kwork_cookie,
+        use_browser=config.kwork_use_browser,
+        cdp_url=config.kwork_cdp_url,
+        browser_profile_dir=config.kwork_browser_profile_dir,
+    )
     if config.kwork_source == "web":
         manual_reply_only = True
         logger.warning("Using Kwork web source in read-only manual reply mode")
@@ -274,7 +283,6 @@ def build_runtime(config: AppConfig):
         imap_password=config.imap_password,
         manual_reply_only=manual_reply_only,
     )
-    kwork_project_client = KworkProjectClient(cookie=config.kwork_cookie)
     return storage, telegram_client, email_client, kwork_project_client
 
 
