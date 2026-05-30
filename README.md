@@ -35,6 +35,7 @@ $env:PYTHONPATH="src"
 Самый удобный вариант на Windows:
 
 ```powershell
+.\lead-funnel-gui.vbs
 .\lead-funnel-gui.cmd
 .\lead-funnel.cmd scan
 .\lead-funnel.cmd watch
@@ -42,7 +43,7 @@ $env:PYTHONPATH="src"
 .\lead-funnel.cmd orders list
 ```
 
-`lead-funnel-gui.cmd` открывает простое окно:
+`lead-funnel-gui.vbs` открывает простое окно без консоли. `lead-funnel-gui.cmd` оставлен как запасной терминальный запуск.
 
 - `Запустить Kwork Chrome` — открыть Kwork в отдельном Chrome-профиле с DevTools-портом.
 - `Сканировать сейчас` — один проход по свежим заказам.
