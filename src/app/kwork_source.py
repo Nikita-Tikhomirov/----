@@ -319,7 +319,7 @@ def _chrome_path() -> str:
 
 
 def _chrome_user_data_dir() -> str:
-    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data")
+    return os.path.join(os.environ.get("LOCALAPPDATA", ""), "KworkLeadChromeUserData")
 
 
 def _chrome_last_profile(user_data: str) -> str:

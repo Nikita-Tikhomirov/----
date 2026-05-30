@@ -74,3 +74,27 @@ def test_parse_kwork_project_html_extracts_attachments():
 
     assert "Техническое задание.pdf" in result.attachments[0]
     assert "screen.png" in result.attachments[1]
+
+
+def test_parse_kwork_project_html_extracts_actionable_facts():
+    html = """
+    <html>
+      <head><title>Верстка лендинга - Kwork</title></head>
+      <body>
+        <h1>Верстка лендинга</h1>
+        <div>Бюджет: до 15 000 ₽</div>
+        <div>Осталось: 2 д. 17 ч.</div>
+        <div>Предложений:&nbsp;4</div>
+        <div>Покупатель: nikita_dev</div>
+        <div>Наймов: 73%</div>
+      </body>
+    </html>
+    """
+
+    result = parse_kwork_project_html("https://kwork.ru/projects/1", html)
+
+    assert "Бюджет: до 15 000 ₽" in result.facts
+    assert "Осталось: 2 д. 17 ч." in result.facts
+    assert "Предложений: 4" in result.facts
+    assert "Покупатель: nikita_dev" in result.facts
+    assert "Наймов: 73%" in result.facts

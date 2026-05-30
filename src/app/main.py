@@ -84,8 +84,10 @@ def scan_once(
         project_text = post.text
         project_summary_suffix = ""
         attachment_context = ""
+        kwork_facts: tuple[str, ...] = ()
         if kwork_project_client is not None:
             project_info = kwork_project_client.inspect(evaluation.contact)
+            kwork_facts = tuple(getattr(project_info, "facts", ()))
             if not project_info.has_response_count and post.channel != "kwork-web":
                 logger.info(
                     "Rejected post %s/%s: cannot verify Kwork responses (%s)",
@@ -113,13 +115,14 @@ def scan_once(
                     cdp_url=kwork_cdp_url,
                     browser_profile_dir=kwork_browser_profile_dir,
                 )
-            if project_info.title or project_info.description or project_info.page_text or project_info.attachments:
+            if project_info.title or project_info.description or project_info.page_text or project_info.attachments or kwork_facts:
                 project_text = "\n\n".join(
                     part
                     for part in [
                         post.text,
                         f"Kwork title: {project_info.title}" if project_info.title else "",
                         f"Kwork description: {project_info.description}" if project_info.description else "",
+                        "Kwork facts:\n" + "\n".join(kwork_facts) if kwork_facts else "",
                         f"Kwork page text: {project_info.page_text}" if project_info.page_text else "",
                         "Kwork attachments:\n" + "\n".join(project_info.attachments) if project_info.attachments else "",
                         f"Kwork attachment contents:\n{attachment_context}" if attachment_context else "",
@@ -142,6 +145,8 @@ def scan_once(
             continue
 
         summary = f"{_summary_from_judge(judge_result)}{project_summary_suffix}"
+        if kwork_facts:
+            summary = "\n\n".join([summary, _format_kwork_facts(kwork_facts)])
         if attachment_context:
             summary = "\n\n".join([summary, _shorten_attachment_report(attachment_context)])
 
@@ -180,6 +185,13 @@ def _summary_from_judge(result: LeadJudgeResult) -> str:
 
 def _shorten_attachment_report(report: str, limit: int = 1800) -> str:
     report = report.strip()
+    if len(report) <= limit:
+        return report
+    return report[: limit - 1].rstrip() + "…"
+
+
+def _format_kwork_facts(facts: tuple[str, ...], limit: int = 1200) -> str:
+    report = "KWORK-ДАННЫЕ:\n" + "\n".join(f"- {fact}" for fact in facts)
     if len(report) <= limit:
         return report
     return report[: limit - 1].rstrip() + "…"

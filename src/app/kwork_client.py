@@ -35,6 +35,7 @@ class KworkProjectInfo:
     description: str
     page_text: str = ""
     attachments: tuple[str, ...] = ()
+    facts: tuple[str, ...] = ()
     reason: str = ""
 
     @property
@@ -83,6 +84,7 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
     title = _clean_title(_first_group(TITLE_PATTERN, html_text, "title"))
     description = _clean_text(_first_group(DESCRIPTION_PATTERN, html_text, "description"))
     attachments = tuple(_extract_attachments(url, html_text))
+    facts = tuple(_extract_facts(visible_text, response_count=count_match.group(1) if count_match else ""))
     page_text = _shorten(visible_text, 4000)
 
     if not count_match:
@@ -93,6 +95,7 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
             description=description,
             page_text=page_text,
             attachments=attachments,
+            facts=facts,
             reason="на странице не найдено поле 'Предложений'",
         )
 
@@ -103,6 +106,7 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
         description=description,
         page_text=page_text,
         attachments=attachments,
+        facts=facts,
     )
 
 
@@ -204,6 +208,34 @@ def _extract_attachments(base_url: str, html_text: str) -> list[str]:
             seen.add(item)
             attachments.append(item)
     return attachments[:10]
+
+
+def _extract_facts(visible_text: str, response_count: str = "") -> list[str]:
+    facts: list[str] = []
+    patterns = [
+        ("Бюджет", r"\b(?:Бюджет|Цена)\s*:\s*[^.]{0,80}?(?:₽|руб\.?|р\b)"),
+        ("Осталось", r"\bОсталось\s*:\s*\d+\s*д\.?(?:\s*\d+\s*ч\.?)?"),
+        ("Покупатель", r"\b(?:Покупатель|Заказчик)\s*:\s*[A-Za-zА-Яа-я0-9_.@-]{2,60}"),
+        ("Наймов", r"\b(?:Наймов|Нанято|Процент найма)\s*:\s*\d{1,3}%"),
+    ]
+    for _, pattern in patterns:
+        match = re.search(pattern, visible_text, re.IGNORECASE)
+        if match:
+            facts.append(_clean_text(match.group(0)))
+    if response_count:
+        facts.append(f"Предложений: {int(response_count)}")
+    return _dedupe(facts)[:8]
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
 
 
 def _shorten(text: str, limit: int) -> str:

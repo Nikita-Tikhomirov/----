@@ -70,7 +70,7 @@ def parse_judge_response(raw: str) -> LeadJudgeResult:
     summary = _clean_text(str(payload.get("summary", ""))) or "Kwork-заказ"
     reasons = _list_of_strings(payload.get("reasons"))[:5]
     risks = _list_of_strings(payload.get("risks"))[:5]
-    questions = _list_of_strings(payload.get("questions"))[:2]
+    questions = _list_of_strings(payload.get("questions"))[:1]
     draft_reply = _clean_text(str(payload.get("draft_reply", "")))
 
     accepted = decision in {"accept", "maybe"} and score >= 60 and estimated_days <= 7
@@ -185,10 +185,14 @@ def _build_prompt(text: str) -> str:
         "- явно больше недели;\n"
         "- слишком низкая цена при большом объёме.\n\n"
         "Составь живой отклик как нормальный человек. Не пиши как бот. "
-        "Если в заказе есть блок Kwork attachments или Kwork attachment contents, учитывай их как часть ТЗ. "
+        "Опирайся на Kwork facts: бюджет, срок, число предложений, вложения и текст ТЗ. "
+        "Если в заказе есть блок Kwork attachments или Kwork attachment contents / ФАЙЛЫ/ТЗ, учитывай их как часть ТЗ. "
         "Если содержимое файла не удалось прочитать или это картинка без OCR, не выдумывай детали, а укажи риск. "
-        "Задай максимум один уточняющий вопрос и только если без него нельзя нормально оценить старт. "
-        "В отклике укажи срок и цену/вилку. Верни строго JSON без markdown:\n"
+        "Не проси уточнить детали в целом и не пиши пустые фразы вроде «обсудим детали»; "
+        "задай максимум один конкретный вопрос только если без него нельзя нормально начать. "
+        "В draft_reply дай конкретный следующий шаг, срок и цену/вилку, без канцелярита и без обещаний невозможного. "
+        "Отклик должен звучать как короткое сообщение реального исполнителя: 4-7 предложений, по делу. "
+        "Верни строго JSON без markdown:\n"
         "{\n"
         '  "decision": "accept|maybe|reject",\n'
         '  "score": 0-100,\n'

@@ -180,6 +180,14 @@ def test_find_or_create_page_reuses_list_tab_for_list(monkeypatch):
     assert page["webSocketDebuggerUrl"] == "ws://list"
 
 
+def test_default_chrome_user_data_dir_uses_kwork_bot_profile(monkeypatch, tmp_path):
+    import app.kwork_source as source
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    assert source._chrome_user_data_dir() == str(tmp_path / "KworkLeadChromeUserData")
+
+
 def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch):
     from app.main import scan_once
     from app.ai_lead_judge import LeadJudgeResult

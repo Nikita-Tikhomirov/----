@@ -26,7 +26,7 @@ def chrome_cookie_header(domain_name: str = ".kwork.ru") -> str:
         logger.info("Direct Chrome cookie read failed for %s: %s", domain_name, exc)
         jar = _read_copied_chrome_cookie_jar(domain_name)
         if jar is None:
-            logger.warning("Failed to read Chrome cookies for %s: %s", domain_name, exc)
+            logger.info("Failed to read Chrome cookies for %s: %s", domain_name, exc)
             return ""
     pairs = sorted(f"{cookie.name}={cookie.value}" for cookie in jar if cookie.name and cookie.value)
     return "; ".join(pairs)

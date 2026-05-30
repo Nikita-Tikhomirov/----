@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from app.ai_lead_judge import judge_lead, parse_judge_response
+from app.ai_lead_judge import _build_prompt, judge_lead, parse_judge_response
 
 
 def test_parse_judge_response_accepts_medium_week_task():
@@ -85,3 +85,15 @@ def test_judge_lead_fallback_accepts_simple_site_task_without_questions():
     assert result.estimated_days <= 2
     assert result.price_rub >= 5000
     assert len(result.questions) <= 1
+
+
+def test_build_prompt_demands_specific_human_kwork_reply():
+    prompt = _build_prompt(
+        "Kwork facts:\nБюджет: до 15000 руб.\nОсталось: 2 д.\n"
+        "Kwork attachment contents:\nФАЙЛЫ/ТЗ: форма заявки и адаптив"
+    )
+
+    assert "не проси уточнить детали в целом" in prompt.lower()
+    assert "Kwork facts" in prompt
+    assert "ФАЙЛЫ/ТЗ" in prompt
+    assert "конкретный следующий шаг" in prompt

@@ -54,11 +54,12 @@ class FakeEmailClient:
 
 
 class FakeKworkProjectClient:
-    def __init__(self, response_count=3, reason="", page_text="", attachments=()):
+    def __init__(self, response_count=3, reason="", page_text="", attachments=(), facts=()):
         self.response_count = response_count
         self.reason = reason
         self.page_text = page_text
         self.attachments = attachments
+        self.facts = facts
         self.inspected = []
 
     def inspect(self, contact):
@@ -70,6 +71,7 @@ class FakeKworkProjectClient:
             description="Детали задачи со страницы Kwork",
             page_text=self.page_text,
             attachments=tuple(self.attachments),
+            facts=tuple(self.facts),
             reason=self.reason,
         )
 
@@ -306,6 +308,50 @@ def test_scan_once_includes_attachment_report_in_email_summary(tmp_path):
     assert "ФАЙЛЫ/ТЗ" in lead.summary
     assert "архив открыт" in lead.summary
     assert "внутри brief.txt" in lead.summary
+
+
+def test_scan_once_includes_kwork_facts_in_email_summary(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+
+    def fake_judge(text, api_key="", model="deepseek-chat"):
+        assert "Kwork facts:" in text
+        assert "Бюджет: до 15 000 ₽" in text
+        assert "Осталось: 2 д. 17 ч." in text
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=89,
+            complexity="simple",
+            estimated_days=2,
+            price_rub=15000,
+            summary="Сверстать лендинг",
+            reasons=["ясный бюджет и срок"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте! Сделаю лендинг за 2 дня, бюджет 15000 руб.",
+        )
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=FakeKworkProjectClient(
+            response_count=4,
+            facts=(
+                "Бюджет: до 15 000 ₽",
+                "Осталось: 2 д. 17 ч.",
+                "Предложений: 4",
+            ),
+        ),
+        lead_judge=fake_judge,
+    )
+
+    lead = storage.list_leads()[0]
+    assert "KWORK-ДАННЫЕ:" in lead.summary
+    assert "Бюджет: до 15 000 ₽" in lead.summary
+    assert "Осталось: 2 д. 17 ч." in lead.summary
 
 
 def test_scan_once_skips_ai_rejected_lead(tmp_path):
