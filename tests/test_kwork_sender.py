@@ -55,9 +55,13 @@ def test_reply_form_opener_supports_kwork_span_buttons():
     from app.kwork_sender import _FILL_AND_SUBMIT_SCRIPT, _HAS_REPLY_FIELD_SCRIPT, _OPEN_REPLY_FORM_SCRIPT
 
     assert ".kw-button" in _OPEN_REPLY_FORM_SCRIPT
+    assert ".trumbowyg-editor" in _OPEN_REPLY_FORM_SCRIPT
     assert ".trumbowyg-editor" in _HAS_REPLY_FIELD_SCRIPT
     assert ".trumbowyg-editor" in _FILL_AND_SUBMIT_SCRIPT
     assert "#offer-custom-price" in _FILL_AND_SUBMIT_SCRIPT
+    assert "Введите название заказа" in _FILL_AND_SUBMIT_SCRIPT
+    assert 'textarea[name="name"]' in _FILL_AND_SUBMIT_SCRIPT
+    assert "payload.title" in _FILL_AND_SUBMIT_SCRIPT
     assert "input[type=tel]" in _FILL_AND_SUBMIT_SCRIPT
     assert "input[type=search]" in _FILL_AND_SUBMIT_SCRIPT
 

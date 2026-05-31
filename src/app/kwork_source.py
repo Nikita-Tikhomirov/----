@@ -365,7 +365,11 @@ def _is_kwork_list_tab(url: str) -> bool:
 
 def _is_kwork_project_tab(url: str) -> bool:
     parsed = urlsplit(url)
-    return parsed.netloc.lower().endswith("kwork.ru") and re.match(r"^/projects/\d+(?:/view)?/?$", parsed.path) is not None
+    if not parsed.netloc.lower().endswith("kwork.ru"):
+        return False
+    if re.match(r"^/projects/\d+(?:/view)?/?$", parsed.path):
+        return True
+    return parsed.path == "/new_offer" and any(key == "project" and value.isdigit() for key, value in parse_qsl(parsed.query))
 
 
 def _matches_tab_kind(url: str, tab_kind: str) -> bool:

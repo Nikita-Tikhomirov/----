@@ -93,6 +93,12 @@ def test_kwork_fresh_location_accepts_view_redirect_and_cache_strip():
     )
 
 
+def test_kwork_project_tab_accepts_new_offer_page():
+    import app.kwork_source as source
+
+    assert source._is_kwork_project_tab("https://kwork.ru/new_offer?project=3187247")
+
+
 def test_find_or_create_page_does_not_reuse_list_tab_for_project(monkeypatch):
     import websocket
     import app.kwork_source as source

@@ -72,7 +72,8 @@ class KworkReplySender:
                 if login_message:
                     raise RuntimeError(login_message)
             terms = _extract_reply_terms(clean_text)
-            submit_result = self._fill_and_submit(ws, clean_text, terms)
+            project_title = self._project_title(ws)
+            submit_result = self._fill_and_submit(ws, clean_text, terms, project_title)
             if not submit_result.get("submitted"):
                 reason = submit_result.get("reason") or "Kwork submit button was not found"
                 raise RuntimeError(str(reason))
@@ -146,12 +147,30 @@ class KworkReplySender:
                 return
             time.sleep(0.5)
 
-    def _fill_and_submit(self, ws, text: str, terms: ReplyTerms) -> dict:
+    def _project_title(self, ws) -> str:
+        from app import kwork_source
+
+        title = str(
+            kwork_source._evaluate(
+                ws,
+                """
+                (() => {
+                  const cardTitle = document.querySelector('.want-card h1, h1, .want-card__title')?.innerText || '';
+                  return (cardTitle || document.title || '').replace(/\\s+-\\s+Kwork\\s*$/i, '').trim();
+                })()
+                """,
+            )
+            or ""
+        )
+        return title[:70]
+
+    def _fill_and_submit(self, ws, text: str, terms: ReplyTerms, title: str = "") -> dict:
         from app import kwork_source
 
         payload = json.dumps(
             {
                 "text": text,
+                "title": title,
                 "price": "" if terms.price_rub is None else str(terms.price_rub),
                 "days": "" if terms.days is None else str(terms.days),
             },
@@ -218,6 +237,9 @@ _OPEN_REPLY_FORM_SCRIPT = r"""
 (() => {
   const norm = value => (value || '').replace(/\s+/g, ' ').trim();
   const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  if (document.querySelector('.trumbowyg-editor, textarea[name="description"], #offer-custom-price')) {
+    return true;
+  }
   const cookie = Array.from(document.querySelectorAll('button,a')).find(el => /^(окей|ok|понятно)$/i.test(norm(el.innerText || el.value)));
   if (cookie && visible(cookie)) cookie.click();
   const opener = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit],span.kw-button,[role=button],.kw-button')).find(el => {
@@ -323,6 +345,15 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
   }
   const priceField = document.querySelector('#offer-custom-price') || fields.find(el => /цен|стоим|бюдж|price|cost|amount|budget|sum/.test(meta(el)));
   if (priceField && payload.price) setValue(priceField, payload.price);
+  const titleTextarea = document.querySelector('textarea[name="name"][placeholder="Введите название заказа"], textarea[name="name"]');
+  const titleEditor = titleTextarea?.closest('.trumbowyg-box')?.querySelector('.trumbowyg-editor')
+    || titleTextarea?.parentElement?.querySelector('.trumbowyg-editor');
+  const titleField = titleEditor || titleTextarea || Array.from(document.querySelectorAll('input[type=text],input:not([type]),textarea')).find(el => {
+    const text = meta(el);
+    return visible(el) && (/название заказа|order title|project title/.test(text) || el.placeholder === 'Введите название заказа');
+  });
+  if (titleField && payload.title) setValue(titleField, payload.title.slice(0, 70));
+  if (titleTextarea && payload.title) setValue(titleTextarea, payload.title.slice(0, 70));
   const daysField = fields.find(el => /срок|дн|day|days|duration|deadline/.test(meta(el))) || document.querySelector('input[placeholder="Срок выполнения"], input.vs__search');
   if (daysField && payload.days) setValue(daysField, payload.days);
   const form = messageField.closest('form') || document;
@@ -330,6 +361,11 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
   const submit = buttons.find(el => /отправить|предложить|оставить предложение|разместить|подать/i.test(norm(el.innerText || el.value || el.getAttribute('aria-label'))));
   if (!submit) return JSON.stringify({submitted: false, reason: 'Kwork submit button was not found'});
   submit.click();
-  return JSON.stringify({submitted: true, priceFilled: Boolean(priceField && payload.price), daysFilled: Boolean(daysField && payload.days)});
+  return JSON.stringify({
+    submitted: true,
+    priceFilled: Boolean(priceField && payload.price),
+    titleFilled: Boolean(titleField && payload.title),
+    daysFilled: Boolean(daysField && payload.days)
+  });
 }
 """
