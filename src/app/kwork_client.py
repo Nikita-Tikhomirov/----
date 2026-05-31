@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import ssl
+import time
 import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
@@ -147,8 +148,8 @@ def _fetch_rendered_project_html(
     ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=timeout_seconds)
     try:
         _refresh_page(ws, url, timeout_seconds)
-        deadline_text = _evaluate(ws, "document.body && document.body.innerText")
-        if not deadline_text:
+        page_text = _wait_for_rendered_project_text(ws, timeout_seconds)
+        if not page_text:
             return ""
         payload = _evaluate(
             ws,
@@ -173,6 +174,18 @@ def _fetch_rendered_project_html(
         return f"{data.get('html', '')}\n<div data-rendered-text>{html.escape(data.get('text', ''))}</div>\n{links_html}"
     finally:
         ws.close()
+
+
+def _wait_for_rendered_project_text(ws, timeout_seconds: float) -> str:
+    from app.kwork_source import _evaluate
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        text = str(_evaluate(ws, "document.body && document.body.innerText") or "")
+        if len(text.strip()) > 100 or "Предложений" in text:
+            return text
+        time.sleep(0.5)
+    return ""
 
 
 def _first_group(pattern: re.Pattern[str], text: str, group: str) -> str:

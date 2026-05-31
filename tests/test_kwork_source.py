@@ -180,6 +180,39 @@ def test_find_or_create_page_reuses_list_tab_for_list(monkeypatch):
     assert page["webSocketDebuggerUrl"] == "ws://list"
 
 
+def test_fetch_rendered_project_html_waits_for_body_text(monkeypatch):
+    import websocket
+    import app.kwork_client as client
+
+    calls = []
+    text_reads = iter(["", "Создание сайта\nПредложений: 3"])
+
+    class FakeWebSocket:
+        def close(self):
+            calls.append("close")
+
+    def fake_evaluate(ws, expression):
+        if expression == "document.body && document.body.innerText":
+            return next(text_reads)
+        if "JSON.stringify" in expression:
+            return '{"html":"<html></html>","text":"Создание сайта\\nПредложений: 3","links":[]}'
+        return ""
+
+    monkeypatch.setattr(client, "_fetch_project_html", lambda *args, **kwargs: "")
+    monkeypatch.setattr("app.kwork_source._ensure_chrome_cdp", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "app.kwork_source._find_or_create_page",
+        lambda *args, **kwargs: {"webSocketDebuggerUrl": "ws://project"},
+    )
+    monkeypatch.setattr("app.kwork_source._refresh_page", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.kwork_source._evaluate", fake_evaluate)
+    monkeypatch.setattr(websocket, "create_connection", lambda url, timeout=20: FakeWebSocket())
+
+    info = client.KworkProjectClient(use_browser=True).inspect("https://kwork.ru/projects/123/view")
+
+    assert info.response_count == 3
+
+
 def test_default_chrome_user_data_dir_uses_kwork_bot_profile(monkeypatch, tmp_path):
     import app.kwork_source as source
 
@@ -251,8 +284,11 @@ def test_kwork_web_source_can_send_when_replies_enabled(monkeypatch):
     sent = []
 
     class FakeSender:
+        last_kwargs = {}
+
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            FakeSender.last_kwargs = kwargs
 
         def send_message(self, contact, text):
             sent.append((contact, text, self.kwargs["cdp_url"]))
@@ -262,13 +298,15 @@ def test_kwork_web_source_can_send_when_replies_enabled(monkeypatch):
     client = source.KworkWebSource(
         enable_replies=True,
         cdp_url="http://127.0.0.1:9222",
+        login_email="bot@example.com",
+        login_password="secret",
     )
 
     assert client.can_send_replies is True
     assert client.send_message("https://kwork.ru/projects/123/view", "Здравствуйте!") == "kwork-project-123"
-    assert sent == [
-        ("https://kwork.ru/projects/123/view", "Здравствуйте!", "http://127.0.0.1:9222")
-    ]
+    assert sent == [("https://kwork.ru/projects/123/view", "Здравствуйте!", "http://127.0.0.1:9222")]
+    assert FakeSender.last_kwargs["login_email"] == "bot@example.com"
+    assert FakeSender.last_kwargs["login_password"] == "secret"
 
 
 def test_kwork_web_source_stays_read_only_when_replies_disabled():

@@ -298,6 +298,8 @@ def build_runtime(config: AppConfig):
             cdp_url=config.kwork_cdp_url,
             browser_profile_dir=config.kwork_browser_profile_dir,
             enable_replies=config.kwork_auto_reply,
+            login_email=config.kwork_login_email,
+            login_password=config.kwork_login_password,
         )
     elif config.telegram_api_id > 0 and config.telegram_api_hash != "fill_later":
         manual_reply_only = False

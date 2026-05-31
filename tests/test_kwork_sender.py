@@ -2,6 +2,7 @@ import pytest
 
 from app.kwork_sender import (
     KworkReplySender,
+    _AUTO_LOGIN_SCRIPT,
     _extract_reply_terms,
     _login_required_message,
 )
@@ -35,6 +36,30 @@ def test_login_required_message_allows_page_with_reply_field():
     page_text = "Вход\nРегистрация\nПредложить услугу"
 
     assert _login_required_message(page_text, has_reply_field=True) == ""
+
+
+def test_kwork_reply_sender_keeps_autologin_credentials_in_memory_only():
+    sender = KworkReplySender(login_email="me@example.com", login_password="secret")
+
+    assert sender.login_email == "me@example.com"
+    assert sender.login_password == "secret"
+
+
+def test_auto_login_script_targets_email_password_and_submit_controls():
+    assert "input[type=email]" in _AUTO_LOGIN_SCRIPT
+    assert "input[type=password]" in _AUTO_LOGIN_SCRIPT
+    assert "submit.click()" in _AUTO_LOGIN_SCRIPT
+
+
+def test_reply_form_opener_supports_kwork_span_buttons():
+    from app.kwork_sender import _FILL_AND_SUBMIT_SCRIPT, _HAS_REPLY_FIELD_SCRIPT, _OPEN_REPLY_FORM_SCRIPT
+
+    assert ".kw-button" in _OPEN_REPLY_FORM_SCRIPT
+    assert ".trumbowyg-editor" in _HAS_REPLY_FIELD_SCRIPT
+    assert ".trumbowyg-editor" in _FILL_AND_SUBMIT_SCRIPT
+    assert "#offer-custom-price" in _FILL_AND_SUBMIT_SCRIPT
+    assert "input[type=tel]" in _FILL_AND_SUBMIT_SCRIPT
+    assert "input[type=search]" in _FILL_AND_SUBMIT_SCRIPT
 
 
 def test_kwork_reply_sender_rejects_non_kwork_project_url():

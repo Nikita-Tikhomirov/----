@@ -33,10 +33,14 @@ class KworkReplySender:
         timeout_seconds: float = 30.0,
         cdp_url: str = "http://127.0.0.1:9222",
         browser_profile_dir: str = "",
+        login_email: str = "",
+        login_password: str = "",
     ):
         self.timeout_seconds = timeout_seconds
         self.cdp_url = cdp_url.rstrip("/")
         self.browser_profile_dir = browser_profile_dir
+        self.login_email = login_email
+        self.login_password = login_password
 
     def send_message(self, contact: str, text: str) -> str:
         if not _is_kwork_project_url(contact):
@@ -59,7 +63,14 @@ class KworkReplySender:
             has_field = bool(kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT))
             login_message = _login_required_message(page_text, has_reply_field=has_field)
             if login_message:
-                raise RuntimeError(login_message)
+                self._auto_login_or_raise(ws, contact, login_message)
+                self._open_reply_form(ws)
+                self._wait_for_reply_field(ws)
+                page_text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
+                has_field = bool(kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT))
+                login_message = _login_required_message(page_text, has_reply_field=has_field)
+                if login_message:
+                    raise RuntimeError(login_message)
             terms = _extract_reply_terms(clean_text)
             submit_result = self._fill_and_submit(ws, clean_text, terms)
             if not submit_result.get("submitted"):
@@ -86,6 +97,42 @@ class KworkReplySender:
         from app import kwork_source
 
         kwork_source._evaluate(ws, _OPEN_REPLY_FORM_SCRIPT)
+
+    def _auto_login_or_raise(self, ws, contact: str, login_message: str) -> None:
+        if not self.login_email or not self.login_password:
+            raise RuntimeError(login_message)
+
+        from app import kwork_source
+
+        payload = json.dumps(
+            {
+                "email": self.login_email,
+                "password": self.login_password,
+            },
+            ensure_ascii=False,
+        )
+        result = kwork_source._evaluate(ws, f"({_AUTO_LOGIN_SCRIPT})({payload})")
+        data = json.loads(result) if isinstance(result, str) else {"started": False, "reason": "no result"}
+        if not data.get("started"):
+            raise RuntimeError(str(data.get("reason") or login_message))
+        self._wait_for_login(ws)
+        kwork_source._refresh_page(ws, contact, self.timeout_seconds)
+        self._wait_for_page_text(ws)
+
+    def _wait_for_login(self, ws) -> None:
+        from app import kwork_source
+
+        deadline = time.monotonic() + self.timeout_seconds
+        while time.monotonic() < deadline:
+            text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
+            has_profile = bool(
+                re.search(r"\b(?:Кворки|Заказы|Чат|Мои отклики|Коннекты|Профиль)\b", text, re.IGNORECASE)
+            )
+            logged_out = "вход" in text.lower() and "регистрация" in text.lower()
+            if has_profile and not logged_out:
+                return
+            time.sleep(0.5)
+        raise RuntimeError("Kwork auto-login did not finish; captcha or manual confirmation may be required")
 
     def _wait_for_reply_field(self, ws) -> None:
         from app import kwork_source
@@ -173,7 +220,7 @@ _OPEN_REPLY_FORM_SCRIPT = r"""
   const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
   const cookie = Array.from(document.querySelectorAll('button,a')).find(el => /^(окей|ok|понятно)$/i.test(norm(el.innerText || el.value)));
   if (cookie && visible(cookie)) cookie.click();
-  const opener = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit]')).find(el => {
+  const opener = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit],span.kw-button,[role=button],.kw-button')).find(el => {
     const text = norm(el.innerText || el.value || el.getAttribute('aria-label'));
     return visible(el) && /(предложить услугу|откликнуться|оставить предложение|предложить)$/i.test(text);
   });
@@ -185,8 +232,46 @@ _OPEN_REPLY_FORM_SCRIPT = r"""
 _HAS_REPLY_FIELD_SCRIPT = r"""
 (() => {
   const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
-  return Array.from(document.querySelectorAll('textarea,[contenteditable="true"],input:not([type]),input[type=text]')).some(visible);
+  return Array.from(document.querySelectorAll('textarea,.trumbowyg-editor,[contenteditable="true"],input:not([type]),input[type=text],input[type=tel],input[type=search]')).some(visible);
 })()
+"""
+
+_AUTO_LOGIN_SCRIPT = r"""
+(payload) => {
+  const norm = value => (value || '').replace(/\s+/g, ' ').trim();
+  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const setValue = (el, value) => {
+    if (!el) return false;
+    el.focus();
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (setter) setter.call(el, value); else el.value = value;
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+    el.dispatchEvent(new Event('change', {bubbles: true}));
+    return true;
+  };
+  const loginOpener = Array.from(document.querySelectorAll('a,button,input[type=button]')).find(el => {
+    const text = norm(el.innerText || el.value || el.getAttribute('aria-label'));
+    return visible(el) && /^вход$/i.test(text);
+  });
+  if (loginOpener) loginOpener.click();
+  const emailField = Array.from(document.querySelectorAll('input[type=email],input[name*=email i],input[name*=login i],input[type=text]'))
+    .find(el => visible(el) && !el.disabled);
+  const passwordField = Array.from(document.querySelectorAll('input[type=password]'))
+    .find(el => visible(el) && !el.disabled);
+  if (!emailField || !passwordField) {
+    return JSON.stringify({started: false, reason: 'Kwork login form was not found'});
+  }
+  setValue(emailField, payload.email);
+  setValue(passwordField, payload.password);
+  const form = passwordField.closest('form') || document;
+  const submit = Array.from(form.querySelectorAll('button,input[type=submit],input[type=button]')).find(el => {
+    const text = norm(el.innerText || el.value || el.getAttribute('aria-label'));
+    return visible(el) && /(войти|вход|login|sign in)/i.test(text);
+  }) || form.querySelector('button,input[type=submit]');
+  if (!submit) return JSON.stringify({started: false, reason: 'Kwork login submit button was not found'});
+  submit.click();
+  return JSON.stringify({started: true});
+}
 """
 
 _FILL_AND_SUBMIT_SCRIPT = r"""
@@ -198,6 +283,14 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
     el.focus();
     if (el.isContentEditable) {
       el.innerText = value;
+      el.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
+      el.dispatchEvent(new Event('change', {bubbles: true}));
+      return true;
+    }
+    if (el.matches && el.matches('.trumbowyg-editor')) {
+      el.classList.remove('force-placeholder', 'is-placeholder-mobile');
+      const clean = value.replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
+      el.innerHTML = '<p>' + clean.replace(/\n/g, '<br>') + '</p>';
       el.dispatchEvent(new InputEvent('input', {bubbles: true, inputType: 'insertText', data: value}));
       el.dispatchEvent(new Event('change', {bubbles: true}));
       return true;
@@ -218,14 +311,19 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
     el.closest('label')?.innerText,
     el.parentElement?.innerText?.slice(0, 160)
   ].filter(Boolean).join(' ')).toLowerCase();
-  const fields = Array.from(document.querySelectorAll('textarea,[contenteditable="true"],input:not([type]),input[type=text],input[type=number]')).filter(visible);
+  const fields = Array.from(document.querySelectorAll('textarea,.trumbowyg-editor,[contenteditable="true"],input:not([type]),input[type=text],input[type=number],input[type=tel],input[type=search]')).filter(visible);
   const messageField = fields.find(el => /сообщ|опис|коммент|текст|message|comment|description|cover|letter/.test(meta(el)))
+    || fields.find(el => el.matches && el.matches('.trumbowyg-editor'))
     || fields.find(el => el.tagName === 'TEXTAREA' || el.isContentEditable);
   if (!messageField) return JSON.stringify({submitted: false, reason: 'Kwork reply field was not found'});
   setValue(messageField, payload.text);
-  const priceField = fields.find(el => /цен|стоим|бюдж|price|cost|amount|budget|sum/.test(meta(el)));
+  const linkedTextarea = document.querySelector('textarea[name="description"]');
+  if (messageField.matches && messageField.matches('.trumbowyg-editor')) {
+    if (linkedTextarea) setValue(linkedTextarea, payload.text);
+  }
+  const priceField = document.querySelector('#offer-custom-price') || fields.find(el => /цен|стоим|бюдж|price|cost|amount|budget|sum/.test(meta(el)));
   if (priceField && payload.price) setValue(priceField, payload.price);
-  const daysField = fields.find(el => /срок|дн|day|days|duration|deadline/.test(meta(el)));
+  const daysField = fields.find(el => /срок|дн|day|days|duration|deadline/.test(meta(el))) || document.querySelector('input[placeholder="Срок выполнения"], input.vs__search');
   if (daysField && payload.days) setValue(daysField, payload.days);
   const form = messageField.closest('form') || document;
   const buttons = Array.from(form.querySelectorAll('button,input[type=submit],input[type=button],a')).filter(visible);

@@ -88,6 +88,7 @@ $env:PYTHONPATH="src"
    - `KWORK_USE_BROWSER=1` — читать отрендеренную страницу через Chrome DevTools, чтобы видеть `Предложений: N`.
    - `KWORK_CDP_URL=http://127.0.0.1:9222`
    - `KWORK_AUTO_REPLY=1` — после письма с `OK <lead_id>` отправлять отклик через Kwork Chrome.
+   - `KWORK_LOGIN_EMAIL` и `KWORK_LOGIN_PASSWORD` — необязательный fallback: если сессия Kwork в bot Chrome слетела, скрипт попробует войти сам.
 8. Не коммить `.env`: файл уже исключен через `.gitignore`.
 
 ## Безопасный поток

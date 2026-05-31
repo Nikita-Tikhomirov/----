@@ -49,6 +49,8 @@ class KworkWebSource:
         cdp_url: str = "http://127.0.0.1:9222",
         browser_profile_dir: str = "",
         enable_replies: bool = False,
+        login_email: str = "",
+        login_password: str = "",
     ):
         self.projects_url = projects_url
         self.max_posts = max_posts
@@ -59,6 +61,8 @@ class KworkWebSource:
         self.cdp_url = cdp_url.rstrip("/")
         self.browser_profile_dir = browser_profile_dir
         self.enable_replies = enable_replies
+        self.login_email = login_email
+        self.login_password = login_password
 
     @property
     def can_send_replies(self) -> bool:
@@ -96,6 +100,8 @@ class KworkWebSource:
             timeout_seconds=self.timeout_seconds,
             cdp_url=self.cdp_url,
             browser_profile_dir=self.browser_profile_dir,
+            login_email=self.login_email,
+            login_password=self.login_password,
         )
         return sender.send_message(contact, text)
 
