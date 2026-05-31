@@ -32,7 +32,7 @@ class LeadFunnelGui:
         self.status = Label(root, text="Готово", anchor="w")
         self.status.pack(fill="x", padx=10, pady=(10, 4))
 
-        self.start_browser_button = Button(root, text="1. Запустить Kwork Chrome", command=self.start_kwork_browser)
+        self.start_browser_button = Button(root, text="1. Открыть Kwork Chrome", command=self.start_kwork_browser)
         self.start_browser_button.pack(fill="x", padx=10, pady=3)
 
         self.scan_button = Button(root, text="2. Сканировать сейчас", command=self.scan_once)
@@ -52,7 +52,7 @@ class LeadFunnelGui:
 
         self.log = scrolledtext.ScrolledText(root, wrap="word", height=24)
         self.log.pack(fill=BOTH, expand=True, padx=10, pady=(8, 10))
-        self.write_log("Запусти Kwork Chrome, затем сканирование или мониторинг.\n")
+        self.write_log("Открой Kwork Chrome, войди в Kwork один раз, затем запускай сканирование или мониторинг.\n")
 
     def start_kwork_browser(self) -> None:
         script = ROOT_DIR / "start-kwork-browser.cmd"
