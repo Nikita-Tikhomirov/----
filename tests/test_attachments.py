@@ -2,6 +2,7 @@ import io
 import zipfile
 
 from app.attachments import build_attachment_context, parse_attachment
+from app.attachments import _cookie_header_from_cdp_cookies
 
 
 def test_parse_attachment_splits_label_and_url():
@@ -9,6 +10,28 @@ def test_parse_attachment_splits_label_and_url():
 
     assert parsed.label == "ТЗ.pdf"
     assert parsed.url == "https://kwork.ru/files/tz.pdf"
+
+
+def test_parse_attachment_strips_html_label():
+    parsed = parse_attachment(
+        '<i class="files-list__icon"></i> <span class="ml10 nowrap">профтест (28).docx</span>: '
+        "https://kwork.ru/files/tz.docx"
+    )
+
+    assert parsed.label == "профтест (28).docx"
+
+
+def test_cookie_header_from_cdp_cookies_keeps_matching_domains():
+    header = _cookie_header_from_cdp_cookies(
+        [
+            {"name": "sid", "value": "abc", "domain": ".kwork.ru"},
+            {"name": "theme", "value": "dark", "domain": "kwork.ru"},
+            {"name": "foreign", "value": "skip", "domain": "example.com"},
+        ],
+        "https://kwork.ru/files/uploaded/tz.docx",
+    )
+
+    assert header == "sid=abc; theme=dark"
 
 
 def test_build_attachment_context_reads_text_attachment(monkeypatch):
@@ -54,6 +77,49 @@ def test_build_attachment_context_can_download_with_browser_session(monkeypatch)
     assert "private brief from logged account" in context
 
 
+def test_build_attachment_context_retries_docx_when_direct_download_is_html(monkeypatch):
+    direct_calls = []
+    browser_calls = []
+    docx_bytes = _docx_bytes("Нужно сверстать страницу профтеста и форму заявки")
+
+    def fake_direct(url, cookie="", max_bytes=2_000_000):
+        direct_calls.append(url)
+        return b"<!doctype html><html><body>login required</body></html>"
+
+    def fake_browser(url, cdp_url, browser_profile_dir="", max_bytes=2_000_000):
+        browser_calls.append(url)
+        return docx_bytes
+
+    monkeypatch.setattr("app.attachments.download_attachment", fake_direct)
+    monkeypatch.setattr("app.attachments.download_attachment_via_browser", fake_browser)
+
+    context = build_attachment_context(
+        ("профтест (28).docx: https://kwork.ru/files/uploaded/tz.docx",),
+        use_browser=True,
+    )
+
+    assert direct_calls == ["https://kwork.ru/files/uploaded/tz.docx"]
+    assert browser_calls == ["https://kwork.ru/files/uploaded/tz.docx"]
+    assert "Статус: скачан, прочитан" in context
+    assert "Нужно сверстать страницу профтеста" in context
+
+
+def test_build_attachment_context_reports_html_instead_of_docx_without_browser(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"<html><body>login required</body></html>",
+    )
+
+    context = build_attachment_context(
+        ("tz.docx: https://kwork.ru/files/tz.docx",),
+        use_browser=False,
+    )
+
+    assert "Статус: не скачан" in context
+    assert "HTML-страницу вместо файла" in context
+    assert "File is not a zip file" not in context
+
+
 def test_build_attachment_context_reports_unsupported_images(monkeypatch):
     monkeypatch.setattr(
         "app.attachments.download_attachment",
@@ -89,6 +155,35 @@ def test_build_attachment_context_reads_image_with_tesseract(monkeypatch):
     assert "На скрине форма заявки" in context
 
 
+def test_build_attachment_context_retries_image_when_direct_download_is_html(monkeypatch):
+    browser_calls = []
+
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"<!doctype html><html><body>login required</body></html>",
+    )
+
+    def fake_browser(url, cdp_url, browser_profile_dir="", max_bytes=2_000_000):
+        browser_calls.append(url)
+        return b"\x89PNG\r\n\x1a\nfake png bytes"
+
+    monkeypatch.setattr("app.attachments.download_attachment_via_browser", fake_browser)
+    monkeypatch.setattr(
+        "app.attachments._run_tesseract_ocr",
+        lambda content, ext: "На скриншоте показан макет главной страницы",
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("screen.png: https://kwork.ru/files/screen.png",),
+        use_browser=True,
+    )
+
+    assert browser_calls == ["https://kwork.ru/files/screen.png"]
+    assert "Статус: скачан, OCR прочитан" in context
+    assert "макет главной страницы" in context
+
+
 def test_build_attachment_context_opens_zip_and_reads_inner_text(monkeypatch):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -108,3 +203,13 @@ def test_build_attachment_context_opens_zip_and_reads_inner_text(monkeypatch):
     assert "Статус: скачан, архив открыт" in context
     assert "brief.txt: прочитан" in context
     assert "Нужно сверстать лендинг" in context
+
+
+def _docx_bytes(text: str) -> bytes:
+    from docx import Document
+
+    document = Document()
+    document.add_paragraph(text)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()

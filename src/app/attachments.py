@@ -47,7 +47,7 @@ def build_attachment_context(
         ref = parse_attachment(raw)
         try:
             content = _download_with_fallback(
-                ref.url,
+                ref,
                 cookie=cookie,
                 max_bytes=max_bytes,
                 use_browser=use_browser,
@@ -77,7 +77,12 @@ def parse_attachment(raw: str) -> AttachmentRef:
     if not sep:
         url = raw.strip()
         label = url.rsplit("/", 1)[-1] or "attachment"
-    return AttachmentRef(label=html.unescape(label).strip(), url=url.strip())
+    return AttachmentRef(label=_clean_label(label), url=url.strip())
+
+
+def _clean_label(value: str) -> str:
+    value = re.sub(r"<[^>]+>", " ", html.unescape(value))
+    return " ".join(value.split()).strip()
 
 
 def download_attachment(url: str, cookie: str = "", max_bytes: int = 2_000_000) -> bytes:
@@ -113,54 +118,27 @@ def download_attachment_via_browser(
     max_bytes: int = 2_000_000,
 ) -> bytes:
     """Download a private attachment through the logged-in Chrome session."""
-    from app.kwork_source import _ensure_chrome_cdp, _evaluate, _find_or_create_page
+    from app.kwork_source import _ensure_chrome_cdp, _find_or_create_page, _send_cdp
 
     _ensure_chrome_cdp(cdp_url, "https://kwork.ru/projects", browser_profile_dir)
     page = _find_or_create_page(cdp_url, "https://kwork.ru/projects")
 
-    import base64
-    import json
     import websocket
 
     ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=45)
     try:
-        payload = _evaluate(
-            ws,
-            f"""
-            (async () => {{
-              const response = await fetch({json.dumps(url)}, {{ credentials: 'include' }});
-              const buffer = await response.arrayBuffer();
-              const bytes = new Uint8Array(buffer);
-              if (bytes.length > {int(max_bytes)}) {{
-                throw new Error('файл больше лимита {int(max_bytes)} байт');
-              }}
-              let binary = '';
-              const chunkSize = 32768;
-              for (let i = 0; i < bytes.length; i += chunkSize) {{
-                binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
-              }}
-              return JSON.stringify({{
-                ok: response.ok,
-                status: response.status,
-                contentType: response.headers.get('content-type') || '',
-                body: btoa(binary)
-              }});
-            }})()
-            """,
-        )
+        _send_cdp(ws, "Network.enable", {})
+        response = _send_cdp(ws, "Network.getCookies", {"urls": ["https://kwork.ru", url]})
     finally:
         ws.close()
-    if not payload:
-        raise RuntimeError("Chrome не вернул файл")
-    data = json.loads(payload)
-    if not data.get("ok"):
-        status = data.get("status", "unknown")
-        raise PermissionError(f"Chrome не смог скачать файл, HTTP {status}. Проверь вход в Kwork.")
-    return base64.b64decode(data.get("body", ""))
+    cookie_header = _cookie_header_from_cdp_cookies(response.get("result", {}).get("cookies", []), url)
+    if not cookie_header:
+        raise PermissionError("Chrome не отдал cookies Kwork. Проверь, что в отдельном Kwork Chrome выполнен вход.")
+    return download_attachment(url, cookie=cookie_header, max_bytes=max_bytes)
 
 
 def _download_with_fallback(
-    url: str,
+    ref: AttachmentRef,
     cookie: str,
     max_bytes: int,
     use_browser: bool,
@@ -168,18 +146,22 @@ def _download_with_fallback(
     browser_profile_dir: str,
 ) -> bytes:
     try:
-        return download_attachment(url, cookie=cookie, max_bytes=max_bytes)
+        content = download_attachment(ref.url, cookie=cookie, max_bytes=max_bytes)
+        _validate_downloaded_content(ref, content)
+        return content
     except Exception as direct_exc:
         if not use_browser:
             raise
-        logger.info("Direct attachment download failed, trying Chrome session for %s: %s", url, direct_exc)
+        logger.info("Direct attachment download failed, trying Chrome session for %s: %s", ref.url, direct_exc)
         try:
-            return download_attachment_via_browser(
-                url,
+            content = download_attachment_via_browser(
+                ref.url,
                 cdp_url=cdp_url,
                 browser_profile_dir=browser_profile_dir,
                 max_bytes=max_bytes,
             )
+            _validate_downloaded_content(ref, content)
+            return content
         except Exception as browser_exc:
             raise RuntimeError(
                 f"прямое скачивание не прошло ({direct_exc}); Chrome-сессия тоже не скачала файл ({browser_exc}). "
@@ -228,6 +210,44 @@ def _extract_docx(content: bytes) -> str:
             if cells:
                 parts.append(" | ".join(cells))
     return "\n".join(parts) or "DOCX прочитан, но текст не найден."
+
+
+def _validate_downloaded_content(ref: AttachmentRef, content: bytes) -> None:
+    ext = _extension(ref.url) or _extension(ref.label)
+    if not content:
+        raise ValueError("скачанный файл пустой")
+    if ext in TEXT_EXTENSIONS:
+        return
+    if _looks_like_html(content):
+        raise ValueError("Kwork вернул HTML-страницу вместо файла; нужен вход в аккаунт через Kwork Chrome")
+    if ext == ".docx" and not zipfile.is_zipfile(io.BytesIO(content)):
+        raise ValueError("скачанный файл не похож на DOCX")
+    if ext == ".pdf" and not content.lstrip().startswith(b"%PDF"):
+        raise ValueError("скачанный файл не похож на PDF")
+    if ext == ".zip" and not zipfile.is_zipfile(io.BytesIO(content)):
+        raise ValueError("скачанный файл не похож на ZIP-архив")
+
+
+def _looks_like_html(content: bytes) -> bool:
+    head = content[:512].lstrip().lower()
+    return head.startswith(b"<!doctype html") or head.startswith(b"<html") or b"<body" in head[:256]
+
+
+def _cookie_header_from_cdp_cookies(cookies: list[dict], url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    pairs: list[str] = []
+    seen: set[str] = set()
+    for cookie in cookies:
+        name = str(cookie.get("name", "")).strip()
+        value = str(cookie.get("value", ""))
+        domain = str(cookie.get("domain", "")).lstrip(".").lower()
+        if not name or name in seen:
+            continue
+        if domain and host != domain and not host.endswith(f".{domain}"):
+            continue
+        pairs.append(f"{name}={value}")
+        seen.add(name)
+    return "; ".join(pairs)
 
 
 def _extract_pdf(content: bytes) -> str:
