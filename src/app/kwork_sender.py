@@ -5,7 +5,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import websocket
 
@@ -69,6 +69,7 @@ class KworkReplySender:
         clean_text = text.strip()
         if not clean_text:
             raise ValueError("Kwork reply text must not be empty")
+        offer_url = _offer_url(contact)
 
         from app import kwork_source
 
@@ -76,15 +77,25 @@ class KworkReplySender:
         page = kwork_source._find_or_create_page(self.cdp_url, contact, tab_kind="project")
         ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=self.timeout_seconds)
         try:
-            kwork_source._refresh_page(ws, contact, self.timeout_seconds)
-            self._wait_for_page_text(ws)
-            self._open_reply_form(ws)
-            self._wait_for_reply_field(ws)
+            if not self._try_open_direct_offer(ws, offer_url):
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+                page = kwork_source._find_or_create_page(self.cdp_url, contact, tab_kind="project")
+                ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=self.timeout_seconds)
+                kwork_source._refresh_page(ws, contact, self.timeout_seconds)
+                self._wait_for_page_text(ws)
+                known_page_ids = _page_ids(kwork_source._cdp_json(self.cdp_url, "/json/list", timeout=5) or [])
+                self._open_reply_form(ws)
+                ws = self._switch_to_offer_page(ws, offer_url, known_page_ids=known_page_ids)
+                self._wait_for_page_text(ws)
+                self._wait_for_reply_field(ws)
             page_text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
             has_field = bool(kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT))
             login_message = _login_required_message(page_text, has_reply_field=has_field)
             if login_message:
-                self._auto_login_or_raise(ws, contact, login_message)
+                self._auto_login_or_raise(ws, offer_url, login_message)
                 self._open_reply_form(ws)
                 self._wait_for_reply_field(ws)
                 page_text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
@@ -109,6 +120,51 @@ class KworkReplySender:
             return f"kwork-project-{project_id}"
         finally:
             ws.close()
+
+    def _try_open_direct_offer(self, ws, offer_url: str) -> bool:
+        from app import kwork_source
+
+        try:
+            kwork_source._refresh_page(ws, offer_url, min(self.timeout_seconds, 8))
+            self._wait_for_page_text(ws)
+            self._wait_for_reply_field(ws)
+            return True
+        except Exception as exc:
+            logger.info("Kwork direct offer page failed, falling back to project button: %s", exc)
+            return False
+
+    def _switch_to_offer_page(self, ws, offer_url: str, known_page_ids: set[str] | None = None):
+        from app import kwork_source
+
+        project_id = _offer_project_id(offer_url)
+        started_at = time.monotonic()
+        deadline = time.monotonic() + self.timeout_seconds
+        while time.monotonic() < deadline:
+            current_url = str(kwork_source._evaluate(ws, "location.href") or "")
+            if _is_kwork_inbox_url(current_url):
+                raise RuntimeError("Kwork opened inbox instead of the offer form; this project may already have a reply.")
+            if _is_offer_page_for_project(current_url, project_id) or kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT):
+                return ws
+            pages = kwork_source._cdp_json(self.cdp_url, "/json/list", timeout=5) or []
+            inbox_seen = False
+            for page in pages:
+                page_url = page.get("url", "")
+                socket_url = page.get("webSocketDebuggerUrl")
+                page_id = str(page.get("id", ""))
+                if _is_kwork_inbox_url(page_url):
+                    inbox_seen = True
+                    if known_page_ids is not None and page_id not in known_page_ids:
+                        raise RuntimeError(
+                            "Kwork opened inbox instead of the offer form; this project may already have a reply."
+                        )
+                if socket_url and _is_offer_page_for_project(page_url, project_id):
+                    new_ws = websocket.create_connection(socket_url, timeout=self.timeout_seconds)
+                    ws.close()
+                    return new_ws
+            if inbox_seen and time.monotonic() - started_at > 5:
+                raise RuntimeError("Kwork opened inbox instead of the offer form; this project may already have a reply.")
+            time.sleep(0.5)
+        return ws
 
     def _wait_for_page_text(self, ws) -> None:
         from app import kwork_source
@@ -173,6 +229,7 @@ class KworkReplySender:
             if _login_required_message(text, has_reply_field=False):
                 return
             time.sleep(0.5)
+        raise RuntimeError("Kwork reply field was not found")
 
     def _project_title(self, ws) -> str:
         from app import kwork_source
@@ -261,6 +318,34 @@ def _project_id(url: str) -> str:
     return match.group(1) if match else "unknown"
 
 
+def _offer_url(url: str) -> str:
+    project_id = _project_id(url)
+    if project_id == "unknown":
+        raise ValueError("Kwork sender requires a Kwork project URL")
+    return f"https://kwork.ru/new_offer?project={project_id}"
+
+
+def _offer_project_id(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.path.rstrip("/") != "/new_offer":
+        return ""
+    values = dict(parse_qsl(parsed.query))
+    return values.get("project", "")
+
+
+def _is_offer_page_for_project(url: str, project_id: str) -> bool:
+    return bool(project_id) and _offer_project_id(url) == project_id
+
+
+def _is_kwork_inbox_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.netloc.lower().endswith("kwork.ru") and parsed.path.rstrip("/").startswith("/inbox")
+
+
+def _page_ids(pages: list[dict]) -> set[str]:
+    return {str(page.get("id", "")) for page in pages if page.get("id")}
+
+
 _OPEN_REPLY_FORM_SCRIPT = r"""
 (() => {
   const norm = value => (value || '').replace(/\s+/g, ' ').trim();
@@ -272,7 +357,7 @@ _OPEN_REPLY_FORM_SCRIPT = r"""
   if (cookie && visible(cookie)) cookie.click();
   const opener = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit],span.kw-button,[role=button],.kw-button')).find(el => {
     const text = norm(el.innerText || el.value || el.getAttribute('aria-label'));
-    return visible(el) && /(предложить услугу|откликнуться|оставить предложение|предложить)$/i.test(text);
+    return visible(el) && /(предложить услугу|откликнуться|оставить предложение|оставить отзыв|предложить)$/i.test(text);
   });
   if (opener) opener.click();
   return true;
@@ -282,7 +367,21 @@ _OPEN_REPLY_FORM_SCRIPT = r"""
 _HAS_REPLY_FIELD_SCRIPT = r"""
 (() => {
   const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
-  return Array.from(document.querySelectorAll('textarea,.trumbowyg-editor,[contenteditable="true"],input:not([type]),input[type=text],input[type=tel],input[type=search]')).some(visible);
+  const norm = value => (value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const meta = el => norm([
+    el.name,
+    el.id,
+    el.className,
+    el.placeholder,
+    el.getAttribute('placeholder'),
+    el.getAttribute('aria-label'),
+    el.parentElement?.innerText?.slice(0, 180)
+  ].filter(Boolean).join(' '));
+  const textarea = document.querySelector('textarea[name="description"]');
+  if (visible(textarea)) return true;
+  return Array.from(document.querySelectorAll('.trumbowyg-editor,[contenteditable="true"]')).some(el => {
+    return visible(el) && /(как вы будете решать|напишите|опис|description|сообщ|коммент|текст|отклик)/i.test(meta(el));
+  });
 })()
 """
 
@@ -362,15 +461,21 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
     el.parentElement?.innerText?.slice(0, 160)
   ].filter(Boolean).join(' ')).toLowerCase();
   const fields = Array.from(document.querySelectorAll('textarea,.trumbowyg-editor,[contenteditable="true"],input:not([type]),input[type=text],input[type=number],input[type=tel],input[type=search]')).filter(visible);
-  const messageField = fields.find(el => /сообщ|опис|коммент|текст|message|comment|description|cover|letter/.test(meta(el)))
+  const messageTextarea = document.querySelector('textarea[name="description"]');
+  const messageEditor = messageTextarea?.closest('.trumbowyg-box')?.querySelector('.trumbowyg-editor')
+    || messageTextarea?.parentElement?.querySelector('.trumbowyg-editor')
+    || Array.from(document.querySelectorAll('.trumbowyg-editor,[contenteditable="true"]')).find(el => {
+      return visible(el) && /сообщ|опис|коммент|текст|message|comment|description|cover|letter|как вы будете решать/.test(meta(el));
+    });
+  const messageField = messageEditor
+    || (messageTextarea && visible(messageTextarea) ? messageTextarea : null)
+    || fields.find(el => /сообщ|опис|коммент|текст|message|comment|description|cover|letter/.test(meta(el)))
     || fields.find(el => el.matches && el.matches('.trumbowyg-editor'))
     || fields.find(el => el.tagName === 'TEXTAREA' || el.isContentEditable);
   if (!messageField) return JSON.stringify({submitted: false, reason: 'Kwork reply field was not found'});
   setValue(messageField, payload.text);
-  const linkedTextarea = document.querySelector('textarea[name="description"]');
-  if (messageField.matches && messageField.matches('.trumbowyg-editor')) {
-    if (linkedTextarea) setValue(linkedTextarea, payload.text);
-  }
+  if (messageTextarea) setValue(messageTextarea, payload.text);
+  if (messageEditor && messageEditor !== messageField) setValue(messageEditor, payload.text);
   const priceField = document.querySelector('#offer-custom-price') || fields.find(el => /цен|стоим|бюдж|price|cost|amount|budget|sum/.test(meta(el)));
   if (priceField && payload.price) setValue(priceField, payload.price);
   const titleTextarea = document.querySelector('textarea[name="name"][placeholder="Введите название заказа"], textarea[name="name"]');

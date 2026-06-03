@@ -60,6 +60,7 @@ COLORS = {
 def build_app_command(command: str, root_dir: Path = ROOT_DIR) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(root_dir / "src")
+    env["PYTHONIOENCODING"] = "utf-8"
     return [sys.executable, "-m", "app.main", command], env
 
 

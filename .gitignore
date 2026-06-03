@@ -6,6 +6,7 @@
 data/
 harness/
 handoffs/
+artifacts/
 _check_*.py
 _test_*.py
 _test_*.ps1

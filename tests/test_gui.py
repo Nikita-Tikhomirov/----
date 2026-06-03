@@ -25,11 +25,15 @@ from app.gui import (
 from app.storage import Lead
 
 
-def test_build_app_command_runs_module_with_src_pythonpath(tmp_path):
+def test_build_app_command_runs_module_with_src_pythonpath(tmp_path, monkeypatch):
+    monkeypatch.delenv("PYTHONUTF8", raising=False)
+
     command, env = build_app_command("scan", root_dir=tmp_path)
 
     assert command[-3:] == ["-m", "app.main", "scan"]
     assert env["PYTHONPATH"] == str(tmp_path / "src")
+    assert env["PYTHONIOENCODING"] == "utf-8"
+    assert "PYTHONUTF8" not in env
 
 
 def test_build_app_command_can_run_approvals_from_gui(tmp_path):

@@ -5,6 +5,7 @@ from app.kwork_sender import (
     _AUTO_LOGIN_SCRIPT,
     _extract_reply_terms,
     _login_required_message,
+    _offer_url,
 )
 
 
@@ -56,15 +57,27 @@ def test_reply_form_opener_supports_kwork_span_buttons():
 
     assert ".kw-button" in _OPEN_REPLY_FORM_SCRIPT
     assert ".trumbowyg-editor" in _OPEN_REPLY_FORM_SCRIPT
+    assert "оставить отзыв" in _OPEN_REPLY_FORM_SCRIPT
     assert ".trumbowyg-editor" in _HAS_REPLY_FIELD_SCRIPT
     assert ".trumbowyg-editor" in _FILL_AND_SUBMIT_SCRIPT
     assert "#offer-custom-price" in _FILL_AND_SUBMIT_SCRIPT
     assert "Введите название заказа" in _FILL_AND_SUBMIT_SCRIPT
     assert 'textarea[name="name"]' in _FILL_AND_SUBMIT_SCRIPT
+    assert "messageEditor" in _FILL_AND_SUBMIT_SCRIPT
+    assert "messageTextarea" in _FILL_AND_SUBMIT_SCRIPT
     assert "payload.title" in _FILL_AND_SUBMIT_SCRIPT
     assert "payload.submit" in _FILL_AND_SUBMIT_SCRIPT
     assert "input[type=tel]" in _FILL_AND_SUBMIT_SCRIPT
     assert "input[type=search]" in _FILL_AND_SUBMIT_SCRIPT
+
+
+def test_reply_field_detector_ignores_generic_kwork_header_inputs():
+    from app.kwork_sender import _HAS_REPLY_FIELD_SCRIPT
+
+    assert 'textarea[name="description"]' in _HAS_REPLY_FIELD_SCRIPT
+    assert ".trumbowyg-editor" in _HAS_REPLY_FIELD_SCRIPT
+    assert "input[type=search]" not in _HAS_REPLY_FIELD_SCRIPT
+    assert "input:not([type])" not in _HAS_REPLY_FIELD_SCRIPT
 
 
 def test_kwork_reply_sender_has_prepare_mode():
@@ -78,3 +91,151 @@ def test_kwork_reply_sender_rejects_non_kwork_project_url():
 
     with pytest.raises(ValueError, match="Kwork project URL"):
         sender.send_message("https://example.com/project/1", "Здравствуйте!")
+
+
+def test_offer_url_targets_kwork_new_offer_page():
+    assert _offer_url("https://kwork.ru/projects/3190074/view") == "https://kwork.ru/new_offer?project=3190074"
+
+
+def test_kwork_reply_sender_uses_new_offer_page_for_reply_form(monkeypatch):
+    from app import kwork_source
+
+    calls = []
+    expected_url = "https://kwork.ru/new_offer?project=3190074"
+
+    class FakeWebSocket:
+        def close(self):
+            calls.append(("close", ""))
+
+    monkeypatch.setattr(
+        kwork_source,
+        "_ensure_chrome_cdp",
+        lambda cdp_url, url, profile_dir: calls.append(("ensure", url)),
+    )
+    monkeypatch.setattr(
+        kwork_source,
+        "_find_or_create_page",
+        lambda cdp_url, url, tab_kind: calls.append(("find", url)) or {"webSocketDebuggerUrl": "ws://test"},
+    )
+    monkeypatch.setattr(
+        kwork_source,
+        "_refresh_page",
+        lambda ws, url, timeout: calls.append(("refresh", url)),
+    )
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda ws, script: "Предложить услугу\nФорма отклика" if "document.body" in script else True,
+    )
+    monkeypatch.setattr("app.kwork_sender.websocket.create_connection", lambda url, timeout: FakeWebSocket())
+    monkeypatch.setattr(KworkReplySender, "_wait_for_page_text", lambda self, ws: None)
+    monkeypatch.setattr(KworkReplySender, "_open_reply_form", lambda self, ws: None)
+    monkeypatch.setattr(KworkReplySender, "_wait_for_reply_field", lambda self, ws: None)
+    monkeypatch.setattr(KworkReplySender, "_project_title", lambda self, ws: "Название заказа")
+    monkeypatch.setattr(KworkReplySender, "_fill_and_submit", lambda self, ws, text, terms, title, submit=True: {"ok": True})
+
+    result = KworkReplySender().prepare_reply(
+        "https://kwork.ru/projects/3190074/view",
+        "Здравствуйте! Сделаю аккуратно.",
+        price_rub=5000,
+        days=3,
+        title="Название заказа",
+    )
+
+    assert ("ensure", "https://kwork.ru/projects/3190074/view") in calls
+    assert ("find", "https://kwork.ru/projects/3190074/view") in calls
+    assert ("refresh", expected_url) in calls
+    assert result == "kwork-project-3190074-prepared"
+
+
+def test_kwork_reply_sender_reconnects_before_project_button_fallback(monkeypatch):
+    from app import kwork_source
+
+    sockets = []
+    calls = []
+
+    class FakeWebSocket:
+        def __init__(self, index):
+            self.index = index
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    def fake_connect(url, timeout):
+        socket = FakeWebSocket(len(sockets) + 1)
+        sockets.append(socket)
+        return socket
+
+    def fake_try_direct(self, ws, offer_url):
+        ws.close()
+        return False
+
+    def fake_refresh(ws, url, timeout):
+        if ws.closed:
+            raise AssertionError("fallback reused a closed websocket")
+        calls.append(("refresh", url, ws.index))
+
+    monkeypatch.setattr(kwork_source, "_ensure_chrome_cdp", lambda cdp_url, url, profile_dir: None)
+    monkeypatch.setattr(
+        kwork_source,
+        "_find_or_create_page",
+        lambda cdp_url, url, tab_kind: {"webSocketDebuggerUrl": "ws://test"},
+    )
+    monkeypatch.setattr(kwork_source, "_refresh_page", fake_refresh)
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda ws, script: "Предложить услугу\nФорма отклика" if "document.body" in script else True,
+    )
+    monkeypatch.setattr("app.kwork_sender.websocket.create_connection", fake_connect)
+    monkeypatch.setattr(KworkReplySender, "_try_open_direct_offer", fake_try_direct)
+    monkeypatch.setattr(KworkReplySender, "_wait_for_page_text", lambda self, ws: None)
+    monkeypatch.setattr(KworkReplySender, "_open_reply_form", lambda self, ws: None)
+    monkeypatch.setattr(KworkReplySender, "_switch_to_offer_page", lambda self, ws, offer_url, known_page_ids=None: ws)
+    monkeypatch.setattr(KworkReplySender, "_wait_for_reply_field", lambda self, ws: None)
+    monkeypatch.setattr(KworkReplySender, "_project_title", lambda self, ws: "Название заказа")
+    monkeypatch.setattr(KworkReplySender, "_fill_and_submit", lambda self, ws, text, terms, title, submit=True: {"ok": True})
+
+    result = KworkReplySender().prepare_reply(
+        "https://kwork.ru/projects/3190074/view",
+        "Здравствуйте! Сделаю аккуратно.",
+        price_rub=5000,
+        days=3,
+        title="Название заказа",
+    )
+
+    assert len(sockets) == 2
+    assert calls == [("refresh", "https://kwork.ru/projects/3190074/view", 2)]
+    assert result == "kwork-project-3190074-prepared"
+
+
+def test_switch_to_offer_page_fails_when_kwork_opens_new_inbox_tab(monkeypatch):
+    from app import kwork_source
+
+    class FakeWebSocket:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda ws, script: "https://kwork.ru/projects/3190074/view" if "location.href" in script else False,
+    )
+    monkeypatch.setattr(
+        kwork_source,
+        "_cdp_json",
+        lambda cdp_url, path, timeout: [
+            {"id": "old", "url": "https://kwork.ru/projects/3190074/view", "webSocketDebuggerUrl": "ws://old"},
+            {"id": "new", "url": "https://kwork.ru/inbox/alex-key", "webSocketDebuggerUrl": "ws://new"},
+        ],
+    )
+
+    sender = KworkReplySender(timeout_seconds=1)
+
+    with pytest.raises(RuntimeError, match="inbox"):
+        sender._switch_to_offer_page(
+            FakeWebSocket(),
+            "https://kwork.ru/new_offer?project=3190074",
+            known_page_ids={"old"},
+        )
