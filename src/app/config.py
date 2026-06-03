@@ -42,13 +42,35 @@ class AppConfig:
     kwork_auto_reply: bool = True
     kwork_login_email: str = ""
     kwork_login_password: str = ""
+    lead_min_score: int = 60
+    lead_max_days: int = 7
+    lead_accept_decisions: tuple[str, ...] = ("accept", "maybe")
+    lead_blocked_keywords: tuple[str, ...] = ("битрикс", "bitrix")
+    lead_hard_reject_keywords: tuple[str, ...] = (
+        "1c",
+        "1с",
+        "android",
+        "ios",
+        "flutter",
+        "react native",
+        "мобильное приложение",
+        "мобильные приложения",
+        "devops",
+        "kubernetes",
+        "blockchain",
+        "crypto",
+        "крипто",
+        "сложная crm",
+        "erp",
+    )
+    lead_required_keywords: tuple[str, ...] = ()
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
 
 
 def load_config(env_path: str | Path = ".env") -> AppConfig:
     if load_dotenv is not None:
-        load_dotenv(env_path, encoding="utf-8")
+        load_dotenv(env_path, encoding="utf-8", override=True)
 
     return AppConfig(
         telegram_api_id=_required_int("TELEGRAM_API_ID"),
@@ -81,6 +103,31 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         kwork_auto_reply=_bool_env("KWORK_AUTO_REPLY", True),
         kwork_login_email=os.getenv("KWORK_LOGIN_EMAIL", ""),
         kwork_login_password=os.getenv("KWORK_LOGIN_PASSWORD", ""),
+        lead_min_score=_int_env("LEAD_MIN_SCORE", 60),
+        lead_max_days=_int_env("LEAD_MAX_DAYS", 7),
+        lead_accept_decisions=_csv_env("LEAD_ACCEPT_DECISIONS", ("accept", "maybe")),
+        lead_blocked_keywords=_csv_env("LEAD_BLOCKED_KEYWORDS", ("битрикс", "bitrix")),
+        lead_hard_reject_keywords=_csv_env(
+            "LEAD_HARD_REJECT_KEYWORDS",
+            (
+                "1c",
+                "1с",
+                "android",
+                "ios",
+                "flutter",
+                "react native",
+                "мобильное приложение",
+                "мобильные приложения",
+                "devops",
+                "kubernetes",
+                "blockchain",
+                "crypto",
+                "крипто",
+                "сложная crm",
+                "erp",
+            ),
+        ),
+        lead_required_keywords=_csv_env("LEAD_REQUIRED_KEYWORDS", ()),
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
     )
@@ -114,3 +161,10 @@ def _channels(value: str) -> tuple[str, ...]:
     if not channels:
         raise ValueError("TELEGRAM_CHANNELS must contain at least one channel")
     return channels
+
+
+def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return default
+    return tuple(item.strip() for item in value.split(",") if item.strip())

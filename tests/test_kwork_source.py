@@ -234,7 +234,7 @@ def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch
 
     judge_calls = []
 
-    def fake_judge(text, api_key="", model="deepseek-chat"):
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
         judge_calls.append(text)
         return LeadJudgeResult(
             accepted=True,

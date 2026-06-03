@@ -26,6 +26,7 @@ CORE_WEB_LABELS = {"HTML/CSS/JS", "верстка", "WordPress"}
 BLOCKED_PATTERNS = (
     ("Bitrix", re.compile(r"битрикс|bitrix", re.IGNORECASE)),
 )
+DEFAULT_BLOCKED_KEYWORDS = ("битрикс", "bitrix")
 
 SMALL_TASK_PATTERN = re.compile(
     r"1-2\s*дн|1\s*день|2\s*дн|за день|пару часов|быстро|небольш|прост|правк",
@@ -55,11 +56,13 @@ def evaluate_post(
     text: str,
     deepseek_api_key: str = "",
     deepseek_model: str = "deepseek-chat",
+    blocked_keywords: tuple[str, ...] = DEFAULT_BLOCKED_KEYWORDS,
+    required_keywords: tuple[str, ...] = (),
 ) -> LeadEvaluation:
     normalized = " ".join(text.split())
     scored_text = re.sub(r"https?://\S+", "", normalized)
     positive = [label for label, pattern in POSITIVE_PATTERNS if pattern.search(scored_text)]
-    blocked = [label for label, pattern in BLOCKED_PATTERNS if pattern.search(scored_text)]
+    blocked = _matched_blocked_labels(scored_text, blocked_keywords)
     contact = _extract_contact(normalized)
     has_core_web = any(label in CORE_WEB_LABELS for label in positive)
     reasons: list[str] = []
@@ -67,11 +70,13 @@ def evaluate_post(
     reasons.extend(blocked)
     if not contact:
         reasons.append("нет контакта")
+    if required_keywords and not _contains_any_keyword(scored_text, required_keywords):
+        reasons.append("нет обязательных слов")
 
     small_task = bool(SMALL_TASK_PATTERN.search(scored_text)) or len(scored_text) <= 260
 
     score = _score(positive, blocked, contact, small_task, has_core_web)
-    accepted = not blocked and contact != ""
+    accepted = not blocked and contact != "" and "нет обязательных слов" not in reasons
     if not accepted and not reasons:
         reasons.append("score ниже порога")
 
@@ -97,6 +102,20 @@ def _extract_contact(text: str) -> str:
         return _clean_contact(reply_match.group(1))
     match = CONTACT_PATTERN.search(text)
     return _clean_contact(match.group(0)) if match else ""
+
+
+def _matched_blocked_labels(text: str, keywords: tuple[str, ...]) -> list[str]:
+    labels = [label for label, pattern in BLOCKED_PATTERNS if pattern.search(text)]
+    for keyword in keywords:
+        clean = keyword.strip()
+        if clean and clean.lower() in text.lower() and clean not in labels:
+            labels.append(clean)
+    return labels
+
+
+def _contains_any_keyword(text: str, keywords: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(keyword.strip().lower() in lowered for keyword in keywords if keyword.strip())
 
 
 def _clean_contact(contact: str) -> str:

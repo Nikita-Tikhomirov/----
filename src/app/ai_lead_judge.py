@@ -20,6 +20,25 @@ SIMPLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 BUDGET_PATTERN = re.compile(r"(\d[\d\s]{2,})\s*(?:₽|руб|р\b)", re.IGNORECASE)
+DEFAULT_ACCEPT_DECISIONS = ("accept", "maybe")
+DEFAULT_BLOCKED_KEYWORDS = ("битрикс", "bitrix")
+DEFAULT_HARD_REJECT_KEYWORDS = (
+    "1c",
+    "1с",
+    "android",
+    "ios",
+    "flutter",
+    "react native",
+    "мобильное приложение",
+    "мобильные приложения",
+    "devops",
+    "kubernetes",
+    "blockchain",
+    "crypto",
+    "крипто",
+    "сложная crm",
+    "erp",
+)
 
 
 @dataclass(frozen=True)
@@ -42,10 +61,22 @@ def judge_lead(
     api_key: str = "",
     model: str = "deepseek-chat",
     timeout_seconds: float = 45.0,
+    min_score: int = 60,
+    max_estimated_days: int = 7,
+    accept_decisions: tuple[str, ...] = DEFAULT_ACCEPT_DECISIONS,
+    blocked_keywords: tuple[str, ...] = DEFAULT_BLOCKED_KEYWORDS,
+    hard_reject_keywords: tuple[str, ...] = DEFAULT_HARD_REJECT_KEYWORDS,
 ) -> LeadJudgeResult:
     """Score a Kwork lead against the user's week-with-AI fit criteria."""
+    blocked = _matched_keywords(text, blocked_keywords)
     if BITRIX_PATTERN.search(text):
         return _reject("Bitrix/Битрикс исключен", text)
+    if blocked:
+        return _reject(f"стоп-слова: {', '.join(blocked)}", text)
+
+    hard_reject = _matched_keywords(text, hard_reject_keywords)
+    if hard_reject:
+        return _reject(f"рискованный стек: {', '.join(hard_reject)}", text)
 
     if api_key:
         ai_result = _judge_with_deepseek(
@@ -55,9 +86,19 @@ def judge_lead(
             timeout_seconds=timeout_seconds,
         )
         if ai_result is not None:
-            return ai_result
+            return _apply_acceptance_settings(
+                ai_result,
+                min_score=min_score,
+                max_estimated_days=max_estimated_days,
+                accept_decisions=accept_decisions,
+            )
 
-    return _fallback_judge(text)
+    return _apply_acceptance_settings(
+        _fallback_judge(text),
+        min_score=min_score,
+        max_estimated_days=max_estimated_days,
+        accept_decisions=accept_decisions,
+    )
 
 
 def parse_judge_response(raw: str) -> LeadJudgeResult:
@@ -150,6 +191,53 @@ def _fallback_judge(text: str) -> LeadJudgeResult:
         questions=questions,
         draft_reply=_fallback_reply(summary, estimated_days, price_rub, questions),
     )
+
+
+def _apply_acceptance_settings(
+    result: LeadJudgeResult,
+    min_score: int,
+    max_estimated_days: int,
+    accept_decisions: tuple[str, ...],
+) -> LeadJudgeResult:
+    allowed_decisions = {decision.strip().lower() for decision in accept_decisions if decision.strip()}
+    accepted = (
+        result.decision in allowed_decisions
+        and result.score >= min_score
+        and result.estimated_days <= max_estimated_days
+    )
+    if accepted == result.accepted:
+        return result
+    reasons = list(result.reasons)
+    if not accepted:
+        if result.decision not in allowed_decisions:
+            reasons.append(f"решение AI не разрешено настройками: {result.decision}")
+        if result.score < min_score:
+            reasons.append(f"score {result.score} ниже порога {min_score}")
+        if result.estimated_days > max_estimated_days:
+            reasons.append(f"срок {result.estimated_days} дн. больше лимита {max_estimated_days}")
+    return LeadJudgeResult(
+        accepted=accepted,
+        decision=result.decision,
+        score=result.score,
+        complexity=result.complexity,
+        estimated_days=result.estimated_days,
+        price_rub=result.price_rub,
+        summary=result.summary,
+        reasons=reasons,
+        risks=result.risks,
+        questions=result.questions,
+        draft_reply=result.draft_reply,
+    )
+
+
+def _matched_keywords(text: str, keywords: tuple[str, ...]) -> list[str]:
+    lowered = text.lower()
+    matches: list[str] = []
+    for keyword in keywords:
+        clean = keyword.strip()
+        if clean and clean.lower() in lowered and clean not in matches:
+            matches.append(clean)
+    return matches
 
 
 def _reject(reason: str, text: str) -> LeadJudgeResult:

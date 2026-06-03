@@ -6,7 +6,13 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from app.ai_lead_judge import LeadJudgeResult, judge_lead
+from app.ai_lead_judge import (
+    DEFAULT_ACCEPT_DECISIONS,
+    DEFAULT_BLOCKED_KEYWORDS,
+    DEFAULT_HARD_REJECT_KEYWORDS,
+    LeadJudgeResult,
+    judge_lead,
+)
 from app.attachments import build_attachment_context
 from app.chrome_cookies import chrome_cookie_header
 from app.config import AppConfig, load_config
@@ -63,6 +69,12 @@ def scan_once(
     kwork_use_browser: bool = True,
     kwork_cdp_url: str = "http://127.0.0.1:9222",
     kwork_browser_profile_dir: str = "",
+    lead_min_score: int = 60,
+    lead_max_days: int = 7,
+    lead_accept_decisions: tuple[str, ...] = DEFAULT_ACCEPT_DECISIONS,
+    lead_blocked_keywords: tuple[str, ...] = DEFAULT_BLOCKED_KEYWORDS,
+    lead_hard_reject_keywords: tuple[str, ...] = DEFAULT_HARD_REJECT_KEYWORDS,
+    lead_required_keywords: tuple[str, ...] = (),
 ) -> int:
     created = 0
     for post in telegram_client.fetch_recent_posts():
@@ -80,7 +92,11 @@ def scan_once(
             else:
                 logger.info("Skipping existing lead for post %s/%s", post.channel, post.message_id)
             continue
-        evaluation = evaluate_post(post.text)
+        evaluation = evaluate_post(
+            post.text,
+            blocked_keywords=lead_blocked_keywords,
+            required_keywords=lead_required_keywords,
+        )
         if not evaluation.accepted:
             logger.info("Rejected post %s/%s: %s", post.channel, post.message_id, evaluation.reasons)
             continue
@@ -138,6 +154,11 @@ def scan_once(
             project_text,
             api_key=deepseek_api_key,
             model=deepseek_model,
+            min_score=lead_min_score,
+            max_estimated_days=lead_max_days,
+            accept_decisions=lead_accept_decisions,
+            blocked_keywords=lead_blocked_keywords,
+            hard_reject_keywords=lead_hard_reject_keywords,
         )
         if not judge_result.accepted:
             logger.info(
@@ -402,6 +423,12 @@ def main() -> int:
             kwork_use_browser=config.kwork_use_browser,
             kwork_cdp_url=config.kwork_cdp_url,
             kwork_browser_profile_dir=config.kwork_browser_profile_dir,
+            lead_min_score=config.lead_min_score,
+            lead_max_days=config.lead_max_days,
+            lead_accept_decisions=config.lead_accept_decisions,
+            lead_blocked_keywords=config.lead_blocked_keywords,
+            lead_hard_reject_keywords=config.lead_hard_reject_keywords,
+            lead_required_keywords=config.lead_required_keywords,
         )
         return 0
     if args.command == "approvals":
@@ -451,6 +478,12 @@ def main() -> int:
             kwork_use_browser=config.kwork_use_browser,
             kwork_cdp_url=config.kwork_cdp_url,
             kwork_browser_profile_dir=config.kwork_browser_profile_dir,
+            lead_min_score=config.lead_min_score,
+            lead_max_days=config.lead_max_days,
+            lead_accept_decisions=config.lead_accept_decisions,
+            lead_blocked_keywords=config.lead_blocked_keywords,
+            lead_hard_reject_keywords=config.lead_hard_reject_keywords,
+            lead_required_keywords=config.lead_required_keywords,
         )
         process_approvals(
             storage,

@@ -193,7 +193,7 @@ def test_scan_once_uses_ai_judge_for_summary_reply_and_score(tmp_path):
     storage.initialize()
     email_client = FakeEmailClient()
 
-    def fake_judge(text, api_key="", model="deepseek-chat"):
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
         return LeadJudgeResult(
             accepted=True,
             decision="accept",
@@ -232,7 +232,7 @@ def test_scan_once_passes_kwork_page_details_and_attachments_to_ai_judge(tmp_pat
     email_client = FakeEmailClient()
     seen_texts = []
 
-    def fake_judge(text, api_key="", model="deepseek-chat"):
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
         seen_texts.append(text)
         return LeadJudgeResult(
             accepted=True,
@@ -270,7 +270,7 @@ def test_scan_once_passes_downloaded_attachment_text_to_ai_judge(tmp_path):
     email_client = FakeEmailClient()
     seen_texts = []
 
-    def fake_judge(text, api_key="", model="deepseek-chat"):
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
         seen_texts.append(text)
         return LeadJudgeResult(
             accepted=True,
@@ -313,7 +313,7 @@ def test_scan_once_includes_attachment_report_in_email_summary(tmp_path):
     storage.initialize()
     email_client = FakeEmailClient()
 
-    def fake_judge(text, api_key="", model="deepseek-chat"):
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
         return LeadJudgeResult(
             accepted=True,
             decision="accept",
@@ -354,7 +354,7 @@ def test_scan_once_includes_kwork_facts_in_email_summary(tmp_path):
     storage.initialize()
     email_client = FakeEmailClient()
 
-    def fake_judge(text, api_key="", model="deepseek-chat"):
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
         assert "Kwork facts:" in text
         assert "Бюджет: до 15 000 ₽" in text
         assert "Осталось: 2 д. 17 ч." in text
@@ -398,7 +398,7 @@ def test_scan_once_skips_ai_rejected_lead(tmp_path):
     storage.initialize()
     email_client = FakeEmailClient()
 
-    def fake_judge(text, api_key="", model="deepseek-chat"):
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
         return LeadJudgeResult(
             accepted=False,
             decision="reject",

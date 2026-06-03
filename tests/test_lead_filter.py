@@ -53,6 +53,26 @@ def test_rejects_bitrix_orders():
     assert "Bitrix" in result.reasons
 
 
+def test_rejects_custom_blocked_keywords():
+    result = evaluate_post(
+        "Нужно настроить Shopify магазин. Отклик: https://example.com/order",
+        blocked_keywords=("shopify",),
+    )
+
+    assert result.accepted is False
+    assert "shopify" in result.reasons
+
+
+def test_required_keywords_can_restrict_feed():
+    result = evaluate_post(
+        "Нужно написать текст для сайта. Отклик: https://example.com/order",
+        required_keywords=("wordpress", "html"),
+    )
+
+    assert result.accepted is False
+    assert "нет обязательных слов" in result.reasons
+
+
 def test_rejects_without_contact_or_reply_path():
     result = evaluate_post("Нужно поправить верстку лендинга за день, деталей мало")
 

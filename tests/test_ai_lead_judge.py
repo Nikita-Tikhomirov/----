@@ -74,6 +74,51 @@ def test_judge_lead_uses_deepseek_json_verdict():
     assert "калькулятор" in result.draft_reply.lower()
 
 
+def test_judge_lead_applies_configurable_thresholds_to_ai_result():
+    with patch("openai.OpenAI") as mock_openai_class:
+        mock_client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = """
+        {
+          "decision": "maybe",
+          "score": 72,
+          "complexity": "medium",
+          "estimated_days": 6,
+          "price_rub": 22000,
+          "summary": "Сделать калькулятор на сайте",
+          "reasons": ["задача понятная"],
+          "risks": [],
+          "questions": [],
+          "draft_reply": "Здравствуйте! Сделаю калькулятор."
+        }
+        """
+        mock_client.chat.completions.create.return_value.choices = [mock_choice]
+        mock_openai_class.return_value = mock_client
+
+        result = judge_lead(
+            "Нужен сайт-калькулятор услуг. Отклик: https://kwork.ru/projects/2",
+            api_key="sk-test",
+            min_score=80,
+            max_estimated_days=5,
+            accept_decisions=("accept",),
+        )
+
+    assert result.accepted is False
+    assert "score 72 ниже порога 80" in result.reasons
+    assert "срок 6 дн. больше лимита 5" in result.reasons
+    assert "решение AI не разрешено настройками: maybe" in result.reasons
+
+
+def test_judge_lead_rejects_custom_hard_reject_keywords():
+    result = judge_lead(
+        "Нужно доработать WebGL сцену. Отклик: https://kwork.ru/projects/9",
+        hard_reject_keywords=("webgl",),
+    )
+
+    assert result.accepted is False
+    assert "webgl" in result.reasons[0]
+
+
 def test_judge_lead_fallback_accepts_simple_site_task_without_questions():
     result = judge_lead(
         "Нужно поправить форму заявки на сайте и адаптив. Бюджет 5000 руб. "
