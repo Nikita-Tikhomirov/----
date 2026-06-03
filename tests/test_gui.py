@@ -5,6 +5,8 @@ import pytest
 from app.gui import (
     LeadFunnelGui,
     _lead_details_text,
+    _attachment_row_values,
+    _fallback_attachments_from_summary,
     _extract_days,
     _extract_offer_count,
     _extract_price,
@@ -201,3 +203,43 @@ def test_clickable_url_handler_opens_selected_lead():
 
     assert LeadFunnelGui.open_selected_lead_from_url(dummy) == "break"
     assert dummy.opened == 1
+
+
+def test_gui_extracts_attachment_rows_from_existing_lead_summary():
+    lead = Lead(
+        id=22,
+        post_id=8,
+        score=74,
+        summary=(
+            "AI: maybe\n\n"
+            "ФАЙЛЫ/ТЗ:\n"
+            "- ТЗ.zip\n"
+            "  Ссылка: https://kwork.ru/files/tz.zip\n"
+            "  Статус: скачан, архив открыт\n"
+            "  Кратко: brief.txt: прочитан Нужно сверстать форму\n\n"
+            "- screen.png\n"
+            "  Ссылка: https://kwork.ru/files/screen.png\n"
+            "  Статус: скачан, OCR прочитан\n"
+            "  Кратко: На скрине форма заявки"
+        ),
+        draft_reply="Здравствуйте! Сделаю.",
+        contact="https://kwork.ru/projects/22/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/22/view",
+    )
+
+    attachments = _fallback_attachments_from_summary(lead)
+
+    assert len(attachments) == 2
+    assert attachments[0].label == "ТЗ.zip"
+    assert attachments[0].opened_archive is True
+    assert attachments[0].ocr_scanned is False
+    assert attachments[1].label == "screen.png"
+    assert attachments[1].ocr_scanned is True
+    assert _attachment_row_values(attachments[0]) == (
+        "ТЗ.zip",
+        "скачан, архив открыт",
+        "archive",
+        "нет локального файла",
+        "brief.txt: прочитан Нужно сверстать форму",
+    )

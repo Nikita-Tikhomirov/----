@@ -13,7 +13,7 @@ from app.ai_lead_judge import (
     LeadJudgeResult,
     judge_lead,
 )
-from app.attachments import build_attachment_context
+from app.attachments import AttachmentProcessingResult, build_attachment_report
 from app.chrome_cookies import chrome_cookie_header
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
@@ -64,7 +64,7 @@ def scan_once(
     kwork_project_client: ProjectInspector | None = None,
     kwork_max_responses: int = 5,
     lead_judge=judge_lead,
-    attachment_context_builder=build_attachment_context,
+    attachment_context_builder=build_attachment_report,
     kwork_cookie: str = "",
     kwork_use_browser: bool = True,
     kwork_cdp_url: str = "http://127.0.0.1:9222",
@@ -104,6 +104,7 @@ def scan_once(
         project_text = post.text
         project_summary_suffix = ""
         attachment_context = ""
+        attachment_reports = ()
         kwork_facts: tuple[str, ...] = ()
         if kwork_project_client is not None:
             project_info = kwork_project_client.inspect(evaluation.contact)
@@ -128,13 +129,17 @@ def scan_once(
             if project_info.has_response_count:
                 project_summary_suffix = f", откликов: {project_info.response_count}"
             if project_info.attachments:
-                attachment_context = attachment_context_builder(
+                attachment_result = _build_attachment_processing_result(
+                    attachment_context_builder,
                     project_info.attachments,
                     cookie=kwork_cookie,
                     use_browser=kwork_use_browser,
                     cdp_url=kwork_cdp_url,
                     browser_profile_dir=kwork_browser_profile_dir,
+                    output_dir=storage.database_path.parent / "attachments" / f"post_{post_id}",
                 )
+                attachment_context = attachment_result.context
+                attachment_reports = attachment_result.reports
             if project_info.title or project_info.description or project_info.page_text or project_info.attachments or kwork_facts:
                 project_text = "\n\n".join(
                     part
@@ -182,12 +187,27 @@ def scan_once(
             draft_reply=judge_result.draft_reply,
             contact=evaluation.contact,
         )
+        if attachment_reports:
+            storage.replace_lead_attachments(lead_id, attachment_reports)
         lead = storage.get_lead(lead_id)
         if lead.status != "new":
             continue
         if _email_lead(storage, email_client, lead):
             created += 1
     return created
+
+
+def _build_attachment_processing_result(builder, attachments: tuple[str, ...], **kwargs) -> AttachmentProcessingResult:
+    try:
+        result = builder(attachments, **kwargs)
+    except TypeError as exc:
+        if "output_dir" not in str(exc):
+            raise
+        fallback_kwargs = {key: value for key, value in kwargs.items() if key != "output_dir"}
+        result = builder(attachments, **fallback_kwargs)
+    if isinstance(result, AttachmentProcessingResult):
+        return result
+    return AttachmentProcessingResult(context=str(result or ""), reports=())
 
 
 def _email_lead(storage: Storage, email_client: LeadMailer, lead) -> bool:

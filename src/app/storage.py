@@ -28,6 +28,20 @@ class Lead:
 
 
 @dataclass(frozen=True)
+class LeadAttachment:
+    id: int
+    lead_id: int
+    label: str
+    url: str
+    local_path: str
+    status: str
+    summary: str
+    kind: str
+    opened_archive: bool
+    ocr_scanned: bool
+
+
+@dataclass(frozen=True)
 class Order:
     id: int
     lead_id: int | None
@@ -89,6 +103,20 @@ class Storage:
                     contact TEXT NOT NULL,
                     sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     telegram_message_id TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS lead_attachments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lead_id INTEGER NOT NULL REFERENCES leads(id),
+                    label TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    local_path TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    summary TEXT NOT NULL DEFAULT '',
+                    kind TEXT NOT NULL DEFAULT 'file',
+                    opened_archive INTEGER NOT NULL DEFAULT 0,
+                    ocr_scanned INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS orders (
@@ -245,6 +273,45 @@ class Storage:
                 "UPDATE leads SET status = 'failed', last_error = ? WHERE id = ?",
                 (error.strip()[:2000], lead_id),
             )
+
+    def replace_lead_attachments(self, lead_id: int, attachments: Iterable) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM lead_attachments WHERE lead_id = ?", (lead_id,))
+            conn.executemany(
+                """
+                INSERT INTO lead_attachments
+                    (lead_id, label, url, local_path, status, summary, kind, opened_archive, ocr_scanned)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        lead_id,
+                        str(getattr(attachment, "label", "")).strip(),
+                        str(getattr(attachment, "url", "")).strip(),
+                        str(getattr(attachment, "local_path", "")).strip(),
+                        str(getattr(attachment, "status", "")).strip(),
+                        str(getattr(attachment, "summary", "")).strip(),
+                        str(getattr(attachment, "kind", "file")).strip() or "file",
+                        1 if bool(getattr(attachment, "opened_archive", False)) else 0,
+                        1 if bool(getattr(attachment, "ocr_scanned", False)) else 0,
+                    )
+                    for attachment in attachments
+                    if str(getattr(attachment, "label", "")).strip() or str(getattr(attachment, "url", "")).strip()
+                ],
+            )
+
+    def list_lead_attachments(self, lead_id: int) -> list[LeadAttachment]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM lead_attachments
+                WHERE lead_id = ?
+                ORDER BY id
+                """,
+                (lead_id,),
+            ).fetchall()
+        return [_lead_attachment_from_row(row) for row in rows]
 
     def get_lead(self, lead_id: int) -> Lead:
         with self._connect() as conn:
@@ -494,6 +561,21 @@ def _order_from_row(row: sqlite3.Row) -> Order:
         revision_notes=str(row["revision_notes"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+    )
+
+
+def _lead_attachment_from_row(row: sqlite3.Row) -> LeadAttachment:
+    return LeadAttachment(
+        id=int(row["id"]),
+        lead_id=int(row["lead_id"]),
+        label=str(row["label"]),
+        url=str(row["url"]),
+        local_path=str(row["local_path"]),
+        status=str(row["status"]),
+        summary=str(row["summary"]),
+        kind=str(row["kind"]),
+        opened_archive=bool(row["opened_archive"]),
+        ocr_scanned=bool(row["ocr_scanned"]),
     )
 
 

@@ -1,4 +1,4 @@
-from app.storage import Storage
+from app.storage import LeadAttachment, Storage
 
 
 def test_deduplicates_posts_by_channel_and_message_id(tmp_path):
@@ -217,3 +217,65 @@ def test_list_leads_returns_latest_first_with_post_metadata_and_sent_state(tmp_p
     assert leads[0].message_id == 101
     assert leads[0].posted_at == "2026-05-04T11:00:00+03:00"
     assert leads[1].sent_at
+
+
+def test_lead_attachments_are_saved_and_replaced(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=200,
+        post_url="https://kwork.ru/projects/200/view",
+        text="📌 Заказ с ТЗ\nПредложений: 2",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=90,
+        summary="AI summary",
+        draft_reply="Здравствуйте! Сделаю.",
+        contact="https://kwork.ru/projects/200/view",
+    )
+
+    storage.replace_lead_attachments(
+        lead_id,
+        [
+            LeadAttachment(
+                id=0,
+                lead_id=lead_id,
+                label="ТЗ.zip",
+                url="https://kwork.ru/files/tz.zip",
+                local_path=str(tmp_path / "attachments" / "tz.zip"),
+                status="скачан, архив открыт",
+                summary="brief.txt: прочитан",
+                kind="archive",
+                opened_archive=True,
+                ocr_scanned=False,
+            )
+        ],
+    )
+    storage.replace_lead_attachments(
+        lead_id,
+        [
+            LeadAttachment(
+                id=0,
+                lead_id=lead_id,
+                label="screen.png",
+                url="https://kwork.ru/files/screen.png",
+                local_path=str(tmp_path / "attachments" / "screen.png"),
+                status="скачан, OCR прочитан",
+                summary="На скрине макет формы",
+                kind="image",
+                opened_archive=False,
+                ocr_scanned=True,
+            )
+        ],
+    )
+
+    attachments = storage.list_lead_attachments(lead_id)
+
+    assert len(attachments) == 1
+    assert attachments[0].label == "screen.png"
+    assert attachments[0].status == "скачан, OCR прочитан"
+    assert attachments[0].ocr_scanned is True
+    assert attachments[0].opened_archive is False

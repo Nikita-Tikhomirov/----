@@ -29,6 +29,24 @@ class AttachmentRef:
     url: str
 
 
+@dataclass(frozen=True)
+class AttachmentReport:
+    label: str
+    url: str
+    local_path: str
+    status: str
+    summary: str
+    kind: str
+    opened_archive: bool
+    ocr_scanned: bool
+
+
+@dataclass(frozen=True)
+class AttachmentProcessingResult:
+    context: str
+    reports: tuple[AttachmentReport, ...]
+
+
 def build_attachment_context(
     attachments: tuple[str, ...],
     cookie: str = "",
@@ -39,12 +57,36 @@ def build_attachment_context(
     browser_profile_dir: str = "",
 ) -> str:
     """Download small readable attachments and return text for AI context."""
+    return build_attachment_report(
+        attachments,
+        cookie=cookie,
+        max_files=max_files,
+        max_bytes=max_bytes,
+        use_browser=use_browser,
+        cdp_url=cdp_url,
+        browser_profile_dir=browser_profile_dir,
+    ).context
+
+
+def build_attachment_report(
+    attachments: tuple[str, ...],
+    cookie: str = "",
+    max_files: int = 3,
+    max_bytes: int = 2_000_000,
+    use_browser: bool = False,
+    cdp_url: str = "http://127.0.0.1:9222",
+    browser_profile_dir: str = "",
+    output_dir: str | Path | None = None,
+) -> AttachmentProcessingResult:
+    """Download attachments, save readable originals, and return AI + UI metadata."""
     if not attachments:
-        return ""
+        return AttachmentProcessingResult(context="", reports=())
 
     blocks: list[str] = ["ФАЙЛЫ/ТЗ:"]
+    reports: list[AttachmentReport] = []
     for raw in attachments[:max_files]:
         ref = parse_attachment(raw)
+        local_path = ""
         try:
             content = _download_with_fallback(
                 ref,
@@ -54,22 +96,34 @@ def build_attachment_context(
                 cdp_url=cdp_url,
                 browser_profile_dir=browser_profile_dir,
             )
+            local_path = _save_attachment_file(ref, content, output_dir) if output_dir is not None else ""
             status, extracted = inspect_attachment(ref, content, max_bytes=max_bytes)
         except Exception as exc:
             logger.warning("Failed to read attachment %s: %s", ref.url, exc)
             status = "не скачан"
             extracted = f"Не удалось скачать или прочитать файл: {exc}"
+        report = AttachmentReport(
+            label=ref.label,
+            url=ref.url,
+            local_path=local_path,
+            status=status,
+            summary=_shorten(extracted, 2500),
+            kind=_attachment_kind(ref),
+            opened_archive="архив открыт" in status,
+            ocr_scanned="OCR" in status,
+        )
+        reports.append(report)
         blocks.append(
             "\n".join(
                 [
                     f"- {ref.label}",
                     f"  Ссылка: {ref.url}",
                     f"  Статус: {status}",
-                    f"  Кратко: {_shorten(extracted, 2500)}",
+                    f"  Кратко: {report.summary}",
                 ]
             )
         )
-    return "\n\n".join(blocks)
+    return AttachmentProcessingResult(context="\n\n".join(blocks), reports=tuple(reports))
 
 
 def parse_attachment(raw: str) -> AttachmentRef:
@@ -83,6 +137,37 @@ def parse_attachment(raw: str) -> AttachmentRef:
 def _clean_label(value: str) -> str:
     value = re.sub(r"<[^>]+>", " ", html.unescape(value))
     return " ".join(value.split()).strip()
+
+
+def _save_attachment_file(ref: AttachmentRef, content: bytes, output_dir: str | Path) -> str:
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = _safe_filename(ref.label)
+    if not _extension(filename):
+        ext = _extension(ref.url)
+        filename = f"{filename}{ext}" if ext else filename
+    path = _unique_path(directory / filename)
+    path.write_bytes(content)
+    return str(path)
+
+
+def _safe_filename(value: str) -> str:
+    name = Path(urlparse(value).path).name if re.match(r"https?://", value, re.IGNORECASE) else value
+    name = _clean_label(name) or "attachment"
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" ._")
+    return name[:120] or "attachment"
+
+
+def _unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem = path.stem or "attachment"
+    suffix = path.suffix
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{stem}-{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"слишком много файлов с именем {path.name}")
 
 
 def download_attachment(url: str, cookie: str = "", max_bytes: int = 2_000_000) -> bytes:
@@ -186,6 +271,21 @@ def inspect_attachment(ref: AttachmentRef, content: bytes, max_bytes: int = 2_00
     if ext in ARCHIVE_EXTENSIONS:
         return _extract_archive(ref, content, max_bytes=max_bytes)
     return "скачан, тип не поддержан", "Файл найден, но тип не поддержан для автоматического чтения."
+
+
+def _attachment_kind(ref: AttachmentRef) -> str:
+    ext = _extension(ref.url) or _extension(ref.label)
+    if ext in IMAGE_EXTENSIONS:
+        return "image"
+    if ext in ARCHIVE_EXTENSIONS:
+        return "archive"
+    if ext == ".pdf":
+        return "pdf"
+    if ext in {".doc", ".docx"}:
+        return "document"
+    if ext in TEXT_EXTENSIONS:
+        return "text"
+    return ext.removeprefix(".") or "file"
 
 
 def _decode_text(content: bytes) -> str:

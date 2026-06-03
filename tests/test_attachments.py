@@ -1,7 +1,8 @@
 import io
 import zipfile
+from pathlib import Path
 
-from app.attachments import build_attachment_context, parse_attachment
+from app.attachments import build_attachment_context, build_attachment_report, parse_attachment
 from app.attachments import _cookie_header_from_cdp_cookies
 
 
@@ -203,6 +204,35 @@ def test_build_attachment_context_opens_zip_and_reads_inner_text(monkeypatch):
     assert "Статус: скачан, архив открыт" in context
     assert "brief.txt: прочитан" in context
     assert "Нужно сверстать лендинг" in context
+
+
+def test_build_attachment_report_saves_file_and_exposes_processing_flags(monkeypatch, tmp_path):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("brief.txt", "Нужно сверстать лендинг и форму")
+
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: buffer.getvalue(),
+    )
+
+    result = build_attachment_report(
+        ("ТЗ клиента.zip: https://kwork.ru/files/tz.zip",),
+        output_dir=tmp_path / "attachments",
+    )
+
+    assert "ФАЙЛЫ/ТЗ" in result.context
+    assert len(result.reports) == 1
+    report = result.reports[0]
+    assert report.label == "ТЗ клиента.zip"
+    assert report.url == "https://kwork.ru/files/tz.zip"
+    assert report.status == "скачан, архив открыт"
+    assert report.kind == "archive"
+    assert report.opened_archive is True
+    assert report.ocr_scanned is False
+    assert "brief.txt: прочитан" in report.summary
+    assert report.local_path
+    assert (tmp_path / "attachments" / Path(report.local_path).name).exists()
 
 
 def test_build_attachment_context_reads_scanned_pdf_with_ocr(monkeypatch):

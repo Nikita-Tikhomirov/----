@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from app.main import create_order_handoff, process_approvals, process_order_reviews, scan_once, submit_order
 from app.ai_lead_judge import LeadJudgeResult
+from app.attachments import AttachmentProcessingResult, AttachmentReport
 from app.kwork_client import KworkProjectInfo
 from app.storage import Storage
 
@@ -347,6 +348,66 @@ def test_scan_once_includes_attachment_report_in_email_summary(tmp_path):
     assert "ФАЙЛЫ/ТЗ" in lead.summary
     assert "архив открыт" in lead.summary
     assert "внутри brief.txt" in lead.summary
+
+
+def test_scan_once_records_structured_attachment_reports(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+    seen_texts = []
+
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
+        seen_texts.append(text)
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=91,
+            complexity="medium",
+            estimated_days=3,
+            price_rub=15000,
+            summary="Сделать сайт по ТЗ",
+            reasons=["ТЗ прочитано"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте! Сделаю по ТЗ за 3 дня.",
+        )
+
+    def fake_attachment_report(attachments, cookie="", **kwargs):
+        assert kwargs["output_dir"].name.startswith("post_")
+        return AttachmentProcessingResult(
+            context="ФАЙЛЫ/ТЗ:\n- ТЗ.zip\n  Статус: скачан, архив открыт\n  Кратко: внутри brief.txt, нужна форма",
+            reports=(
+                AttachmentReport(
+                    label="ТЗ.zip",
+                    url="https://kwork.ru/files/tz.zip",
+                    local_path=str(tmp_path / "attachments" / "tz.zip"),
+                    status="скачан, архив открыт",
+                    summary="внутри brief.txt, нужна форма",
+                    kind="archive",
+                    opened_archive=True,
+                    ocr_scanned=False,
+                ),
+            ),
+        )
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=FakeKworkProjectClient(
+            response_count=1,
+            attachments=("ТЗ.zip: https://kwork.ru/files/tz.zip",),
+        ),
+        lead_judge=fake_judge,
+        attachment_context_builder=fake_attachment_report,
+    )
+
+    lead = storage.list_leads()[0]
+    attachments = storage.list_lead_attachments(lead.id)
+    assert "внутри brief.txt" in seen_texts[0]
+    assert len(attachments) == 1
+    assert attachments[0].label == "ТЗ.zip"
+    assert attachments[0].opened_archive is True
 
 
 def test_scan_once_includes_kwork_facts_in_email_summary(tmp_path):

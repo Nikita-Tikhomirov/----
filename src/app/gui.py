@@ -12,7 +12,7 @@ from tkinter import ttk
 
 from app.config import load_config
 from app.kwork_sender import KworkReplySender, _extract_reply_terms
-from app.storage import Lead, Storage
+from app.storage import Lead, LeadAttachment, Storage
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -79,6 +79,7 @@ class LeadFunnelGui:
         self.setting_vars: dict[str, StringVar] = {}
         self.current_lead_id: int | None = None
         self.lead_rows: dict[str, int] = {}
+        self.attachment_rows: dict[str, LeadAttachment] = {}
         self.status_var = StringVar(value="Готово")
 
         self._configure_style()
@@ -286,6 +287,35 @@ class LeadFunnelGui:
         text_frame.columnconfigure(1, weight=1)
         text_frame.rowconfigure(1, weight=1)
 
+        attachments_frame = ttk.Frame(frame)
+        attachments_frame.pack(fill="x", pady=(2, 6))
+        ttk.Label(attachments_frame, text="Вложения и отработка", style="Muted.TLabel").pack(anchor="w")
+        attachment_table_frame = ttk.Frame(attachments_frame)
+        attachment_table_frame.pack(fill="x", pady=(4, 0))
+        attachment_columns = ("label", "status", "kind", "local", "summary")
+        self.attachments_table = ttk.Treeview(attachment_table_frame, columns=attachment_columns, show="headings", height=4)
+        attachment_headings = {
+            "label": "Файл",
+            "status": "Статус",
+            "kind": "Тип",
+            "local": "Локально",
+            "summary": "Кратко",
+        }
+        attachment_widths = {"label": 210, "status": 170, "kind": 80, "local": 140, "summary": 470}
+        for column in attachment_columns:
+            self.attachments_table.heading(column, text=attachment_headings[column])
+            self.attachments_table.column(column, width=attachment_widths[column], anchor="w")
+        attachment_scrollbar = ttk.Scrollbar(attachment_table_frame, orient="vertical", command=self.attachments_table.yview)
+        self.attachments_table.configure(yscrollcommand=attachment_scrollbar.set)
+        self.attachments_table.pack(side="left", fill="x", expand=True)
+        attachment_scrollbar.pack(side="right", fill="y")
+
+        attachment_buttons = ttk.Frame(attachments_frame)
+        attachment_buttons.pack(fill="x", pady=(4, 0))
+        ttk.Button(attachment_buttons, text="Открыть файл", command=self.open_selected_attachment, style="Modern.TButton").pack(side="left", padx=(0, 6))
+        ttk.Button(attachment_buttons, text="Открыть ссылку", command=self.open_selected_attachment_link, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(attachment_buttons, text="Скопировать отчет", command=self.copy_selected_attachment_report, style="Modern.TButton").pack(side="left", padx=6)
+
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x", pady=(4, 0))
         ttk.Button(buttons, text="Обновить", command=self.refresh_leads, style="Modern.TButton").pack(side="left", padx=(0, 6))
@@ -373,6 +403,7 @@ class LeadFunnelGui:
         self.summary_text.insert("1.0", _lead_details_text(lead))
         self.reply_text.delete("1.0", END)
         self.reply_text.insert("1.0", lead.draft_reply)
+        self._load_lead_attachments(lead)
 
     def save_lead_edits(self) -> None:
         lead_id = self._selected_lead_id()
@@ -405,6 +436,39 @@ class LeadFunnelGui:
         self.root.clipboard_clear()
         self.root.clipboard_append(url)
         self.lead_status_var.set(f"Ссылка скопирована: {url}")
+
+    def open_selected_attachment(self) -> None:
+        attachment = self._selected_attachment()
+        if attachment is None:
+            return
+        if attachment.local_path and Path(attachment.local_path).exists():
+            self._open_local_path(Path(attachment.local_path))
+            self.lead_status_var.set(f"Открыт файл: {attachment.local_path}")
+            return
+        if attachment.url:
+            self._open_url_in_kwork_chrome(attachment.url)
+            self.lead_status_var.set(f"Открыта ссылка вложения: {attachment.url}")
+            return
+        messagebox.showwarning("Вложение", "У вложения нет локального файла или ссылки.")
+
+    def open_selected_attachment_link(self) -> None:
+        attachment = self._selected_attachment()
+        if attachment is None:
+            return
+        if not attachment.url:
+            messagebox.showwarning("Вложение", "У вложения нет ссылки.")
+            return
+        self._open_url_in_kwork_chrome(attachment.url)
+        self.lead_status_var.set(f"Открыта ссылка вложения: {attachment.url}")
+
+    def copy_selected_attachment_report(self) -> None:
+        attachment = self._selected_attachment()
+        if attachment is None:
+            return
+        report = _attachment_report_text(attachment)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(report)
+        self.lead_status_var.set(f"Отчет по вложению скопирован: {attachment.label}")
 
     def prepare_selected_lead(self) -> None:
         lead = self._selected_lead()
@@ -526,10 +590,14 @@ class LeadFunnelGui:
         )
 
     def _open_kwork_lead(self, lead: Lead) -> str:
+        self._open_url_in_kwork_chrome(lead.contact)
+        return f"opened lead {lead.id}"
+
+    def _open_url_in_kwork_chrome(self, url: str) -> str:
         from app import kwork_source
 
         config = load_config()
-        kwork_source._ensure_chrome_cdp(config.kwork_cdp_url, lead.contact, config.kwork_browser_profile_dir)
+        kwork_source._ensure_chrome_cdp(config.kwork_cdp_url, url, config.kwork_browser_profile_dir)
         version = kwork_source._cdp_json(config.kwork_cdp_url, "/json/version", timeout=5)
         if not version:
             raise RuntimeError("Chrome DevTools недоступен")
@@ -537,10 +605,16 @@ class LeadFunnelGui:
 
         ws = websocket.create_connection(version["webSocketDebuggerUrl"], timeout=10)
         try:
-            kwork_source._send_cdp(ws, "Target.createTarget", {"url": lead.contact})
+            kwork_source._send_cdp(ws, "Target.createTarget", {"url": url})
         finally:
             ws.close()
-        return f"opened lead {lead.id}"
+        return f"opened {url}"
+
+    def _open_local_path(self, path: Path) -> None:
+        if os.name == "nt":
+            os.startfile(str(path))
+            return
+        subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def start_watch(self) -> None:
         if self.watch_process and self.watch_process.poll() is None:
@@ -655,6 +729,27 @@ class LeadFunnelGui:
         self.log.insert(END, text)
         self.log.see(END)
 
+    def _load_lead_attachments(self, lead: Lead) -> None:
+        self.attachment_rows.clear()
+        self.attachments_table.delete(*self.attachments_table.get_children())
+        try:
+            attachments = self._storage().list_lead_attachments(lead.id)
+        except Exception as exc:
+            self.write_log(f"Не удалось загрузить вложения лида #{lead.id}: {exc}\n")
+            attachments = []
+        if not attachments:
+            attachments = _fallback_attachments_from_summary(lead)
+        for attachment in attachments:
+            item_id = self.attachments_table.insert("", END, values=_attachment_row_values(attachment))
+            self.attachment_rows[item_id] = attachment
+
+    def _selected_attachment(self) -> LeadAttachment | None:
+        selected = self.attachments_table.selection()
+        if not selected:
+            messagebox.showwarning("Вложение не выбрано", "Выбери вложение в таблице.")
+            return None
+        return self.attachment_rows.get(selected[0])
+
     def _clear_lead_details(self) -> None:
         self.current_lead_id = None
         self.lead_title_var.set("")
@@ -664,6 +759,8 @@ class LeadFunnelGui:
         self.lead_status_var.set("Лид не выбран")
         self.summary_text.delete("1.0", END)
         self.reply_text.delete("1.0", END)
+        self.attachment_rows.clear()
+        self.attachments_table.delete(*self.attachments_table.get_children())
 
 
 def main() -> int:
@@ -751,6 +848,95 @@ def _normalize_decisions(value: str) -> str:
 
 def _normalize_csv(value: str) -> str:
     return ", ".join(item.strip() for item in value.split(",") if item.strip())
+
+
+def _attachment_row_values(attachment: LeadAttachment) -> tuple[str, str, str, str, str]:
+    return (
+        attachment.label,
+        attachment.status,
+        attachment.kind,
+        _attachment_local_state(attachment),
+        attachment.summary,
+    )
+
+
+def _fallback_attachments_from_summary(lead: Lead) -> list[LeadAttachment]:
+    marker = "ФАЙЛЫ/ТЗ:"
+    if marker not in lead.summary:
+        return []
+
+    section = lead.summary.split(marker, 1)[1]
+    blocks = [block.strip() for block in re.split(r"\n\s*(?=-\s+)", section.strip()) if block.strip()]
+    attachments: list[LeadAttachment] = []
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if not lines or not lines[0].startswith("- "):
+            continue
+        label = lines[0].removeprefix("- ").strip()
+        url = _read_attachment_field(block, "Ссылка")
+        status = _read_attachment_field(block, "Статус")
+        summary = _read_attachment_field(block, "Кратко")
+        if not label and not url:
+            continue
+        kind = _attachment_kind_from_values(label, url, status)
+        attachments.append(
+            LeadAttachment(
+                id=0,
+                lead_id=lead.id,
+                label=label or "attachment",
+                url=url,
+                local_path="",
+                status=status or "нет отчета",
+                summary=summary,
+                kind=kind,
+                opened_archive="архив открыт" in status.lower(),
+                ocr_scanned="ocr" in status.lower(),
+            )
+        )
+    return attachments
+
+
+def _attachment_report_text(attachment: LeadAttachment) -> str:
+    return "\n".join(
+        [
+            f"Файл: {attachment.label}",
+            f"Ссылка: {attachment.url or '-'}",
+            f"Локально: {attachment.local_path or '-'}",
+            f"Статус: {attachment.status or '-'}",
+            f"Тип: {attachment.kind or 'file'}",
+            f"Архив открыт: {'да' if attachment.opened_archive else 'нет'}",
+            f"OCR/фото прочитано: {'да' if attachment.ocr_scanned else 'нет'}",
+            "Кратко:",
+            attachment.summary or "-",
+        ]
+    )
+
+
+def _attachment_local_state(attachment: LeadAttachment) -> str:
+    if not attachment.local_path:
+        return "нет локального файла"
+    path = Path(attachment.local_path)
+    return path.name if path.exists() else "файл не найден"
+
+
+def _read_attachment_field(block: str, field: str) -> str:
+    match = re.search(rf"^\s*{re.escape(field)}:\s*(.*)$", block, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def _attachment_kind_from_values(label: str, url: str, status: str) -> str:
+    haystack = f"{label} {url} {status}".lower()
+    if any(ext in haystack for ext in (".zip", ".rar", ".7z")) or "архив" in haystack:
+        return "archive"
+    if ".pdf" in haystack:
+        return "pdf"
+    if any(ext in haystack for ext in (".doc", ".docx", ".rtf", ".odt")):
+        return "document"
+    if any(ext in haystack for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif")) or "ocr" in haystack:
+        return "image"
+    if any(ext in haystack for ext in (".txt", ".md", ".csv", ".html", ".htm")):
+        return "text"
+    return "file"
 
 
 def _extract_price(lead: Lead) -> int | None:
