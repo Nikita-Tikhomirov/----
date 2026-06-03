@@ -116,6 +116,7 @@ class KworkReplySender:
             project_id = _project_id(contact)
             if not submit:
                 return f"kwork-project-{project_id}-prepared"
+            self._confirm_after_submit(ws)
             self._wait_after_submit(ws)
             return f"kwork-project-{project_id}"
         finally:
@@ -266,6 +267,22 @@ class KworkReplySender:
             return json.loads(result)
         return {"submitted": False, "reason": "Kwork submit script returned no result"}
 
+    def _confirm_after_submit(self, ws) -> None:
+        from app import kwork_source
+
+        deadline = time.monotonic() + min(self.timeout_seconds, 5)
+        while time.monotonic() < deadline:
+            result = kwork_source._evaluate(ws, _CONFIRM_SUBMIT_SCRIPT)
+            data = json.loads(result) if isinstance(result, str) else {"ok": True}
+            if data.get("blocked"):
+                raise RuntimeError(str(data.get("reason") or "Kwork requires manual confirmation"))
+            if data.get("clicked"):
+                time.sleep(0.8)
+                continue
+            if not data.get("hasDialog"):
+                return
+            time.sleep(0.4)
+
     def _wait_after_submit(self, ws) -> None:
         from app import kwork_source
 
@@ -273,11 +290,19 @@ class KworkReplySender:
         while time.monotonic() < deadline:
             text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
             lowered = text.lower()
-            if any(marker in lowered for marker in ("предложение отправлено", "ваше предложение", "отклик отправлен")):
+            if re.search(
+                r"(предложени[ея]\s+отправлен|отклик\s+отправлен|"
+                r"ваш[ее]?\s+предложени[ея]\s+(?:отправлен|размещен|принят)|"
+                r"успешно\s+отправлен)",
+                lowered,
+            ):
                 return
+            if any(marker in lowered for marker in ("sms", "смс", "captcha", "капч", "верификац", "код подтверждения")):
+                raise RuntimeError("Kwork requires manual confirmation before sending the reply")
             if any(marker in lowered for marker in ("обязательное поле", "заполните", "ошибка")):
                 raise RuntimeError("Kwork did not accept the reply; check required fields in the opened project tab")
             time.sleep(0.5)
+        raise RuntimeError("Kwork reply was not confirmed as sent; check the opened tab for confirmation or errors")
 
 
 def _extract_reply_terms(text: str) -> ReplyTerms:
@@ -421,6 +446,38 @@ _AUTO_LOGIN_SCRIPT = r"""
   submit.click();
   return JSON.stringify({started: true});
 }
+"""
+
+_CONFIRM_SUBMIT_SCRIPT = r"""
+(() => {
+  const norm = value => (value || '').replace(/\s+/g, ' ').trim();
+  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const textOf = el => norm(el?.innerText || el?.textContent || el?.value || el?.getAttribute?.('aria-label'));
+  const dialogSelector = '[role=dialog],.modal,.modal-dialog,.popup,.kw-modal,.modal-wrapper,.v--modal-box,.swal2-popup,.js-modal,.js-popup';
+  const dialogs = Array.from(document.querySelectorAll(dialogSelector)).filter(visible);
+  const fixedOverlays = Array.from(document.querySelectorAll('body > div')).filter(el => {
+    const style = window.getComputedStyle(el);
+    return visible(el) && style.position === 'fixed' && textOf(el).length > 20;
+  });
+  const roots = dialogs.length ? dialogs : fixedOverlays.slice(0, 6);
+  for (const root of roots) {
+    const rootText = textOf(root).toLowerCase();
+    if (/(sms|смс|captcha|капч|верификац|подтвердите телефон|код подтверждения|код из сообщения)/i.test(rootText)) {
+      return JSON.stringify({ok: false, blocked: true, reason: 'Kwork requires manual SMS/captcha/verification confirmation'});
+    }
+    const buttons = Array.from(root.querySelectorAll('button,input[type=button],input[type=submit],a,.kw-button,[role=button]')).filter(visible);
+    const button = buttons.find(el => {
+      const text = textOf(el).toLowerCase();
+      if (!text || /(отмена|назад|закрыть|нет|cancel|close)/i.test(text)) return false;
+      return /(подтверд|отправить|продолжить|да|ок|ok|соглас|разместить|предложить|оставить)/i.test(text);
+    });
+    if (button) {
+      button.click();
+      return JSON.stringify({ok: true, clicked: true, hasDialog: true, text: textOf(button)});
+    }
+  }
+  return JSON.stringify({ok: true, clicked: false, hasDialog: roots.length > 0});
+})()
 """
 
 _FILL_AND_SUBMIT_SCRIPT = r"""

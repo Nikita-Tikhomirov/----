@@ -210,6 +210,70 @@ def test_kwork_reply_sender_reconnects_before_project_button_fallback(monkeypatc
     assert result == "kwork-project-3190074-prepared"
 
 
+def test_kwork_reply_sender_confirms_submit_and_waits_for_success(monkeypatch):
+    from app import kwork_source
+
+    events = []
+
+    class FakeWebSocket:
+        def close(self):
+            events.append("close")
+
+    monkeypatch.setattr(kwork_source, "_ensure_chrome_cdp", lambda cdp_url, url, profile_dir: None)
+    monkeypatch.setattr(
+        kwork_source,
+        "_find_or_create_page",
+        lambda cdp_url, url, tab_kind: {"webSocketDebuggerUrl": "ws://test"},
+    )
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda ws, script: "Предложить услугу\nФорма отклика" if "document.body" in script else True,
+    )
+    monkeypatch.setattr("app.kwork_sender.websocket.create_connection", lambda url, timeout: FakeWebSocket())
+    monkeypatch.setattr(KworkReplySender, "_try_open_direct_offer", lambda self, ws, offer_url: True)
+    monkeypatch.setattr(KworkReplySender, "_project_title", lambda self, ws: "Название заказа")
+    monkeypatch.setattr(
+        KworkReplySender,
+        "_fill_and_submit",
+        lambda self, ws, text, terms, title, submit=True: events.append(("submit", submit)) or {"ok": True},
+    )
+    monkeypatch.setattr(KworkReplySender, "_confirm_after_submit", lambda self, ws: events.append("confirm"))
+    monkeypatch.setattr(KworkReplySender, "_wait_after_submit", lambda self, ws: events.append("wait"))
+
+    result = KworkReplySender().send_message(
+        "https://kwork.ru/projects/3190074/view",
+        "Здравствуйте! Сделаю аккуратно.",
+    )
+
+    assert result == "kwork-project-3190074"
+    assert events[:3] == [("submit", True), "confirm", "wait"]
+
+
+def test_wait_after_submit_raises_when_kwork_keeps_form_open(monkeypatch):
+    from app import kwork_source
+
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda ws, script: "Предложить услугу\nОписание\nСтоимость\nНазвание заказа",
+    )
+
+    sender = KworkReplySender(timeout_seconds=0.1)
+
+    with pytest.raises(RuntimeError, match="not confirmed as sent"):
+        sender._wait_after_submit(object())
+
+
+def test_confirmation_script_clicks_kwork_modal_confirmation():
+    from app.kwork_sender import _CONFIRM_SUBMIT_SCRIPT
+
+    assert "role=dialog" in _CONFIRM_SUBMIT_SCRIPT
+    assert "подтверд" in _CONFIRM_SUBMIT_SCRIPT
+    assert "верификац" in _CONFIRM_SUBMIT_SCRIPT
+    assert "button.click()" in _CONFIRM_SUBMIT_SCRIPT
+
+
 def test_switch_to_offer_page_fails_when_kwork_opens_new_inbox_tab(monkeypatch):
     from app import kwork_source
 
