@@ -7,7 +7,7 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, Tk, messagebox, scrolledtext
+from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, TclError, Tk, messagebox, scrolledtext
 from tkinter import ttk
 
 from app.config import load_config
@@ -283,6 +283,8 @@ class LeadFunnelGui:
         self.summary_text.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(4, 0))
         self.reply_text = scrolledtext.ScrolledText(text_frame, height=7, wrap="word", bg="#ffffff", fg=COLORS["text"], insertbackground=COLORS["accent"], relief="solid", bd=1, padx=10, pady=10, font=("Segoe UI", 10))
         self.reply_text.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(4, 0))
+        self._bind_copyable_text(self.summary_text)
+        self._bind_copyable_text(self.reply_text)
         text_frame.columnconfigure(0, weight=1)
         text_frame.columnconfigure(1, weight=1)
         text_frame.rowconfigure(1, weight=1)
@@ -330,6 +332,11 @@ class LeadFunnelGui:
         ttk.Label(parent, text="Здесь видны сканирование, ошибки отправки и действия с лидами.", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
         self.log = scrolledtext.ScrolledText(parent, wrap="word", height=20, bg="#0f172a", fg="#dbeafe", insertbackground="#dbeafe", relief="flat", padx=12, pady=12, font=("Consolas", 10))
         self.log.pack(fill=BOTH, expand=True)
+        self._bind_copyable_text(self.log)
+
+    def _bind_copyable_text(self, widget) -> None:
+        for sequence in ("<Control-c>", "<Control-C>", "<Control-Insert>", "<<Copy>>"):
+            widget.bind(sequence, lambda event: _copy_widget_selection_to_clipboard(event.widget, self.root))
 
     def start_kwork_browser(self) -> None:
         script = ROOT_DIR / "start-kwork-browser.cmd"
@@ -848,6 +855,18 @@ def _normalize_decisions(value: str) -> str:
 
 def _normalize_csv(value: str) -> str:
     return ", ".join(item.strip() for item in value.split(",") if item.strip())
+
+
+def _copy_widget_selection_to_clipboard(widget, clipboard_owner) -> str | None:
+    try:
+        selected_text = widget.get("sel.first", "sel.last")
+    except (TclError, AttributeError):
+        return None
+    if not selected_text:
+        return None
+    clipboard_owner.clipboard_clear()
+    clipboard_owner.clipboard_append(selected_text)
+    return "break"
 
 
 def _attachment_row_values(attachment: LeadAttachment) -> tuple[str, str, str, str, str]:

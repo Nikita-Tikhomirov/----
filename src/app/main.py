@@ -129,6 +129,16 @@ def scan_once(
             if project_info.has_response_count:
                 project_summary_suffix = f", откликов: {project_info.response_count}"
             if project_info.attachments:
+                attachment_lead_context = "\n\n".join(
+                    part
+                    for part in (
+                        post.text,
+                        project_info.title,
+                        project_info.description,
+                        project_info.page_text,
+                    )
+                    if part
+                )
                 attachment_result = _build_attachment_processing_result(
                     attachment_context_builder,
                     project_info.attachments,
@@ -137,6 +147,9 @@ def scan_once(
                     cdp_url=kwork_cdp_url,
                     browser_profile_dir=kwork_browser_profile_dir,
                     output_dir=storage.database_path.parent / "attachments" / f"post_{post_id}",
+                    lead_context=attachment_lead_context,
+                    deepseek_api_key=deepseek_api_key,
+                    deepseek_model=deepseek_model,
                 )
                 attachment_context = attachment_result.context
                 attachment_reports = attachment_result.reports
@@ -201,9 +214,10 @@ def _build_attachment_processing_result(builder, attachments: tuple[str, ...], *
     try:
         result = builder(attachments, **kwargs)
     except TypeError as exc:
-        if "output_dir" not in str(exc):
+        optional_keys = {"output_dir", "lead_context", "deepseek_api_key", "deepseek_model"}
+        if not any(key in str(exc) for key in optional_keys):
             raise
-        fallback_kwargs = {key: value for key, value in kwargs.items() if key != "output_dir"}
+        fallback_kwargs = {key: value for key, value in kwargs.items() if key not in optional_keys}
         result = builder(attachments, **fallback_kwargs)
     if isinstance(result, AttachmentProcessingResult):
         return result

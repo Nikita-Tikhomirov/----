@@ -1,4 +1,5 @@
 from pathlib import Path
+from tkinter import Text, Tk
 
 import pytest
 
@@ -6,6 +7,7 @@ from app.gui import (
     LeadFunnelGui,
     _lead_details_text,
     _attachment_row_values,
+    _copy_widget_selection_to_clipboard,
     _fallback_attachments_from_summary,
     _extract_days,
     _extract_offer_count,
@@ -203,6 +205,29 @@ def test_clickable_url_handler_opens_selected_lead():
 
     assert LeadFunnelGui.open_selected_lead_from_url(dummy) == "break"
     assert dummy.opened == 1
+
+
+def test_text_selection_can_be_copied_to_clipboard():
+    root = Tk()
+    root.withdraw()
+    try:
+        widget = Text(root)
+        widget.insert("1.0", "Данные заказа можно выделить и скопировать")
+        widget.tag_add("sel", "1.0", "1.13")
+
+        assert _copy_widget_selection_to_clipboard(widget, root) == "break"
+        assert root.clipboard_get() == "Данные заказа"
+    finally:
+        root.destroy()
+
+
+def test_lead_text_widgets_bind_copy_shortcuts():
+    source = (Path(__file__).resolve().parents[1] / "src" / "app" / "gui.py").read_text(encoding="utf-8")
+
+    assert "self._bind_copyable_text(self.summary_text)" in source
+    assert "self._bind_copyable_text(self.reply_text)" in source
+    assert "<Control-c>" in source
+    assert "<Control-Insert>" in source
 
 
 def test_gui_extracts_attachment_rows_from_existing_lead_summary():

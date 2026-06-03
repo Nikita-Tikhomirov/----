@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import io
+import json
 import logging
 import os
 import re
@@ -21,6 +22,21 @@ TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".html", ".htm", ".json", ".xml"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z"}
 DEFAULT_TESSERACT_CMD = Path(r"D:\Tesseract-OCR\tesseract.exe")
+IMPORTANT_ARCHIVE_NAME_PARTS = (
+    "тз",
+    "tz",
+    "brief",
+    "бриф",
+    "задани",
+    "тех",
+    "опис",
+    "макет",
+    "design",
+    "figma",
+    "screen",
+    "скрин",
+    "форма",
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +63,20 @@ class AttachmentProcessingResult:
     reports: tuple[AttachmentReport, ...]
 
 
+@dataclass(frozen=True)
+class ArchiveEntryInfo:
+    name: str
+    size: int
+    kind: str
+
+
+@dataclass(frozen=True)
+class ArchiveSelection:
+    names: tuple[str, ...]
+    used_ai: bool
+    reason: str = ""
+
+
 def build_attachment_context(
     attachments: tuple[str, ...],
     cookie: str = "",
@@ -55,6 +85,9 @@ def build_attachment_context(
     use_browser: bool = False,
     cdp_url: str = "http://127.0.0.1:9222",
     browser_profile_dir: str = "",
+    lead_context: str = "",
+    deepseek_api_key: str = "",
+    deepseek_model: str = "deepseek-chat",
 ) -> str:
     """Download small readable attachments and return text for AI context."""
     return build_attachment_report(
@@ -65,6 +98,9 @@ def build_attachment_context(
         use_browser=use_browser,
         cdp_url=cdp_url,
         browser_profile_dir=browser_profile_dir,
+        lead_context=lead_context,
+        deepseek_api_key=deepseek_api_key,
+        deepseek_model=deepseek_model,
     ).context
 
 
@@ -77,6 +113,9 @@ def build_attachment_report(
     cdp_url: str = "http://127.0.0.1:9222",
     browser_profile_dir: str = "",
     output_dir: str | Path | None = None,
+    lead_context: str = "",
+    deepseek_api_key: str = "",
+    deepseek_model: str = "deepseek-chat",
 ) -> AttachmentProcessingResult:
     """Download attachments, save readable originals, and return AI + UI metadata."""
     if not attachments:
@@ -97,7 +136,14 @@ def build_attachment_report(
                 browser_profile_dir=browser_profile_dir,
             )
             local_path = _save_attachment_file(ref, content, output_dir) if output_dir is not None else ""
-            status, extracted = inspect_attachment(ref, content, max_bytes=max_bytes)
+            status, extracted = inspect_attachment(
+                ref,
+                content,
+                max_bytes=max_bytes,
+                lead_context=lead_context,
+                deepseek_api_key=deepseek_api_key,
+                deepseek_model=deepseek_model,
+            )
         except Exception as exc:
             logger.warning("Failed to read attachment %s: %s", ref.url, exc)
             status = "не скачан"
@@ -258,7 +304,14 @@ def extract_attachment_text(ref: AttachmentRef, content: bytes) -> str:
     return inspect_attachment(ref, content)[1]
 
 
-def inspect_attachment(ref: AttachmentRef, content: bytes, max_bytes: int = 2_000_000) -> tuple[str, str]:
+def inspect_attachment(
+    ref: AttachmentRef,
+    content: bytes,
+    max_bytes: int = 2_000_000,
+    lead_context: str = "",
+    deepseek_api_key: str = "",
+    deepseek_model: str = "deepseek-chat",
+) -> tuple[str, str]:
     ext = _extension(ref.url) or _extension(ref.label)
     if ext in TEXT_EXTENSIONS:
         return "скачан, прочитан", _decode_text(content)
@@ -269,7 +322,14 @@ def inspect_attachment(ref: AttachmentRef, content: bytes, max_bytes: int = 2_00
     if ext in IMAGE_EXTENSIONS:
         return _extract_image_ocr(content, ext)
     if ext in ARCHIVE_EXTENSIONS:
-        return _extract_archive(ref, content, max_bytes=max_bytes)
+        return _extract_archive(
+            ref,
+            content,
+            max_bytes=max_bytes,
+            lead_context=lead_context,
+            deepseek_api_key=deepseek_api_key,
+            deepseek_model=deepseek_model,
+        )
     return "скачан, тип не поддержан", "Файл найден, но тип не поддержан для автоматического чтения."
 
 
@@ -405,22 +465,74 @@ def _extract_image_ocr(content: bytes, ext: str) -> tuple[str, str]:
     return "скачан, OCR не выполнен", "OCR выполнился, но текст на изображении не найден."
 
 
-def _extract_archive(ref: AttachmentRef, content: bytes, max_bytes: int) -> tuple[str, str]:
+def _extract_archive(
+    ref: AttachmentRef,
+    content: bytes,
+    max_bytes: int,
+    lead_context: str,
+    deepseek_api_key: str,
+    deepseek_model: str,
+) -> tuple[str, str]:
     ext = _extension(ref.url) or _extension(ref.label)
     if ext != ".zip":
         return "скачан, архив не открыт", "Автоматически открываются только ZIP-архивы; RAR/7Z пока нужно смотреть вручную."
     try:
-        lines = _read_zip_archive(content, max_bytes=max_bytes)
+        lines, selection = _read_zip_archive(
+            ref,
+            content,
+            max_bytes=max_bytes,
+            lead_context=lead_context,
+            deepseek_api_key=deepseek_api_key,
+            deepseek_model=deepseek_model,
+        )
     except zipfile.BadZipFile:
         return "скачан, архив не открыт", "ZIP-архив поврежден или это не ZIP-файл."
-    return "скачан, архив открыт", "\n".join(lines) or "ZIP-архив открыт, но подходящие файлы внутри не найдены."
+    status = "скачан, архив открыт"
+    if selection.used_ai:
+        status += ", AI выбрала файлы" if selection.names else ", AI не выбрала файлы"
+    return status, "\n".join(lines) or "ZIP-архив открыт, но подходящие файлы внутри не найдены."
 
 
-def _read_zip_archive(content: bytes, max_bytes: int, max_entries: int = 8) -> list[str]:
+def _read_zip_archive(
+    ref: AttachmentRef,
+    content: bytes,
+    max_bytes: int,
+    lead_context: str,
+    deepseek_api_key: str,
+    deepseek_model: str,
+    max_entries: int = 8,
+) -> tuple[list[str], ArchiveSelection]:
     lines: list[str] = []
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
-        entries = [info for info in archive.infolist() if not info.is_dir()]
-        for info in entries[:max_entries]:
+        infos = [info for info in archive.infolist() if not info.is_dir()]
+        entries = tuple(_archive_entry_info(info) for info in infos)
+        selection = select_archive_entries_with_deepseek(
+            ref,
+            entries,
+            lead_context=lead_context,
+            api_key=deepseek_api_key,
+            model=deepseek_model,
+            max_entries=max_entries,
+        )
+        selected_names = set(selection.names)
+        if entries:
+            lines.append("Состав архива: " + ", ".join(_format_archive_entry(entry) for entry in entries[:20]))
+            if len(entries) > 20:
+                lines.append(f"Еще файлов в архиве: {len(entries) - 20}, список сокращен.")
+        if selection.used_ai:
+            picked = ", ".join(selection.names) if selection.names else "ничего"
+            reason = f"; причина: {selection.reason}" if selection.reason else ""
+            lines.append(f"AI выбрала файлы: {picked}{reason}")
+        else:
+            picked = ", ".join(selection.names) if selection.names else "ничего"
+            reason = f"; причина: {selection.reason}" if selection.reason else ""
+            lines.append(f"Выбраны файлы для чтения: {picked}{reason}")
+
+        info_by_name = {info.filename: info for info in infos}
+        for name in selection.names:
+            info = info_by_name.get(name)
+            if info is None:
+                continue
             name = info.filename
             if info.file_size > max_bytes:
                 lines.append(f"{name}: пропущен, файл больше лимита {max_bytes} байт")
@@ -434,9 +546,141 @@ def _read_zip_archive(content: bytes, max_bytes: int, max_entries: int = 8) -> l
             status, extracted = inspect_attachment(nested_ref, data, max_bytes=max_bytes)
             nested_status = status.removeprefix("скачан, ")
             lines.append(f"{name}: {nested_status}\n{_shorten(extracted, 1500)}")
-        if len(entries) > max_entries:
-            lines.append(f"Еще файлов в архиве: {len(entries) - max_entries}, не читались из-за лимита.")
-    return lines
+        skipped = [entry.name for entry in entries if entry.name not in selected_names]
+        if skipped:
+            lines.append(f"Не читались по выбору AI/fallback: {', '.join(skipped[:12])}")
+            if len(skipped) > 12:
+                lines.append(f"Еще пропущено файлов: {len(skipped) - 12}.")
+    return lines, selection
+
+
+def _archive_entry_info(info: zipfile.ZipInfo) -> ArchiveEntryInfo:
+    return ArchiveEntryInfo(name=info.filename, size=int(info.file_size), kind=_archive_entry_kind(info.filename))
+
+
+def _archive_entry_kind(name: str) -> str:
+    ext = _extension(name)
+    if ext in TEXT_EXTENSIONS:
+        return "text"
+    if ext == ".docx":
+        return "document"
+    if ext == ".pdf":
+        return "pdf"
+    if ext in IMAGE_EXTENSIONS:
+        return "image"
+    if ext in ARCHIVE_EXTENSIONS:
+        return "archive"
+    return ext.removeprefix(".") or "file"
+
+
+def _format_archive_entry(entry: ArchiveEntryInfo) -> str:
+    return f"{entry.name} ({entry.kind}, {entry.size} B)"
+
+
+def select_archive_entries_with_deepseek(
+    ref: AttachmentRef,
+    entries: tuple[ArchiveEntryInfo, ...],
+    lead_context: str = "",
+    api_key: str = "",
+    model: str = "deepseek-chat",
+    max_entries: int = 8,
+) -> ArchiveSelection:
+    if not entries:
+        return ArchiveSelection(names=(), used_ai=False, reason="архив пустой")
+    fallback = _select_archive_entries_by_rules(entries, max_entries=max_entries)
+    if not api_key:
+        return fallback
+    try:
+        names, reason = _ask_deepseek_for_archive_entries(ref, entries, lead_context, api_key, model, max_entries)
+    except Exception as exc:
+        logger.warning("DeepSeek archive entry selection failed for %s: %s", ref.label, exc)
+        return ArchiveSelection(names=fallback.names, used_ai=False, reason=f"AI не сработала, fallback: {fallback.reason}")
+    valid_names = _valid_archive_names(names, entries, max_entries=max_entries)
+    if not valid_names:
+        return ArchiveSelection(names=fallback.names, used_ai=False, reason=f"AI не выбрала валидные файлы, fallback: {fallback.reason}")
+    return ArchiveSelection(names=valid_names, used_ai=True, reason=_shorten(reason, 250))
+
+
+def _ask_deepseek_for_archive_entries(
+    ref: AttachmentRef,
+    entries: tuple[ArchiveEntryInfo, ...],
+    lead_context: str,
+    api_key: str,
+    model: str,
+    max_entries: int,
+) -> tuple[tuple[str, ...], str]:
+    from openai import OpenAI
+
+    entry_lines = "\n".join(f"- {entry.name} | {entry.kind} | {entry.size} B" for entry in entries[:60])
+    prompt = (
+        "Выбери файлы из ZIP-архива Kwork-заказа, которые нужно прочитать перед оценкой заказа и откликом.\n"
+        "Выбирай только ТЗ, brief, описания, макеты, скриншоты, PDF/DOCX/TXT/HTML/CSV/JSON/XML. "
+        "Не выбирай мусор, системные файлы, дубли и явно нерелевантные заметки. "
+        f"Верни JSON строго вида {{\"read\": [\"filename\"], \"reason\": \"кратко\"}}. "
+        f"Максимум файлов: {max_entries}.\n\n"
+        f"Архив: {ref.label}\n"
+        f"Контекст заказа:\n{_shorten(lead_context, 2500) or 'нет контекста'}\n\n"
+        f"Файлы:\n{entry_lines}"
+    )
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com/v1")
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": "Ты аккуратный помощник, выбираешь только полезные файлы ТЗ внутри архива."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0,
+        max_tokens=500,
+    )
+    content = response.choices[0].message.content or ""
+    payload = _parse_json_object(content)
+    raw_names = payload.get("read", [])
+    if not isinstance(raw_names, list):
+        raw_names = []
+    names = tuple(str(name).strip() for name in raw_names if str(name).strip())
+    reason = str(payload.get("reason", "")).strip()
+    return names, reason
+
+
+def _parse_json_object(raw: str) -> dict:
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("DeepSeek response does not contain JSON object")
+    payload = json.loads(raw[start : end + 1])
+    if not isinstance(payload, dict):
+        raise ValueError("DeepSeek response JSON must be an object")
+    return payload
+
+
+def _valid_archive_names(names: tuple[str, ...], entries: tuple[ArchiveEntryInfo, ...], max_entries: int) -> tuple[str, ...]:
+    allowed = {entry.name for entry in entries}
+    result: list[str] = []
+    for name in names:
+        if name in allowed and name not in result:
+            result.append(name)
+        if len(result) >= max_entries:
+            break
+    return tuple(result)
+
+
+def _select_archive_entries_by_rules(entries: tuple[ArchiveEntryInfo, ...], max_entries: int) -> ArchiveSelection:
+    readable = [entry for entry in entries if entry.kind in {"text", "document", "pdf", "image"}]
+    if not readable:
+        return ArchiveSelection(names=tuple(entry.name for entry in entries[:max_entries]), used_ai=False, reason="поддержанных файлов не найдено")
+    scored = sorted(readable, key=_archive_entry_priority)
+    names = tuple(entry.name for entry in scored[:max_entries])
+    return ArchiveSelection(names=names, used_ai=False, reason="выбраны похожие на ТЗ файлы")
+
+
+def _archive_entry_priority(entry: ArchiveEntryInfo) -> tuple[int, int, str]:
+    lowered = entry.name.lower()
+    if any(part in lowered for part in IMPORTANT_ARCHIVE_NAME_PARTS):
+        name_score = 0
+    else:
+        name_score = 1
+    kind_score = {"document": 0, "pdf": 1, "text": 2, "image": 3}.get(entry.kind, 9)
+    return (name_score, kind_score, entry.name)
 
 
 def _run_tesseract_ocr(content: bytes, ext: str) -> str:

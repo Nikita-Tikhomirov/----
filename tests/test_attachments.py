@@ -2,7 +2,7 @@ import io
 import zipfile
 from pathlib import Path
 
-from app.attachments import build_attachment_context, build_attachment_report, parse_attachment
+from app.attachments import ArchiveSelection, build_attachment_context, build_attachment_report, parse_attachment
 from app.attachments import _cookie_header_from_cdp_cookies
 
 
@@ -233,6 +233,40 @@ def test_build_attachment_report_saves_file_and_exposes_processing_flags(monkeyp
     assert "brief.txt: прочитан" in report.summary
     assert report.local_path
     assert (tmp_path / "attachments" / Path(report.local_path).name).exists()
+
+
+def test_build_attachment_report_uses_ai_to_choose_zip_entries(monkeypatch, tmp_path):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("random-notes.txt", "Это читать не нужно")
+        archive.writestr("brief.txt", "Нужно сверстать форму заявки и адаптив")
+
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: buffer.getvalue(),
+    )
+
+    def fake_select_archive_entries(ref, entries, lead_context="", api_key="", model="deepseek-chat", max_entries=8):
+        assert ref.label == "ТЗ.zip"
+        assert [entry.name for entry in entries] == ["random-notes.txt", "brief.txt"]
+        assert "форма заявки" in lead_context
+        assert api_key == "sk-test"
+        return ArchiveSelection(names=("brief.txt",), used_ai=True, reason="это похоже на ТЗ")
+
+    monkeypatch.setattr("app.attachments.select_archive_entries_with_deepseek", fake_select_archive_entries)
+
+    result = build_attachment_report(
+        ("ТЗ.zip: https://kwork.ru/files/tz.zip",),
+        output_dir=tmp_path / "attachments",
+        lead_context="Заказ: форма заявки на сайте",
+        deepseek_api_key="sk-test",
+    )
+
+    report = result.reports[0]
+    assert "AI выбрала файлы: brief.txt" in report.summary
+    assert "Нужно сверстать форму заявки" in report.summary
+    assert "Это читать не нужно" not in report.summary
+    assert report.status == "скачан, архив открыт, AI выбрала файлы"
 
 
 def test_build_attachment_context_reads_scanned_pdf_with_ocr(monkeypatch):
