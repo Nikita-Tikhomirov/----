@@ -122,6 +122,7 @@ class LeadFunnelGui:
         style.configure("Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"])
         style.configure("Muted.TLabel", background=COLORS["panel"], foreground=COLORS["muted"])
         style.configure("Status.TLabel", background=COLORS["panel_alt"], foreground=COLORS["accent"], padding=(12, 6), font=("Segoe UI Semibold", 10))
+        style.configure("Link.TLabel", background=COLORS["panel"], foreground="#2563eb", font=("Segoe UI", 10, "underline"))
         style.configure("Modern.TButton", padding=(12, 8), background=COLORS["panel"], foreground=COLORS["text"], bordercolor=COLORS["line"])
         style.map("Modern.TButton", background=[("active", COLORS["panel_alt"])])
         style.configure("Accent.TButton", padding=(13, 8), background=COLORS["accent"], foreground="#ffffff", bordercolor=COLORS["accent"])
@@ -261,7 +262,15 @@ class LeadFunnelGui:
         ttk.Label(fields, text="Срок", style="Panel.TLabel").grid(row=0, column=4, sticky="w", padx=(0, 6), pady=2)
         ttk.Entry(fields, textvariable=self.lead_days_var, width=8).grid(row=0, column=5, sticky="w", pady=2)
         ttk.Label(fields, text="Ссылка", style="Panel.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=2)
-        ttk.Entry(fields, textvariable=self.lead_url_var, state="readonly").grid(row=1, column=1, columnspan=5, sticky="ew", pady=2)
+        self.lead_url_label = ttk.Label(
+            fields,
+            textvariable=self.lead_url_var,
+            style="Link.TLabel",
+            cursor="hand2",
+            anchor="w",
+        )
+        self.lead_url_label.grid(row=1, column=1, columnspan=5, sticky="ew", pady=2)
+        self.lead_url_label.bind("<Button-1>", self.open_selected_lead_from_url)
         ttk.Label(fields, textvariable=self.lead_status_var, style="Muted.TLabel", anchor="w").grid(row=2, column=0, columnspan=6, sticky="ew", pady=2)
         fields.columnconfigure(1, weight=1)
 
@@ -383,6 +392,10 @@ class LeadFunnelGui:
         if lead is None:
             return
         self._run_lead_action("Открытие заказа", lambda: self._open_kwork_lead(lead), lead_id=lead.id)
+
+    def open_selected_lead_from_url(self, _event=None) -> str:
+        self.open_selected_lead()
+        return "break"
 
     def copy_selected_lead_url(self) -> None:
         lead = self._selected_lead()

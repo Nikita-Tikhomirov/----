@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from app.gui import (
+    LeadFunnelGui,
     _lead_details_text,
     _extract_days,
     _extract_offer_count,
@@ -177,3 +178,26 @@ def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
     assert "Осталось: 2 д. 17 ч." in details
     assert "КАРТОЧКА KWORK" in details
     assert "AI написал слишком общий заголовок" in details
+
+
+def test_lead_url_is_rendered_as_clickable_link():
+    source = (Path(__file__).resolve().parents[1] / "src" / "app" / "gui.py").read_text(encoding="utf-8")
+
+    assert "self.lead_url_label = ttk.Label" in source
+    assert 'style="Link.TLabel"' in source
+    assert 'cursor="hand2"' in source
+    assert 'self.lead_url_label.bind("<Button-1>", self.open_selected_lead_from_url)' in source
+
+
+def test_clickable_url_handler_opens_selected_lead():
+    class DummyGui:
+        def __init__(self):
+            self.opened = 0
+
+        def open_selected_lead(self):
+            self.opened += 1
+
+    dummy = DummyGui()
+
+    assert LeadFunnelGui.open_selected_lead_from_url(dummy) == "break"
+    assert dummy.opened == 1
