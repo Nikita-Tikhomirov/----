@@ -254,9 +254,9 @@ def process_approvals(
         lead = storage.get_lead(lead_id)
         try:
             telegram_message_id = telegram_client.send_message(lead.contact, lead.draft_reply)
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to send Telegram reply for lead %s", lead_id)
-            storage.mark_failed(lead_id)
+            storage.mark_failed(lead_id, str(exc))
             continue
         storage.mark_sent(lead_id, lead.contact, telegram_message_id)
         logger.info("Sent approved lead %s to %s", lead_id, lead.contact)

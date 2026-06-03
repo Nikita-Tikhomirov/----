@@ -49,6 +49,36 @@ def test_get_lead_for_post_returns_existing_lead(tmp_path):
     assert lead.status == "new"
 
 
+def test_lead_reply_and_last_error_can_be_updated(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="jobs",
+        message_id=44,
+        post_url="https://t.me/jobs/44",
+        text="Нужно сверстать лендинг",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=80,
+        summary="HTML/CSS лендинг",
+        draft_reply="Старый отклик",
+        contact="@client_dev",
+    )
+
+    storage.update_lead_reply(lead_id, "Новый отклик")
+    storage.mark_failed(lead_id, "Kwork submit button was not found")
+
+    failed = storage.get_lead(lead_id)
+    assert failed.draft_reply == "Новый отклик"
+    assert failed.status == "failed"
+    assert "submit button" in failed.last_error
+
+    storage.mark_lead_emailed(lead_id, "<lead@example.com>")
+    assert storage.get_lead(lead_id).last_error == ""
+
+
 def test_approval_can_be_recorded_only_once(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

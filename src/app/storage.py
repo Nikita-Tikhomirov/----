@@ -18,6 +18,7 @@ class Lead:
     status: str
     post_url: str
     post_text: str = ""
+    last_error: str = ""
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,7 @@ class Storage:
                     contact TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'new',
                     email_message_id TEXT,
+                    last_error TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -107,6 +109,7 @@ class Storage:
                 );
                 """
             )
+            _ensure_column(conn, "leads", "last_error", "TEXT NOT NULL DEFAULT ''")
 
     def save_post(
         self,
@@ -159,8 +162,18 @@ class Storage:
     def mark_lead_emailed(self, lead_id: int, email_message_id: str) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE leads SET status = 'emailed', email_message_id = ? WHERE id = ?",
+                "UPDATE leads SET status = 'emailed', email_message_id = ?, last_error = '' WHERE id = ?",
                 (email_message_id, lead_id),
+            )
+
+    def update_lead_reply(self, lead_id: int, draft_reply: str) -> None:
+        clean_reply = draft_reply.strip()
+        if not clean_reply:
+            raise ValueError("Lead draft reply must not be empty")
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE leads SET draft_reply = ?, last_error = '' WHERE id = ?",
+                (clean_reply, lead_id),
             )
 
     def has_lead_for_post(self, post_id: int) -> bool:
@@ -212,12 +225,15 @@ class Storage:
                 """,
                 (lead_id, contact, telegram_message_id),
             )
-            conn.execute("UPDATE leads SET status = 'sent' WHERE id = ?", (lead_id,))
+            conn.execute("UPDATE leads SET status = 'sent', last_error = '' WHERE id = ?", (lead_id,))
         self.create_order_from_lead(lead_id)
 
-    def mark_failed(self, lead_id: int) -> None:
+    def mark_failed(self, lead_id: int, error: str = "") -> None:
         with self._connect() as conn:
-            conn.execute("UPDATE leads SET status = 'failed' WHERE id = ?", (lead_id,))
+            conn.execute(
+                "UPDATE leads SET status = 'failed', last_error = ? WHERE id = ?",
+                (error.strip()[:2000], lead_id),
+            )
 
     def get_lead(self, lead_id: int) -> Lead:
         with self._connect() as conn:
@@ -435,6 +451,7 @@ def _lead_from_row(row: sqlite3.Row) -> Lead:
         status=str(row["status"]),
         post_url=str(row["post_url"]),
         post_text=str(row["raw_text"]) if "raw_text" in keys else "",
+        last_error=str(row["last_error"]) if "last_error" in keys else "",
     )
 
 
@@ -471,3 +488,9 @@ def _insert_order_review(
     except sqlite3.IntegrityError:
         return False
     return True
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

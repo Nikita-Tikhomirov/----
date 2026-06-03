@@ -62,8 +62,15 @@ def test_reply_form_opener_supports_kwork_span_buttons():
     assert "Введите название заказа" in _FILL_AND_SUBMIT_SCRIPT
     assert 'textarea[name="name"]' in _FILL_AND_SUBMIT_SCRIPT
     assert "payload.title" in _FILL_AND_SUBMIT_SCRIPT
+    assert "payload.submit" in _FILL_AND_SUBMIT_SCRIPT
     assert "input[type=tel]" in _FILL_AND_SUBMIT_SCRIPT
     assert "input[type=search]" in _FILL_AND_SUBMIT_SCRIPT
+
+
+def test_kwork_reply_sender_has_prepare_mode():
+    sender = KworkReplySender()
+
+    assert hasattr(sender, "prepare_reply")
 
 
 def test_kwork_reply_sender_rejects_non_kwork_project_url():

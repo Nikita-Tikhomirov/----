@@ -43,6 +43,27 @@ class KworkReplySender:
         self.login_password = login_password
 
     def send_message(self, contact: str, text: str) -> str:
+        return self.send_reply(contact, text, submit=True)
+
+    def prepare_reply(
+        self,
+        contact: str,
+        text: str,
+        price_rub: int | None = None,
+        days: int | None = None,
+        title: str = "",
+    ) -> str:
+        return self.send_reply(contact, text, price_rub=price_rub, days=days, title=title, submit=False)
+
+    def send_reply(
+        self,
+        contact: str,
+        text: str,
+        price_rub: int | None = None,
+        days: int | None = None,
+        title: str = "",
+        submit: bool = True,
+    ) -> str:
         if not _is_kwork_project_url(contact):
             raise ValueError("Kwork sender requires a Kwork project URL")
         clean_text = text.strip()
@@ -71,14 +92,20 @@ class KworkReplySender:
                 login_message = _login_required_message(page_text, has_reply_field=has_field)
                 if login_message:
                     raise RuntimeError(login_message)
-            terms = _extract_reply_terms(clean_text)
-            project_title = self._project_title(ws)
-            submit_result = self._fill_and_submit(ws, clean_text, terms, project_title)
-            if not submit_result.get("submitted"):
+            extracted_terms = _extract_reply_terms(clean_text)
+            terms = ReplyTerms(
+                price_rub=price_rub if price_rub is not None else extracted_terms.price_rub,
+                days=days if days is not None else extracted_terms.days,
+            )
+            project_title = (title or self._project_title(ws)).strip()
+            submit_result = self._fill_and_submit(ws, clean_text, terms, project_title, submit=submit)
+            if not submit_result.get("ok"):
                 reason = submit_result.get("reason") or "Kwork submit button was not found"
                 raise RuntimeError(str(reason))
-            self._wait_after_submit(ws)
             project_id = _project_id(contact)
+            if not submit:
+                return f"kwork-project-{project_id}-prepared"
+            self._wait_after_submit(ws)
             return f"kwork-project-{project_id}"
         finally:
             ws.close()
@@ -164,7 +191,7 @@ class KworkReplySender:
         )
         return title[:70]
 
-    def _fill_and_submit(self, ws, text: str, terms: ReplyTerms, title: str = "") -> dict:
+    def _fill_and_submit(self, ws, text: str, terms: ReplyTerms, title: str = "", submit: bool = True) -> dict:
         from app import kwork_source
 
         payload = json.dumps(
@@ -173,6 +200,7 @@ class KworkReplySender:
                 "title": title,
                 "price": "" if terms.price_rub is None else str(terms.price_rub),
                 "days": "" if terms.days is None else str(terms.days),
+                "submit": submit,
             },
             ensure_ascii=False,
         )
@@ -356,12 +384,22 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
   if (titleTextarea && payload.title) setValue(titleTextarea, payload.title.slice(0, 70));
   const daysField = fields.find(el => /срок|дн|day|days|duration|deadline/.test(meta(el))) || document.querySelector('input[placeholder="Срок выполнения"], input.vs__search');
   if (daysField && payload.days) setValue(daysField, payload.days);
+  if (!payload.submit) {
+    return JSON.stringify({
+      ok: true,
+      submitted: false,
+      priceFilled: Boolean(priceField && payload.price),
+      titleFilled: Boolean(titleField && payload.title),
+      daysFilled: Boolean(daysField && payload.days)
+    });
+  }
   const form = messageField.closest('form') || document;
   const buttons = Array.from(form.querySelectorAll('button,input[type=submit],input[type=button],a')).filter(visible);
   const submit = buttons.find(el => /отправить|предложить|оставить предложение|разместить|подать/i.test(norm(el.innerText || el.value || el.getAttribute('aria-label'))));
-  if (!submit) return JSON.stringify({submitted: false, reason: 'Kwork submit button was not found'});
+  if (!submit) return JSON.stringify({ok: false, submitted: false, reason: 'Kwork submit button was not found'});
   submit.click();
   return JSON.stringify({
+    ok: true,
     submitted: true,
     priceFilled: Boolean(priceField && payload.price),
     titleFilled: Boolean(titleField && payload.title),

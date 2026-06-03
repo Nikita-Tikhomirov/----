@@ -180,7 +180,7 @@ def inspect_attachment(ref: AttachmentRef, content: bytes, max_bytes: int = 2_00
     if ext == ".docx":
         return "скачан, прочитан", _extract_docx(content)
     if ext == ".pdf":
-        return "скачан, прочитан", _extract_pdf(content)
+        return _extract_pdf(content)
     if ext in IMAGE_EXTENSIONS:
         return _extract_image_ocr(content, ext)
     if ext in ARCHIVE_EXTENSIONS:
@@ -250,19 +250,48 @@ def _cookie_header_from_cdp_cookies(cookies: list[dict], url: str) -> str:
     return "; ".join(pairs)
 
 
-def _extract_pdf(content: bytes) -> str:
+def _extract_pdf(content: bytes) -> tuple[str, str]:
     try:
         from pypdf import PdfReader
     except ImportError:
         try:
             from PyPDF2 import PdfReader
         except ImportError:
-            return "PDF найден, но библиотека для чтения PDF не установлена."
+            return "скачан, текст не извлечен", "PDF найден, но библиотека для чтения PDF не установлена."
     reader = PdfReader(io.BytesIO(content))
     pages = []
     for page in reader.pages[:5]:
         pages.append(page.extract_text() or "")
-    return "\n".join(text for text in pages if text.strip()) or "PDF прочитан, но текст не извлечен."
+    extracted = "\n".join(text for text in pages if text.strip())
+    if extracted.strip():
+        return "скачан, прочитан", extracted
+    try:
+        ocr_text = _extract_pdf_ocr(content)
+    except Exception as exc:
+        return "скачан, текст не извлечен", f"PDF без текстового слоя. OCR PDF не выполнен: {exc}"
+    if ocr_text.strip():
+        return "скачан, OCR прочитан", "PDF без текстового слоя. OCR:\n" + ocr_text
+    return "скачан, OCR не выполнен", "PDF без текстового слоя. OCR выполнился, но текст не найден."
+
+
+def _extract_pdf_ocr(content: bytes, max_pages: int = 3) -> str:
+    try:
+        import fitz
+    except ImportError as exc:
+        raise RuntimeError("PyMuPDF не установлен для OCR PDF") from exc
+    document = fitz.open(stream=content, filetype="pdf")
+    texts: list[str] = []
+    try:
+        for page_index in range(min(max_pages, document.page_count)):
+            page = document.load_page(page_index)
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image_bytes = pixmap.tobytes("png")
+            text = _run_tesseract_ocr(image_bytes, ".png")
+            if text.strip():
+                texts.append(f"Страница {page_index + 1}: {text.strip()}")
+    finally:
+        document.close()
+    return "\n".join(texts)
 
 
 def _extract_image_ocr(content: bytes, ext: str) -> tuple[str, str]:

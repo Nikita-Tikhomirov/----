@@ -89,8 +89,9 @@ class EmailClient:
         with imaplib.IMAP4_SSL(self.imap_host, self.imap_port) as imap:
             imap.login(self.imap_user, self.imap_password)
             imap.select("INBOX")
-            _, data = imap.search(None, "UNSEEN")
-            for message_id in data[0].split():
+            _, data = imap.search(None, "ALL")
+            message_ids = data[0].split()[-80:]
+            for message_id in message_ids:
                 _, fetched = imap.fetch(message_id, "(RFC822)")
                 raw = fetched[0][1]
                 parsed.append(BytesParser(policy=policy.default).parsebytes(raw))

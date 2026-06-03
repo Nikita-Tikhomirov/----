@@ -2,7 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from app.gui import build_app_command, build_script_command, normalize_filter_settings, read_env_values, update_env_values
+from app.gui import (
+    _extract_days,
+    _extract_price,
+    _lead_title,
+    _parse_optional_int,
+    build_app_command,
+    build_script_command,
+    normalize_filter_settings,
+    read_env_values,
+    update_env_values,
+)
+from app.storage import Lead
 
 
 def test_build_app_command_runs_module_with_src_pythonpath(tmp_path):
@@ -94,3 +105,27 @@ def test_normalize_filter_settings_validates_numbers_and_decisions():
 def test_normalize_filter_settings_rejects_bad_kwork_url():
     with pytest.raises(ValueError, match="Страница Kwork"):
         normalize_filter_settings({"KWORK_PROJECTS_URL": "https://example.com/projects"})
+
+
+def test_lead_gui_helpers_extract_editable_fields():
+    lead = Lead(
+        id=12,
+        post_id=3,
+        score=80,
+        summary="AI: accept\nСрок: 3 дн.\nЦена: 7000 руб.\nЗадача: Поправить форму заявки на WordPress",
+        draft_reply="Здравствуйте! Сделаю за 2 дня, цена 5000 руб.",
+        contact="https://kwork.ru/projects/1",
+        status="emailed",
+        post_url="https://kwork.ru/projects/1",
+    )
+
+    assert _extract_price(lead) == 5000
+    assert _extract_days(lead) == 2
+    assert _lead_title(lead) == "Поправить форму заявки на WordPress"
+    assert _parse_optional_int(" 12 000 ", "Цена") == 12000
+    assert _parse_optional_int("", "Цена") is None
+
+
+def test_parse_optional_int_rejects_negative_values():
+    with pytest.raises(ValueError, match="больше 0"):
+        _parse_optional_int("-1", "Цена")

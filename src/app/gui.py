@@ -5,7 +5,12 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from tkinter import BOTH, DISABLED, END, NORMAL, Button, Entry, Label, LabelFrame, StringVar, Tk, messagebox, scrolledtext
+from tkinter import BOTH, DISABLED, END, NORMAL, Button, Entry, Label, LabelFrame, StringVar, Text, Tk, messagebox, scrolledtext
+from tkinter import ttk
+
+from app.config import load_config
+from app.kwork_sender import KworkReplySender, _extract_reply_terms
+from app.storage import Lead, Storage
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -55,11 +60,14 @@ class LeadFunnelGui:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.watch_process: subprocess.Popen[str] | None = None
         self.setting_vars: dict[str, StringVar] = {}
+        self.current_lead_id: int | None = None
+        self.lead_rows: dict[str, int] = {}
 
         self.status = Label(root, text="Готово", anchor="w")
         self.status.pack(fill="x", padx=10, pady=(10, 4))
 
         self._create_settings_panel()
+        self._create_leads_panel()
 
         self.start_browser_button = Button(root, text="1. Открыть Kwork Chrome", command=self.start_kwork_browser)
         self.start_browser_button.pack(fill="x", padx=10, pady=3)
@@ -79,10 +87,11 @@ class LeadFunnelGui:
         self.clear_button = Button(root, text="Очистить лог", command=self.clear_log)
         self.clear_button.pack(fill="x", padx=10, pady=3)
 
-        self.log = scrolledtext.ScrolledText(root, wrap="word", height=24)
+        self.log = scrolledtext.ScrolledText(root, wrap="word", height=10)
         self.log.pack(fill=BOTH, expand=True, padx=10, pady=(8, 10))
         self.write_log("Открой Kwork Chrome, войди в Kwork один раз, затем запускай сканирование или мониторинг.\n")
         self.write_log(self._filter_summary())
+        self.refresh_leads()
 
     def _create_settings_panel(self) -> None:
         frame = LabelFrame(self.root, text="Настройки отбора")
@@ -112,6 +121,63 @@ class LeadFunnelGui:
             pady=(8, 6),
         )
 
+    def _create_leads_panel(self) -> None:
+        frame = LabelFrame(self.root, text="Лиды и отклик")
+        frame.pack(fill="both", padx=10, pady=(0, 8))
+
+        table_frame = ttk.Frame(frame)
+        table_frame.pack(fill="x", padx=8, pady=(8, 4))
+        columns = ("id", "status", "score", "price", "days", "title")
+        self.leads_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=7)
+        headings = {
+            "id": "ID",
+            "status": "Статус",
+            "score": "Score",
+            "price": "Цена",
+            "days": "Дн.",
+            "title": "Задача",
+        }
+        widths = {"id": 50, "status": 90, "score": 60, "price": 80, "days": 55, "title": 620}
+        for column in columns:
+            self.leads_table.heading(column, text=headings[column])
+            self.leads_table.column(column, width=widths[column], anchor="w")
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.leads_table.yview)
+        self.leads_table.configure(yscrollcommand=scrollbar.set)
+        self.leads_table.pack(side="left", fill="x", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self.leads_table.bind("<<TreeviewSelect>>", self.on_lead_select)
+
+        fields = ttk.Frame(frame)
+        fields.pack(fill="x", padx=8, pady=4)
+        self.lead_title_var = StringVar()
+        self.lead_price_var = StringVar()
+        self.lead_days_var = StringVar()
+        self.lead_status_var = StringVar(value="Лид не выбран")
+
+        Label(fields, text="Название").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=2)
+        Entry(fields, textvariable=self.lead_title_var).grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=2)
+        Label(fields, text="Цена").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=2)
+        Entry(fields, textvariable=self.lead_price_var, width=10).grid(row=0, column=3, sticky="w", padx=(0, 8), pady=2)
+        Label(fields, text="Срок, дней").grid(row=0, column=4, sticky="w", padx=(0, 6), pady=2)
+        Entry(fields, textvariable=self.lead_days_var, width=8).grid(row=0, column=5, sticky="w", pady=2)
+        Label(fields, textvariable=self.lead_status_var, anchor="w").grid(row=1, column=0, columnspan=6, sticky="ew", pady=2)
+        fields.columnconfigure(1, weight=1)
+
+        text_frame = ttk.Frame(frame)
+        text_frame.pack(fill="both", expand=True, padx=8, pady=4)
+        self.summary_text = Text(text_frame, height=5, wrap="word")
+        self.summary_text.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        self.reply_text = Text(text_frame, height=5, wrap="word")
+        self.reply_text.pack(side="left", fill="both", expand=True, padx=(6, 0))
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", padx=8, pady=(4, 8))
+        Button(buttons, text="Обновить лиды", command=self.refresh_leads).pack(side="left", padx=(0, 6))
+        Button(buttons, text="Сохранить правки", command=self.save_lead_edits).pack(side="left", padx=6)
+        Button(buttons, text="Открыть заказ", command=self.open_selected_lead).pack(side="left", padx=6)
+        Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead).pack(side="left", padx=6)
+        Button(buttons, text="Отправить отклик", command=self.send_selected_lead).pack(side="left", padx=6)
+
     def start_kwork_browser(self) -> None:
         script = ROOT_DIR / "start-kwork-browser.cmd"
         self._run_once(build_script_command(script), os.environ.copy(), "Kwork Chrome")
@@ -123,6 +189,206 @@ class LeadFunnelGui:
     def process_approvals(self) -> None:
         command, env = build_app_command("approvals")
         self._run_once(command, env, "Проверка OK")
+
+    def refresh_leads(self) -> None:
+        try:
+            storage = self._storage()
+            leads = storage.list_leads()
+        except Exception as exc:
+            self.write_log(f"Не удалось загрузить лиды: {exc}\n")
+            return
+        self.lead_rows.clear()
+        self.leads_table.delete(*self.leads_table.get_children())
+        for lead in reversed(leads[-80:]):
+            price = _extract_price(lead)
+            days = _extract_days(lead)
+            title = _lead_title(lead)
+            item_id = self.leads_table.insert(
+                "",
+                END,
+                values=(lead.id, lead.status, lead.score, price or "", days or "", title),
+            )
+            self.lead_rows[item_id] = lead.id
+
+    def on_lead_select(self, _event=None) -> None:
+        selected = self.leads_table.selection()
+        if not selected:
+            return
+        lead_id = self.lead_rows.get(selected[0])
+        if lead_id is None:
+            return
+        try:
+            lead = self._storage().get_lead(lead_id)
+        except Exception as exc:
+            self.write_log(f"Не удалось открыть лид #{lead_id}: {exc}\n")
+            return
+        self.current_lead_id = lead.id
+        self.lead_title_var.set(_lead_title(lead))
+        self.lead_price_var.set(str(_extract_price(lead) or ""))
+        self.lead_days_var.set(str(_extract_days(lead) or ""))
+        status = f"Лид #{lead.id}: {lead.status}; ссылка: {lead.post_url}"
+        if lead.last_error:
+            status += f"; ошибка: {lead.last_error}"
+        self.lead_status_var.set(status)
+        self.summary_text.delete("1.0", END)
+        self.summary_text.insert("1.0", lead.summary)
+        self.reply_text.delete("1.0", END)
+        self.reply_text.insert("1.0", lead.draft_reply)
+
+    def save_lead_edits(self) -> None:
+        lead_id = self._selected_lead_id()
+        if lead_id is None:
+            return
+        reply = self.reply_text.get("1.0", END).strip()
+        try:
+            self._storage().update_lead_reply(lead_id, reply)
+        except Exception as exc:
+            messagebox.showerror("Ошибка", str(exc))
+            return
+        self.write_log(f"Лид #{lead_id}: текст отклика сохранен.\n")
+        self.refresh_leads()
+
+    def open_selected_lead(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        self._run_lead_action("Открытие заказа", lambda: self._open_kwork_lead(lead), lead_id=lead.id)
+
+    def prepare_selected_lead(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        self._save_selected_reply_if_changed(lead.id)
+        try:
+            payload = self._lead_payload(lead)
+        except ValueError as exc:
+            messagebox.showerror("Ошибка", str(exc))
+            return
+        self._run_lead_action(
+            f"Заполнение лида #{lead.id}",
+            lambda: self._sender().prepare_reply(
+                lead.contact,
+                payload["reply"],
+                price_rub=payload["price"],
+                days=payload["days"],
+                title=payload["title"],
+            ),
+            lead_id=lead.id,
+        )
+
+    def send_selected_lead(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        if not messagebox.askyesno("Отправить отклик", f"Реально отправить отклик по лиду #{lead.id}?"):
+            return
+        self._save_selected_reply_if_changed(lead.id)
+        try:
+            payload = self._lead_payload(lead)
+        except ValueError as exc:
+            messagebox.showerror("Ошибка", str(exc))
+            return
+        self._run_lead_action(
+            f"Отправка лида #{lead.id}",
+            lambda: self._send_lead_now(lead, payload),
+            lead_id=lead.id,
+        )
+
+    def _send_lead_now(self, lead: Lead, payload: dict) -> str:
+        message_id = self._sender().send_reply(
+            lead.contact,
+            payload["reply"],
+            price_rub=payload["price"],
+            days=payload["days"],
+            title=payload["title"],
+            submit=True,
+        )
+        self._storage().mark_sent(lead.id, lead.contact, message_id)
+        return message_id
+
+    def _run_lead_action(self, label: str, action, lead_id: int | None = None) -> None:
+        self.status.config(text=f"{label}: выполняется")
+        self.write_log(f"=== {label}: старт ===\n")
+        threading.Thread(target=self._run_lead_action_thread, args=(label, action, lead_id), daemon=True).start()
+
+    def _run_lead_action_thread(self, label: str, action, lead_id: int | None) -> None:
+        try:
+            result = action()
+        except Exception as exc:
+            if lead_id is not None:
+                try:
+                    self._storage().mark_failed(lead_id, str(exc))
+                except Exception:
+                    pass
+            self.write_log(f"=== {label}: ошибка: {exc} ===\n")
+            self.root.after(0, lambda: self.status.config(text=f"{label}: ошибка"))
+        else:
+            self.write_log(f"=== {label}: готово ({result}) ===\n")
+            self.root.after(0, lambda: self.status.config(text=f"{label}: готово"))
+        finally:
+            self.root.after(0, self.refresh_leads)
+
+    def _lead_payload(self, lead: Lead) -> dict:
+        reply = self.reply_text.get("1.0", END).strip()
+        if not reply:
+            raise ValueError("Текст отклика пустой")
+        return {
+            "reply": reply,
+            "title": self.lead_title_var.get().strip() or _lead_title(lead),
+            "price": _parse_optional_int(self.lead_price_var.get(), "Цена"),
+            "days": _parse_optional_int(self.lead_days_var.get(), "Срок"),
+        }
+
+    def _save_selected_reply_if_changed(self, lead_id: int) -> None:
+        reply = self.reply_text.get("1.0", END).strip()
+        if reply:
+            self._storage().update_lead_reply(lead_id, reply)
+
+    def _selected_lead_id(self) -> int | None:
+        selected = self.leads_table.selection()
+        if not selected:
+            messagebox.showwarning("Лид не выбран", "Выбери лид в таблице.")
+            return None
+        return self.lead_rows.get(selected[0])
+
+    def _selected_lead(self) -> Lead | None:
+        lead_id = self._selected_lead_id()
+        if lead_id is None:
+            return None
+        return self._storage().get_lead(lead_id)
+
+    def _storage(self) -> Storage:
+        config = load_config()
+        storage = Storage(config.database_path)
+        storage.initialize()
+        return storage
+
+    def _sender(self) -> KworkReplySender:
+        config = load_config()
+        return KworkReplySender(
+            timeout_seconds=45,
+            cdp_url=config.kwork_cdp_url,
+            browser_profile_dir=config.kwork_browser_profile_dir,
+            login_email=config.kwork_login_email,
+            login_password=config.kwork_login_password,
+        )
+
+    def _open_kwork_lead(self, lead: Lead) -> str:
+        from app import kwork_source
+
+        config = load_config()
+        kwork_source._ensure_chrome_cdp(config.kwork_cdp_url, lead.contact, config.kwork_browser_profile_dir)
+        version = kwork_source._cdp_json(config.kwork_cdp_url, "/json/version", timeout=5)
+        if not version:
+            raise RuntimeError("Chrome DevTools недоступен")
+        import websocket
+
+        ws = websocket.create_connection(version["webSocketDebuggerUrl"], timeout=10)
+        try:
+            kwork_source._send_cdp(ws, "Target.createTarget", {"url": lead.contact})
+        finally:
+            ws.close()
+        return f"opened lead {lead.id}"
 
     def start_watch(self) -> None:
         if self.watch_process and self.watch_process.poll() is None:
@@ -323,6 +589,48 @@ def _normalize_decisions(value: str) -> str:
 
 def _normalize_csv(value: str) -> str:
     return ", ".join(item.strip() for item in value.split(",") if item.strip())
+
+
+def _extract_price(lead: Lead) -> int | None:
+    terms = _extract_reply_terms(lead.draft_reply)
+    if terms.price_rub is not None:
+        return terms.price_rub
+    import re
+
+    match = re.search(r"Цена:\s*(\d[\d\s]*)\s*руб", lead.summary, re.IGNORECASE)
+    return int(match.group(1).replace(" ", "")) if match else None
+
+
+def _extract_days(lead: Lead) -> int | None:
+    terms = _extract_reply_terms(lead.draft_reply)
+    if terms.days is not None:
+        return terms.days
+    import re
+
+    match = re.search(r"Срок:\s*(\d{1,2})\s*дн", lead.summary, re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _lead_title(lead: Lead) -> str:
+    for line in lead.summary.splitlines():
+        clean = line.strip()
+        if clean.startswith("Задача:"):
+            return clean.removeprefix("Задача:").strip()[:70]
+    first_line = next((line.strip() for line in lead.summary.splitlines() if line.strip()), "")
+    return (first_line or f"Kwork lead {lead.id}")[:70]
+
+
+def _parse_optional_int(value: str, label: str) -> int | None:
+    clean = value.strip().replace(" ", "")
+    if not clean:
+        return None
+    try:
+        number = int(clean)
+    except ValueError as exc:
+        raise ValueError(f"{label}: нужно число") from exc
+    if number <= 0:
+        raise ValueError(f"{label}: число должно быть больше 0")
+    return number
 
 
 if __name__ == "__main__":

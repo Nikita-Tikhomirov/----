@@ -205,6 +205,44 @@ def test_build_attachment_context_opens_zip_and_reads_inner_text(monkeypatch):
     assert "Нужно сверстать лендинг" in context
 
 
+def test_build_attachment_context_reads_scanned_pdf_with_ocr(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: _blank_pdf_bytes(),
+    )
+    monkeypatch.setattr(
+        "app.attachments._extract_pdf_ocr",
+        lambda content: "На PDF скане инструкция по cookie-уведомлению",
+    )
+
+    context = build_attachment_context(
+        ("ТЗ.pdf: https://kwork.ru/files/tz.pdf",),
+        cookie="",
+    )
+
+    assert "Статус: скачан, OCR прочитан" in context
+    assert "инструкция по cookie" in context
+
+
+def test_build_attachment_context_reports_pdf_ocr_failure(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: _blank_pdf_bytes(),
+    )
+    monkeypatch.setattr(
+        "app.attachments._extract_pdf_ocr",
+        lambda content: (_ for _ in ()).throw(RuntimeError("Tesseract не найден")),
+    )
+
+    context = build_attachment_context(
+        ("ТЗ.pdf: https://kwork.ru/files/tz.pdf",),
+        cookie="",
+    )
+
+    assert "Статус: скачан, текст не извлечен" in context
+    assert "OCR PDF не выполнен" in context
+
+
 def _docx_bytes(text: str) -> bytes:
     from docx import Document
 
@@ -213,3 +251,13 @@ def _docx_bytes(text: str) -> bytes:
     buffer = io.BytesIO()
     document.save(buffer)
     return buffer.getvalue()
+
+
+def _blank_pdf_bytes() -> bytes:
+    import fitz
+
+    document = fitz.open()
+    document.new_page(width=200, height=200)
+    data = document.tobytes()
+    document.close()
+    return data
