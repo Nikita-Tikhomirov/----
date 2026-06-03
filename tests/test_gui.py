@@ -13,8 +13,10 @@ from app.gui import (
     _extract_offer_count,
     _extract_price,
     _extract_remaining_time,
+    _format_datetime,
     _lead_title,
     _parse_optional_int,
+    _should_refresh_after_process,
     build_lead_row_values,
     build_app_command,
     build_script_command,
@@ -144,6 +146,26 @@ def test_parse_optional_int_rejects_negative_values():
         _parse_optional_int("-1", "Цена")
 
 
+def test_format_datetime_displays_moscow_time():
+    assert _format_datetime("2026-05-04T07:30:00+00:00") == "04.05 10:30 МСК"
+    assert _format_datetime("2026-05-04T10:30:00+03:00") == "04.05 10:30 МСК"
+    assert _format_datetime("2026-05-04 10:30:00") == "04.05 10:30 МСК"
+
+
+def test_scan_and_approval_processes_trigger_lead_refresh():
+    assert _should_refresh_after_process("Сканирование")
+    assert _should_refresh_after_process("Проверка OK")
+    assert not _should_refresh_after_process("Kwork Chrome")
+
+
+def test_monitoring_schedules_periodic_lead_refresh():
+    source = (Path(__file__).resolve().parents[1] / "src" / "app" / "gui.py").read_text(encoding="utf-8")
+
+    assert "self._schedule_watch_refresh()" in source
+    assert "self.watch_refresh_after_id = self.root.after" in source
+    assert "self._cancel_watch_refresh()" in source
+
+
 def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
     lead = Lead(
         id=18,
@@ -169,9 +191,9 @@ def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
     assert _extract_remaining_time(lead) == "2 д. 17 ч."
     assert build_lead_row_values(lead) == (
         18,
-        "04.05 10:30",
+        "04.05 10:30 МСК",
         4,
-        "отправлен 04.05 10:45",
+        "отправлен 04.05 10:45 МСК",
         "sent",
         65,
         9000,

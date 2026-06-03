@@ -5,7 +5,7 @@ import re
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, TclError, Tk, messagebox, scrolledtext
 from tkinter import ttk
@@ -17,6 +17,9 @@ from app.storage import Lead, LeadAttachment, Storage
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_PATH = ROOT_DIR / ".env"
+MOSCOW_TZ = timezone(timedelta(hours=3), "МСК")
+WATCH_REFRESH_MS = 5000
+REFRESH_AFTER_LABELS = {"Сканирование", "Проверка OK"}
 
 FILTER_SETTINGS = (
     ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
@@ -77,6 +80,7 @@ class LeadFunnelGui:
         self.root.configure(bg=COLORS["bg"])
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.watch_process: subprocess.Popen[str] | None = None
+        self.watch_refresh_after_id: str | None = None
         self.setting_vars: dict[str, StringVar] = {}
         self.current_lead_id: int | None = None
         self.lead_rows: dict[str, int] = {}
@@ -644,6 +648,7 @@ class LeadFunnelGui:
         self.start_watch_button.config(state=DISABLED)
         self.stop_watch_button.config(state=NORMAL)
         self.write_log("=== Мониторинг запущен ===\n")
+        self._schedule_watch_refresh()
         threading.Thread(target=self._stream_process, args=(self.watch_process, "Мониторинг"), daemon=True).start()
 
     def stop_watch(self) -> None:
@@ -651,7 +656,9 @@ class LeadFunnelGui:
             self.status_var.set("Мониторинг не запущен")
             self.start_watch_button.config(state=NORMAL)
             self.stop_watch_button.config(state=DISABLED)
+            self._cancel_watch_refresh()
             return
+        self._cancel_watch_refresh()
         self.watch_process.terminate()
         try:
             self.watch_process.wait(timeout=5)
@@ -696,6 +703,7 @@ class LeadFunnelGui:
         )
 
     def close(self) -> None:
+        self._cancel_watch_refresh()
         self.stop_watch()
         self.root.destroy()
 
@@ -719,6 +727,8 @@ class LeadFunnelGui:
         self._stream_process(process, label)
         self.root.after(0, lambda: self.status_var.set(f"{label}: завершено"))
         self.write_log(f"=== {label}: завершено с кодом {process.returncode} ===\n")
+        if _should_refresh_after_process(label):
+            self.root.after(0, self.refresh_leads)
 
     def _stream_process(self, process: subprocess.Popen[str], label: str) -> None:
         assert process.stdout is not None
@@ -726,6 +736,8 @@ class LeadFunnelGui:
             self.write_log(line)
         process.wait()
         if process is self.watch_process:
+            self.root.after(0, self._cancel_watch_refresh)
+            self.root.after(0, self.refresh_leads)
             self.root.after(0, lambda: self.start_watch_button.config(state=NORMAL))
             self.root.after(0, lambda: self.stop_watch_button.config(state=DISABLED))
             self.root.after(0, lambda: self.status_var.set(f"{label}: остановлен"))
@@ -736,6 +748,26 @@ class LeadFunnelGui:
     def _append_log(self, text: str) -> None:
         self.log.insert(END, text)
         self.log.see(END)
+
+    def _schedule_watch_refresh(self) -> None:
+        self._cancel_watch_refresh()
+        self._refresh_leads_while_watching()
+
+    def _refresh_leads_while_watching(self) -> None:
+        if not self.watch_process or self.watch_process.poll() is not None:
+            self.watch_refresh_after_id = None
+            return
+        self.refresh_leads()
+        self.watch_refresh_after_id = self.root.after(WATCH_REFRESH_MS, self._refresh_leads_while_watching)
+
+    def _cancel_watch_refresh(self) -> None:
+        if not self.watch_refresh_after_id:
+            return
+        try:
+            self.root.after_cancel(self.watch_refresh_after_id)
+        except TclError:
+            pass
+        self.watch_refresh_after_id = None
 
     def _load_lead_attachments(self, lead: Lead) -> None:
         self.attachment_rows.clear()
@@ -1082,10 +1114,17 @@ def _format_datetime(value: str) -> str:
         lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M"),
     ):
         try:
-            return parser(normalized).strftime("%d.%m %H:%M")
+            parsed = parser(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=MOSCOW_TZ)
+            return parsed.astimezone(MOSCOW_TZ).strftime("%d.%m %H:%M МСК")
         except ValueError:
             continue
     return clean.replace("T", " ")[:16]
+
+
+def _should_refresh_after_process(label: str) -> bool:
+    return label in REFRESH_AFTER_LABELS
 
 
 def _looks_like_kwork_meta_line(value: str) -> bool:
