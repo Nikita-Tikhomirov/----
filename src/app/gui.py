@@ -5,7 +5,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from tkinter import BOTH, DISABLED, END, NORMAL, Button, Entry, Label, LabelFrame, StringVar, Text, Tk, messagebox, scrolledtext
+from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, Text, Tk, messagebox, scrolledtext
 from tkinter import ttk
 
 from app.config import load_config
@@ -41,6 +41,19 @@ INTEGER_LIMITS = {
     "LEAD_MAX_DAYS": (1, 30),
 }
 
+COLORS = {
+    "bg": "#f5f7fb",
+    "panel": "#ffffff",
+    "panel_alt": "#eef3f8",
+    "text": "#182230",
+    "muted": "#667085",
+    "line": "#d8dee8",
+    "accent": "#0f766e",
+    "accent_hover": "#115e59",
+    "danger": "#b42318",
+    "danger_hover": "#912018",
+}
+
 
 def build_app_command(command: str, root_dir: Path = ROOT_DIR) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
@@ -56,77 +69,143 @@ class LeadFunnelGui:
     def __init__(self, root: Tk):
         self.root = root
         self.root.title("Kwork Lead Funnel")
-        self.root.geometry("980x760")
+        self.root.geometry("1180x820")
+        self.root.minsize(1040, 720)
+        self.root.configure(bg=COLORS["bg"])
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.watch_process: subprocess.Popen[str] | None = None
         self.setting_vars: dict[str, StringVar] = {}
         self.current_lead_id: int | None = None
         self.lead_rows: dict[str, int] = {}
+        self.status_var = StringVar(value="Готово")
 
-        self.status = Label(root, text="Готово", anchor="w")
-        self.status.pack(fill="x", padx=10, pady=(10, 4))
+        self._configure_style()
 
-        self._create_settings_panel()
-        self._create_leads_panel()
+        app = ttk.Frame(root, style="App.TFrame", padding=16)
+        app.pack(fill=BOTH, expand=True)
 
-        self.start_browser_button = Button(root, text="1. Открыть Kwork Chrome", command=self.start_kwork_browser)
-        self.start_browser_button.pack(fill="x", padx=10, pady=3)
+        self._create_header(app)
+        self._create_action_bar(app)
 
-        self.scan_button = Button(root, text="2. Сканировать сейчас", command=self.scan_once)
-        self.scan_button.pack(fill="x", padx=10, pady=3)
+        self.notebook = ttk.Notebook(app, style="Modern.TNotebook")
+        self.notebook.pack(fill=BOTH, expand=True, pady=(12, 0))
 
-        self.start_watch_button = Button(root, text="3. Старт мониторинга", command=self.start_watch)
-        self.start_watch_button.pack(fill="x", padx=10, pady=3)
+        self.leads_tab = ttk.Frame(self.notebook, style="Panel.TFrame", padding=14)
+        self.settings_tab = ttk.Frame(self.notebook, style="Panel.TFrame", padding=14)
+        self.log_tab = ttk.Frame(self.notebook, style="Panel.TFrame", padding=14)
+        self.notebook.add(self.leads_tab, text="Лиды")
+        self.notebook.add(self.settings_tab, text="Настройки")
+        self.notebook.add(self.log_tab, text="Лог")
 
-        self.approvals_button = Button(root, text="4. Проверить OK и отправить отклики", command=self.process_approvals)
-        self.approvals_button.pack(fill="x", padx=10, pady=3)
-
-        self.stop_watch_button = Button(root, text="Стоп мониторинга", command=self.stop_watch, state=DISABLED)
-        self.stop_watch_button.pack(fill="x", padx=10, pady=3)
-
-        self.clear_button = Button(root, text="Очистить лог", command=self.clear_log)
-        self.clear_button.pack(fill="x", padx=10, pady=3)
-
-        self.log = scrolledtext.ScrolledText(root, wrap="word", height=10)
-        self.log.pack(fill=BOTH, expand=True, padx=10, pady=(8, 10))
+        self._create_leads_panel(self.leads_tab)
+        self._create_settings_panel(self.settings_tab)
+        self._create_log_panel(self.log_tab)
         self.write_log("Открой Kwork Chrome, войди в Kwork один раз, затем запускай сканирование или мониторинг.\n")
         self.write_log(self._filter_summary())
         self.refresh_leads()
 
-    def _create_settings_panel(self) -> None:
-        frame = LabelFrame(self.root, text="Настройки отбора")
-        frame.pack(fill="x", padx=10, pady=(4, 8))
+    def _configure_style(self) -> None:
+        self.root.option_add("*Font", ("Segoe UI", 10))
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("TFrame", background=COLORS["panel"])
+        style.configure("App.TFrame", background=COLORS["bg"])
+        style.configure("Panel.TFrame", background=COLORS["panel"])
+        style.configure("Card.TFrame", background=COLORS["panel"], relief="flat")
+        style.configure("Header.TLabel", background=COLORS["bg"], foreground=COLORS["text"], font=("Segoe UI Semibold", 19))
+        style.configure("Subtle.TLabel", background=COLORS["bg"], foreground=COLORS["muted"], font=("Segoe UI", 10))
+        style.configure("Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"])
+        style.configure("Muted.TLabel", background=COLORS["panel"], foreground=COLORS["muted"])
+        style.configure("Status.TLabel", background=COLORS["panel_alt"], foreground=COLORS["accent"], padding=(12, 6), font=("Segoe UI Semibold", 10))
+        style.configure("Modern.TButton", padding=(12, 8), background=COLORS["panel"], foreground=COLORS["text"], bordercolor=COLORS["line"])
+        style.map("Modern.TButton", background=[("active", COLORS["panel_alt"])])
+        style.configure("Accent.TButton", padding=(13, 8), background=COLORS["accent"], foreground="#ffffff", bordercolor=COLORS["accent"])
+        style.map("Accent.TButton", background=[("active", COLORS["accent_hover"]), ("disabled", COLORS["line"])], foreground=[("disabled", COLORS["muted"])])
+        style.configure("Danger.TButton", padding=(12, 8), background=COLORS["danger"], foreground="#ffffff", bordercolor=COLORS["danger"])
+        style.map("Danger.TButton", background=[("active", COLORS["danger_hover"]), ("disabled", COLORS["line"])], foreground=[("disabled", COLORS["muted"])])
+        style.configure("Modern.TNotebook", background=COLORS["bg"], borderwidth=0)
+        style.configure("Modern.TNotebook.Tab", padding=(18, 9), background=COLORS["panel_alt"], foreground=COLORS["muted"])
+        style.map("Modern.TNotebook.Tab", background=[("selected", COLORS["panel"])], foreground=[("selected", COLORS["text"])])
+        style.configure("Treeview", rowheight=30, font=("Segoe UI", 10), background="#ffffff", fieldbackground="#ffffff", foreground=COLORS["text"], borderwidth=0)
+        style.configure("Treeview.Heading", font=("Segoe UI Semibold", 10), background=COLORS["panel_alt"], foreground=COLORS["muted"], relief="flat")
+        style.map("Treeview", background=[("selected", "#d9f0ec")], foreground=[("selected", COLORS["text"])])
+        style.configure("TEntry", fieldbackground="#ffffff", bordercolor=COLORS["line"], padding=6)
+
+    def _create_header(self, parent: ttk.Frame) -> None:
+        header = ttk.Frame(parent, style="App.TFrame")
+        header.pack(fill="x")
+        title_block = ttk.Frame(header, style="App.TFrame")
+        title_block.pack(side="left", fill="x", expand=True)
+        ttk.Label(title_block, text="Kwork Lead Funnel", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(
+            title_block,
+            text="Поиск заказов, проверка ТЗ и аккуратный отклик без лишней суеты.",
+            style="Subtle.TLabel",
+        ).pack(anchor="w", pady=(3, 0))
+        ttk.Label(header, textvariable=self.status_var, style="Status.TLabel").pack(side="right", anchor="ne")
+
+    def _create_action_bar(self, parent: ttk.Frame) -> None:
+        bar = ttk.Frame(parent, style="App.TFrame")
+        bar.pack(fill="x", pady=(14, 0))
+        self.start_browser_button = ttk.Button(bar, text="Открыть Kwork Chrome", command=self.start_kwork_browser, style="Modern.TButton")
+        self.start_browser_button.pack(side="left", padx=(0, 8))
+        self.scan_button = ttk.Button(bar, text="Сканировать", command=self.scan_once, style="Accent.TButton")
+        self.scan_button.pack(side="left", padx=8)
+        self.start_watch_button = ttk.Button(bar, text="Старт мониторинга", command=self.start_watch, style="Modern.TButton")
+        self.start_watch_button.pack(side="left", padx=8)
+        self.stop_watch_button = ttk.Button(bar, text="Стоп", command=self.stop_watch, state=DISABLED, style="Danger.TButton")
+        self.stop_watch_button.pack(side="left", padx=8)
+        self.approvals_button = ttk.Button(bar, text="Проверить OK", command=self.process_approvals, style="Modern.TButton")
+        self.approvals_button.pack(side="left", padx=8)
+        self.clear_button = ttk.Button(bar, text="Очистить лог", command=self.clear_log, style="Modern.TButton")
+        self.clear_button.pack(side="right")
+
+    def _create_settings_panel(self, parent: ttk.Frame) -> None:
+        frame = ttk.Frame(parent, style="Panel.TFrame")
+        frame.pack(fill="x")
+        ttk.Label(frame, text="Настройки отбора", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(0, 10),
+        )
         values = read_env_values(ENV_PATH)
 
         for row, (key, label, default) in enumerate(FILTER_SETTINGS):
-            Label(frame, text=label, anchor="w").grid(row=row, column=0, sticky="w", padx=8, pady=3)
+            grid_row = row + 1
+            ttk.Label(frame, text=label, style="Panel.TLabel").grid(row=grid_row, column=0, sticky="w", padx=(0, 12), pady=5)
             variable = StringVar(value=values.get(key, default))
             self.setting_vars[key] = variable
-            Entry(frame, textvariable=variable).grid(row=row, column=1, sticky="ew", padx=8, pady=3)
+            ttk.Entry(frame, textvariable=variable).grid(row=grid_row, column=1, sticky="ew", pady=5)
 
         frame.columnconfigure(1, weight=1)
-        button_row = len(FILTER_SETTINGS)
-        Button(frame, text="Сохранить настройки", command=self.save_settings).grid(
+        button_row = len(FILTER_SETTINGS) + 1
+        ttk.Button(frame, text="Сохранить настройки", command=self.save_settings, style="Accent.TButton").grid(
             row=button_row,
             column=0,
             sticky="ew",
-            padx=8,
-            pady=(8, 6),
+            padx=(0, 8),
+            pady=(12, 0),
         )
-        Button(frame, text="Перезагрузить из .env", command=self.reload_settings).grid(
+        ttk.Button(frame, text="Перезагрузить из .env", command=self.reload_settings, style="Modern.TButton").grid(
             row=button_row,
             column=1,
             sticky="ew",
-            padx=8,
-            pady=(8, 6),
+            pady=(12, 0),
         )
 
-    def _create_leads_panel(self) -> None:
-        frame = LabelFrame(self.root, text="Лиды и отклик")
-        frame.pack(fill="both", padx=10, pady=(0, 8))
+    def _create_leads_panel(self, parent: ttk.Frame) -> None:
+        frame = ttk.Frame(parent, style="Panel.TFrame")
+        frame.pack(fill=BOTH, expand=True)
+        ttk.Label(frame, text="Лиды", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(anchor="w")
+        ttk.Label(frame, text="Выбери лид, поправь цену, срок и текст, затем заполни или отправь отклик.", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
 
         table_frame = ttk.Frame(frame)
-        table_frame.pack(fill="x", padx=8, pady=(8, 4))
+        table_frame.pack(fill="x", pady=(0, 8))
         columns = ("id", "status", "score", "price", "days", "title")
         self.leads_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=7)
         headings = {
@@ -146,37 +225,52 @@ class LeadFunnelGui:
         self.leads_table.pack(side="left", fill="x", expand=True)
         scrollbar.pack(side="right", fill="y")
         self.leads_table.bind("<<TreeviewSelect>>", self.on_lead_select)
+        self.leads_table.tag_configure("new", background="#fffbeb")
+        self.leads_table.tag_configure("emailed", background="#f8fafc")
+        self.leads_table.tag_configure("failed", background="#fff1f0")
+        self.leads_table.tag_configure("sent", background="#ecfdf3")
 
         fields = ttk.Frame(frame)
-        fields.pack(fill="x", padx=8, pady=4)
+        fields.pack(fill="x", pady=(6, 4))
         self.lead_title_var = StringVar()
         self.lead_price_var = StringVar()
         self.lead_days_var = StringVar()
         self.lead_status_var = StringVar(value="Лид не выбран")
 
-        Label(fields, text="Название").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=2)
-        Entry(fields, textvariable=self.lead_title_var).grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=2)
-        Label(fields, text="Цена").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=2)
-        Entry(fields, textvariable=self.lead_price_var, width=10).grid(row=0, column=3, sticky="w", padx=(0, 8), pady=2)
-        Label(fields, text="Срок, дней").grid(row=0, column=4, sticky="w", padx=(0, 6), pady=2)
-        Entry(fields, textvariable=self.lead_days_var, width=8).grid(row=0, column=5, sticky="w", pady=2)
-        Label(fields, textvariable=self.lead_status_var, anchor="w").grid(row=1, column=0, columnspan=6, sticky="ew", pady=2)
+        ttk.Label(fields, text="Название", style="Panel.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=2)
+        ttk.Entry(fields, textvariable=self.lead_title_var).grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=2)
+        ttk.Label(fields, text="Цена", style="Panel.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 6), pady=2)
+        ttk.Entry(fields, textvariable=self.lead_price_var, width=10).grid(row=0, column=3, sticky="w", padx=(0, 8), pady=2)
+        ttk.Label(fields, text="Срок", style="Panel.TLabel").grid(row=0, column=4, sticky="w", padx=(0, 6), pady=2)
+        ttk.Entry(fields, textvariable=self.lead_days_var, width=8).grid(row=0, column=5, sticky="w", pady=2)
+        ttk.Label(fields, textvariable=self.lead_status_var, style="Muted.TLabel", anchor="w").grid(row=1, column=0, columnspan=6, sticky="ew", pady=2)
         fields.columnconfigure(1, weight=1)
 
         text_frame = ttk.Frame(frame)
-        text_frame.pack(fill="both", expand=True, padx=8, pady=4)
-        self.summary_text = Text(text_frame, height=5, wrap="word")
-        self.summary_text.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        self.reply_text = Text(text_frame, height=5, wrap="word")
-        self.reply_text.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        text_frame.pack(fill="both", expand=True, pady=6)
+        ttk.Label(text_frame, text="AI-оценка и ТЗ", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        ttk.Label(text_frame, text="Текст отклика", style="Muted.TLabel").grid(row=0, column=1, sticky="w", padx=(6, 0))
+        self.summary_text = Text(text_frame, height=7, wrap="word", bg="#f8fafc", fg=COLORS["text"], relief="flat", padx=10, pady=10, font=("Segoe UI", 10))
+        self.summary_text.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(4, 0))
+        self.reply_text = Text(text_frame, height=7, wrap="word", bg="#ffffff", fg=COLORS["text"], insertbackground=COLORS["accent"], relief="solid", bd=1, padx=10, pady=10, font=("Segoe UI", 10))
+        self.reply_text.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(4, 0))
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.columnconfigure(1, weight=1)
+        text_frame.rowconfigure(1, weight=1)
 
         buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", padx=8, pady=(4, 8))
-        Button(buttons, text="Обновить лиды", command=self.refresh_leads).pack(side="left", padx=(0, 6))
-        Button(buttons, text="Сохранить правки", command=self.save_lead_edits).pack(side="left", padx=6)
-        Button(buttons, text="Открыть заказ", command=self.open_selected_lead).pack(side="left", padx=6)
-        Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead).pack(side="left", padx=6)
-        Button(buttons, text="Отправить отклик", command=self.send_selected_lead).pack(side="left", padx=6)
+        buttons.pack(fill="x", pady=(4, 0))
+        ttk.Button(buttons, text="Обновить", command=self.refresh_leads, style="Modern.TButton").pack(side="left", padx=(0, 6))
+        ttk.Button(buttons, text="Сохранить", command=self.save_lead_edits, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Отправить отклик", command=self.send_selected_lead, style="Danger.TButton").pack(side="right")
+
+    def _create_log_panel(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="Лог", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(anchor="w")
+        ttk.Label(parent, text="Здесь видны сканирование, ошибки отправки и действия с лидами.", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
+        self.log = scrolledtext.ScrolledText(parent, wrap="word", height=20, bg="#0f172a", fg="#dbeafe", insertbackground="#dbeafe", relief="flat", padx=12, pady=12, font=("Consolas", 10))
+        self.log.pack(fill=BOTH, expand=True)
 
     def start_kwork_browser(self) -> None:
         script = ROOT_DIR / "start-kwork-browser.cmd"
@@ -207,6 +301,7 @@ class LeadFunnelGui:
                 "",
                 END,
                 values=(lead.id, lead.status, lead.score, price or "", days or "", title),
+                tags=(lead.status,),
             )
             self.lead_rows[item_id] = lead.id
 
@@ -307,7 +402,7 @@ class LeadFunnelGui:
         return message_id
 
     def _run_lead_action(self, label: str, action, lead_id: int | None = None) -> None:
-        self.status.config(text=f"{label}: выполняется")
+        self.status_var.set(f"{label}: выполняется")
         self.write_log(f"=== {label}: старт ===\n")
         threading.Thread(target=self._run_lead_action_thread, args=(label, action, lead_id), daemon=True).start()
 
@@ -321,10 +416,10 @@ class LeadFunnelGui:
                 except Exception:
                     pass
             self.write_log(f"=== {label}: ошибка: {exc} ===\n")
-            self.root.after(0, lambda: self.status.config(text=f"{label}: ошибка"))
+            self.root.after(0, lambda: self.status_var.set(f"{label}: ошибка"))
         else:
             self.write_log(f"=== {label}: готово ({result}) ===\n")
-            self.root.after(0, lambda: self.status.config(text=f"{label}: готово"))
+            self.root.after(0, lambda: self.status_var.set(f"{label}: готово"))
         finally:
             self.root.after(0, self.refresh_leads)
 
@@ -406,7 +501,7 @@ class LeadFunnelGui:
             errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-        self.status.config(text="Мониторинг запущен")
+        self.status_var.set("Мониторинг запущен")
         self.start_watch_button.config(state=DISABLED)
         self.stop_watch_button.config(state=NORMAL)
         self.write_log("=== Мониторинг запущен ===\n")
@@ -414,7 +509,7 @@ class LeadFunnelGui:
 
     def stop_watch(self) -> None:
         if not self.watch_process or self.watch_process.poll() is not None:
-            self.status.config(text="Мониторинг не запущен")
+            self.status_var.set("Мониторинг не запущен")
             self.start_watch_button.config(state=NORMAL)
             self.stop_watch_button.config(state=DISABLED)
             return
@@ -423,7 +518,7 @@ class LeadFunnelGui:
             self.watch_process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             self.watch_process.kill()
-        self.status.config(text="Мониторинг остановлен")
+        self.status_var.set("Мониторинг остановлен")
         self.start_watch_button.config(state=NORMAL)
         self.stop_watch_button.config(state=DISABLED)
         self.write_log("=== Мониторинг остановлен ===\n")
@@ -466,7 +561,7 @@ class LeadFunnelGui:
         self.root.destroy()
 
     def _run_once(self, command: list[str], env: dict[str, str], label: str) -> None:
-        self.status.config(text=f"{label}: выполняется")
+        self.status_var.set(f"{label}: выполняется")
         self.write_log(f"=== {label}: старт ===\n")
         threading.Thread(target=self._run_once_thread, args=(command, env, label), daemon=True).start()
 
@@ -483,7 +578,7 @@ class LeadFunnelGui:
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         self._stream_process(process, label)
-        self.root.after(0, lambda: self.status.config(text=f"{label}: завершено"))
+        self.root.after(0, lambda: self.status_var.set(f"{label}: завершено"))
         self.write_log(f"=== {label}: завершено с кодом {process.returncode} ===\n")
 
     def _stream_process(self, process: subprocess.Popen[str], label: str) -> None:
@@ -494,7 +589,7 @@ class LeadFunnelGui:
         if process is self.watch_process:
             self.root.after(0, lambda: self.start_watch_button.config(state=NORMAL))
             self.root.after(0, lambda: self.stop_watch_button.config(state=DISABLED))
-            self.root.after(0, lambda: self.status.config(text=f"{label}: остановлен"))
+            self.root.after(0, lambda: self.status_var.set(f"{label}: остановлен"))
 
     def write_log(self, text: str) -> None:
         self.root.after(0, lambda: self._append_log(text))
