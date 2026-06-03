@@ -73,8 +73,12 @@ def scan_once(
             text=post.text,
             posted_at=post.posted_at,
         )
-        if storage.has_lead_for_post(post_id):
-            logger.info("Skipping existing lead for post %s/%s", post.channel, post.message_id)
+        existing_lead = storage.get_lead_for_post(post_id)
+        if existing_lead is not None:
+            if existing_lead.status == "new" and _email_lead(storage, email_client, existing_lead):
+                created += 1
+            else:
+                logger.info("Skipping existing lead for post %s/%s", post.channel, post.message_id)
             continue
         evaluation = evaluate_post(post.text)
         if not evaluation.accepted:
@@ -160,11 +164,20 @@ def scan_once(
         lead = storage.get_lead(lead_id)
         if lead.status != "new":
             continue
-        email_message_id = email_client.send_lead(lead)
-        storage.mark_lead_emailed(lead_id, email_message_id)
-        logger.info("Emailed lead %s from %s", lead_id, post.url)
-        created += 1
+        if _email_lead(storage, email_client, lead):
+            created += 1
     return created
+
+
+def _email_lead(storage: Storage, email_client: LeadMailer, lead) -> bool:
+    try:
+        email_message_id = email_client.send_lead(lead)
+    except Exception as exc:
+        logger.warning("Failed to email lead %s from %s: %s", lead.id, lead.post_url, exc)
+        return False
+    storage.mark_lead_emailed(lead.id, email_message_id)
+    logger.info("Emailed lead %s from %s", lead.id, lead.post_url)
+    return True
 
 
 def _summary_from_judge(result: LeadJudgeResult) -> str:

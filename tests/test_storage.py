@@ -24,6 +24,31 @@ def test_deduplicates_posts_by_channel_and_message_id(tmp_path):
     assert storage.count_posts() == 1
 
 
+def test_get_lead_for_post_returns_existing_lead(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="jobs",
+        message_id=43,
+        post_url="https://t.me/jobs/43",
+        text="Нужно сверстать лендинг",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=81,
+        summary="HTML/CSS лендинг",
+        draft_reply="Здравствуйте! Готов помочь.",
+        contact="@client_dev",
+    )
+
+    lead = storage.get_lead_for_post(post_id)
+
+    assert lead is not None
+    assert lead.id == lead_id
+    assert lead.status == "new"
+
+
 def test_approval_can_be_recorded_only_once(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

@@ -53,6 +53,18 @@ class FakeEmailClient:
         return self.approvals
 
 
+class FlakyEmailClient(FakeEmailClient):
+    def __init__(self):
+        super().__init__()
+        self.fail_once = True
+
+    def send_lead(self, lead):
+        if self.fail_once:
+            self.fail_once = False
+            raise TimeoutError("SMTP timed out")
+        return super().send_lead(lead)
+
+
 class FakeKworkProjectClient:
     def __init__(self, response_count=3, reason="", page_text="", attachments=(), facts=()):
         self.response_count = response_count
@@ -111,6 +123,33 @@ def test_scan_once_creates_lead_and_sends_email(tmp_path):
     leads = storage.list_leads(status="emailed")
     assert len(leads) == 1
     assert email_client.sent_leads == [leads[0].id]
+
+
+def test_scan_once_keeps_new_lead_retryable_when_email_fails(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FlakyEmailClient()
+
+    first_created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+    )
+    lead = storage.list_leads()[0]
+
+    assert first_created == 0
+    assert lead.status == "new"
+    assert email_client.sent_leads == []
+
+    second_created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+    )
+
+    assert second_created == 1
+    assert storage.get_lead(lead.id).status == "emailed"
+    assert email_client.sent_leads == [lead.id]
 
 
 def test_scan_once_skips_kwork_projects_with_too_many_responses(tmp_path):

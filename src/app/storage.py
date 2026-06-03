@@ -168,6 +168,19 @@ class Storage:
             row = conn.execute("SELECT 1 FROM leads WHERE post_id = ?", (post_id,)).fetchone()
         return row is not None
 
+    def get_lead_for_post(self, post_id: int) -> Lead | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT leads.*, posts.post_url, posts.raw_text
+                FROM leads
+                JOIN posts ON posts.id = leads.post_id
+                WHERE leads.post_id = ?
+                """,
+                (post_id,),
+            ).fetchone()
+        return _lead_from_row(row) if row is not None else None
+
     def record_approval(self, lead_id: int, email_message_id: str) -> bool:
         with self._connect() as conn:
             lead = conn.execute(
