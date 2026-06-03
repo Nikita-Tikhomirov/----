@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import threading
+from datetime import datetime
 from pathlib import Path
-from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, Text, Tk, messagebox, scrolledtext
+from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, Tk, messagebox, scrolledtext
 from tkinter import ttk
 
 from app.config import load_config
@@ -206,17 +208,30 @@ class LeadFunnelGui:
 
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill="x", pady=(0, 8))
-        columns = ("id", "status", "score", "price", "days", "title")
-        self.leads_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=7)
+        columns = ("id", "posted", "offers", "sent", "status", "score", "price", "days", "title")
+        self.leads_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=9)
         headings = {
             "id": "ID",
+            "posted": "Дата",
+            "offers": "Откл.",
+            "sent": "Наш отклик",
             "status": "Статус",
             "score": "Score",
             "price": "Цена",
             "days": "Дн.",
-            "title": "Задача",
+            "title": "Название заказа",
         }
-        widths = {"id": 50, "status": 90, "score": 60, "price": 80, "days": 55, "title": 620}
+        widths = {
+            "id": 48,
+            "posted": 92,
+            "offers": 58,
+            "sent": 132,
+            "status": 82,
+            "score": 58,
+            "price": 76,
+            "days": 48,
+            "title": 520,
+        }
         for column in columns:
             self.leads_table.heading(column, text=headings[column])
             self.leads_table.column(column, width=widths[column], anchor="w")
@@ -229,6 +244,7 @@ class LeadFunnelGui:
         self.leads_table.tag_configure("emailed", background="#f8fafc")
         self.leads_table.tag_configure("failed", background="#fff1f0")
         self.leads_table.tag_configure("sent", background="#ecfdf3")
+        self.leads_table.tag_configure("low_score", background="#fff7ed")
 
         fields = ttk.Frame(frame)
         fields.pack(fill="x", pady=(6, 4))
@@ -236,6 +252,7 @@ class LeadFunnelGui:
         self.lead_price_var = StringVar()
         self.lead_days_var = StringVar()
         self.lead_status_var = StringVar(value="Лид не выбран")
+        self.lead_url_var = StringVar()
 
         ttk.Label(fields, text="Название", style="Panel.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6), pady=2)
         ttk.Entry(fields, textvariable=self.lead_title_var).grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=2)
@@ -243,16 +260,18 @@ class LeadFunnelGui:
         ttk.Entry(fields, textvariable=self.lead_price_var, width=10).grid(row=0, column=3, sticky="w", padx=(0, 8), pady=2)
         ttk.Label(fields, text="Срок", style="Panel.TLabel").grid(row=0, column=4, sticky="w", padx=(0, 6), pady=2)
         ttk.Entry(fields, textvariable=self.lead_days_var, width=8).grid(row=0, column=5, sticky="w", pady=2)
-        ttk.Label(fields, textvariable=self.lead_status_var, style="Muted.TLabel", anchor="w").grid(row=1, column=0, columnspan=6, sticky="ew", pady=2)
+        ttk.Label(fields, text="Ссылка", style="Panel.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 6), pady=2)
+        ttk.Entry(fields, textvariable=self.lead_url_var, state="readonly").grid(row=1, column=1, columnspan=5, sticky="ew", pady=2)
+        ttk.Label(fields, textvariable=self.lead_status_var, style="Muted.TLabel", anchor="w").grid(row=2, column=0, columnspan=6, sticky="ew", pady=2)
         fields.columnconfigure(1, weight=1)
 
         text_frame = ttk.Frame(frame)
         text_frame.pack(fill="both", expand=True, pady=6)
-        ttk.Label(text_frame, text="AI-оценка и ТЗ", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        ttk.Label(text_frame, text="Данные заказа и AI-оценка", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
         ttk.Label(text_frame, text="Текст отклика", style="Muted.TLabel").grid(row=0, column=1, sticky="w", padx=(6, 0))
-        self.summary_text = Text(text_frame, height=7, wrap="word", bg="#f8fafc", fg=COLORS["text"], relief="flat", padx=10, pady=10, font=("Segoe UI", 10))
+        self.summary_text = scrolledtext.ScrolledText(text_frame, height=7, wrap="word", bg="#f8fafc", fg=COLORS["text"], relief="flat", padx=10, pady=10, font=("Segoe UI", 10))
         self.summary_text.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=(4, 0))
-        self.reply_text = Text(text_frame, height=7, wrap="word", bg="#ffffff", fg=COLORS["text"], insertbackground=COLORS["accent"], relief="solid", bd=1, padx=10, pady=10, font=("Segoe UI", 10))
+        self.reply_text = scrolledtext.ScrolledText(text_frame, height=7, wrap="word", bg="#ffffff", fg=COLORS["text"], insertbackground=COLORS["accent"], relief="solid", bd=1, padx=10, pady=10, font=("Segoe UI", 10))
         self.reply_text.grid(row=1, column=1, sticky="nsew", padx=(6, 0), pady=(4, 0))
         text_frame.columnconfigure(0, weight=1)
         text_frame.columnconfigure(1, weight=1)
@@ -263,6 +282,7 @@ class LeadFunnelGui:
         ttk.Button(buttons, text="Обновить", command=self.refresh_leads, style="Modern.TButton").pack(side="left", padx=(0, 6))
         ttk.Button(buttons, text="Сохранить", command=self.save_lead_edits, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Отправить отклик", command=self.send_selected_lead, style="Danger.TButton").pack(side="right")
 
@@ -293,17 +313,28 @@ class LeadFunnelGui:
             return
         self.lead_rows.clear()
         self.leads_table.delete(*self.leads_table.get_children())
-        for lead in reversed(leads[-80:]):
-            price = _extract_price(lead)
-            days = _extract_days(lead)
-            title = _lead_title(lead)
+        target_item = None
+        selected_lead_id = self.current_lead_id
+        for lead in leads[:80]:
             item_id = self.leads_table.insert(
                 "",
                 END,
-                values=(lead.id, lead.status, lead.score, price or "", days or "", title),
-                tags=(lead.status,),
+                values=build_lead_row_values(lead),
+                tags=_lead_row_tags(lead),
             )
             self.lead_rows[item_id] = lead.id
+            if lead.id == selected_lead_id:
+                target_item = item_id
+        children = self.leads_table.get_children()
+        if target_item is None and children:
+            target_item = children[0]
+        if target_item is not None:
+            self.leads_table.selection_set(target_item)
+            self.leads_table.focus(target_item)
+            self.leads_table.see(target_item)
+            self.on_lead_select()
+        else:
+            self._clear_lead_details()
 
     def on_lead_select(self, _event=None) -> None:
         selected = self.leads_table.selection()
@@ -321,12 +352,16 @@ class LeadFunnelGui:
         self.lead_title_var.set(_lead_title(lead))
         self.lead_price_var.set(str(_extract_price(lead) or ""))
         self.lead_days_var.set(str(_extract_days(lead) or ""))
-        status = f"Лид #{lead.id}: {lead.status}; ссылка: {lead.post_url}"
+        self.lead_url_var.set(lead.contact or lead.post_url)
+        status = (
+            f"Лид #{lead.id}: {lead.status}; score {lead.score}; "
+            f"предложений: {_extract_offer_count(lead) or 'не видно'}; наш отклик: {_reply_state(lead)}"
+        )
         if lead.last_error:
             status += f"; ошибка: {lead.last_error}"
         self.lead_status_var.set(status)
         self.summary_text.delete("1.0", END)
-        self.summary_text.insert("1.0", lead.summary)
+        self.summary_text.insert("1.0", _lead_details_text(lead))
         self.reply_text.delete("1.0", END)
         self.reply_text.insert("1.0", lead.draft_reply)
 
@@ -348,6 +383,15 @@ class LeadFunnelGui:
         if lead is None:
             return
         self._run_lead_action("Открытие заказа", lambda: self._open_kwork_lead(lead), lead_id=lead.id)
+
+    def copy_selected_lead_url(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        url = lead.contact or lead.post_url
+        self.root.clipboard_clear()
+        self.root.clipboard_append(url)
+        self.lead_status_var.set(f"Ссылка скопирована: {url}")
 
     def prepare_selected_lead(self) -> None:
         lead = self._selected_lead()
@@ -598,6 +642,16 @@ class LeadFunnelGui:
         self.log.insert(END, text)
         self.log.see(END)
 
+    def _clear_lead_details(self) -> None:
+        self.current_lead_id = None
+        self.lead_title_var.set("")
+        self.lead_price_var.set("")
+        self.lead_days_var.set("")
+        self.lead_url_var.set("")
+        self.lead_status_var.set("Лид не выбран")
+        self.summary_text.delete("1.0", END)
+        self.reply_text.delete("1.0", END)
+
 
 def main() -> int:
     root = Tk()
@@ -707,12 +761,121 @@ def _extract_days(lead: Lead) -> int | None:
 
 
 def _lead_title(lead: Lead) -> str:
+    for line in lead.post_text.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        if clean.startswith("\U0001f4cc"):
+            return clean.lstrip("\U0001f4cc").strip()[:70]
+        if _looks_like_kwork_meta_line(clean):
+            continue
+        return clean[:70]
     for line in lead.summary.splitlines():
         clean = line.strip()
         if clean.startswith("Задача:"):
             return clean.removeprefix("Задача:").strip()[:70]
     first_line = next((line.strip() for line in lead.summary.splitlines() if line.strip()), "")
     return (first_line or f"Kwork lead {lead.id}")[:70]
+
+
+def build_lead_row_values(lead: Lead) -> tuple:
+    return (
+        lead.id,
+        _format_datetime(lead.posted_at or lead.created_at),
+        _extract_offer_count(lead) or "",
+        _reply_state(lead),
+        lead.status,
+        lead.score,
+        _extract_price(lead) or "",
+        _extract_days(lead) or "",
+        _lead_title(lead),
+    )
+
+
+def _lead_details_text(lead: Lead) -> str:
+    offer_count = _extract_offer_count(lead)
+    remaining = _extract_remaining_time(lead)
+    lines = [
+        f"Название: {_lead_title(lead)}",
+        f"Ссылка: {lead.contact or lead.post_url}",
+        f"Дата: {_format_datetime(lead.posted_at or lead.created_at)}",
+        f"Предложений: {offer_count if offer_count is not None else 'не найдено'}",
+        f"Осталось: {remaining or 'не найдено'}",
+        f"Наш отклик: {_reply_state(lead)}",
+        f"Статус: {lead.status}; score: {lead.score}",
+    ]
+    if lead.channel or lead.message_id:
+        lines.append(f"Источник: {lead.channel or 'unknown'} / {lead.message_id or '-'}")
+    if lead.last_error:
+        lines.append(f"Ошибка: {lead.last_error}")
+    lines.extend(
+        [
+            "",
+            "--- КАРТОЧКА KWORK ---",
+            lead.post_text.strip() or "Карточка заказа не сохранена.",
+            "",
+            "--- AI-ОЦЕНКА ---",
+            lead.summary.strip() or "AI-оценка пустая.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _extract_offer_count(lead: Lead) -> int | None:
+    for text in (lead.post_text, lead.summary):
+        match = re.search(r"Предложений:\s*(\d+)", text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _extract_remaining_time(lead: Lead) -> str:
+    for text in (lead.post_text, lead.summary):
+        match = re.search(r"Осталось:\s*(.*?)(?:\s+Предложений:|\n|$)", text, re.IGNORECASE)
+        if match:
+            return _clean_meta_value(match.group(1))
+    return ""
+
+
+def _reply_state(lead: Lead) -> str:
+    if lead.sent_at:
+        return f"отправлен {_format_datetime(lead.sent_at)}"
+    if lead.status == "sent":
+        return "отправлен"
+    return "нет"
+
+
+def _lead_row_tags(lead: Lead) -> tuple[str, ...]:
+    tags = [lead.status]
+    if lead.score < 70 and lead.status != "sent":
+        tags.append("low_score")
+    return tuple(tags)
+
+
+def _format_datetime(value: str) -> str:
+    clean = value.strip()
+    if not clean:
+        return "-"
+    normalized = clean.replace("Z", "+00:00")
+    for parser in (
+        lambda item: datetime.fromisoformat(item),
+        lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M:%S"),
+        lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M"),
+    ):
+        try:
+            return parser(normalized).strftime("%d.%m %H:%M")
+        except ValueError:
+            continue
+    return clean.replace("T", " ")[:16]
+
+
+def _looks_like_kwork_meta_line(value: str) -> bool:
+    lowered = value.lower()
+    return lowered.startswith(("осталось:", "предложений:", "отклик:", "kwork title:", "kwork description:"))
+
+
+def _clean_meta_value(value: str) -> str:
+    return " ".join(value.split()).strip(" ;")
 
 
 def _parse_optional_int(value: str, label: str) -> int | None:

@@ -19,6 +19,12 @@ class Lead:
     post_url: str
     post_text: str = ""
     last_error: str = ""
+    channel: str = ""
+    message_id: int = 0
+    posted_at: str = ""
+    created_at: str = ""
+    email_message_id: str = ""
+    sent_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -185,9 +191,14 @@ class Storage:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT leads.*, posts.post_url, posts.raw_text
+                SELECT leads.*, posts.post_url, posts.raw_text,
+                       posts.channel AS post_channel,
+                       posts.message_id AS post_message_id,
+                       posts.posted_at AS post_posted_at,
+                       sent_messages.sent_at AS sent_at
                 FROM leads
                 JOIN posts ON posts.id = leads.post_id
+                LEFT JOIN sent_messages ON sent_messages.lead_id = leads.id
                 WHERE leads.post_id = ?
                 """,
                 (post_id,),
@@ -239,9 +250,14 @@ class Storage:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT leads.*, posts.post_url, posts.raw_text
+                SELECT leads.*, posts.post_url, posts.raw_text,
+                       posts.channel AS post_channel,
+                       posts.message_id AS post_message_id,
+                       posts.posted_at AS post_posted_at,
+                       sent_messages.sent_at AS sent_at
                 FROM leads
                 JOIN posts ON posts.id = leads.post_id
+                LEFT JOIN sent_messages ON sent_messages.lead_id = leads.id
                 WHERE leads.id = ?
                 """,
                 (lead_id,),
@@ -252,15 +268,20 @@ class Storage:
 
     def list_leads(self, status: str | None = None) -> list[Lead]:
         sql = """
-            SELECT leads.*, posts.post_url, posts.raw_text
+            SELECT leads.*, posts.post_url, posts.raw_text,
+                   posts.channel AS post_channel,
+                   posts.message_id AS post_message_id,
+                   posts.posted_at AS post_posted_at,
+                   sent_messages.sent_at AS sent_at
             FROM leads
             JOIN posts ON posts.id = leads.post_id
+            LEFT JOIN sent_messages ON sent_messages.lead_id = leads.id
         """
         params: tuple[str, ...] = ()
         if status:
             sql += " WHERE leads.status = ?"
             params = (status,)
-        sql += " ORDER BY leads.id"
+        sql += " ORDER BY COALESCE(NULLIF(posts.posted_at, ''), leads.created_at) DESC, leads.id DESC"
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [_lead_from_row(row) for row in rows]
@@ -452,6 +473,12 @@ def _lead_from_row(row: sqlite3.Row) -> Lead:
         post_url=str(row["post_url"]),
         post_text=str(row["raw_text"]) if "raw_text" in keys else "",
         last_error=str(row["last_error"]) if "last_error" in keys else "",
+        channel=str(row["post_channel"]) if "post_channel" in keys else "",
+        message_id=int(row["post_message_id"]) if "post_message_id" in keys else 0,
+        posted_at=str(row["post_posted_at"]) if "post_posted_at" in keys else "",
+        created_at=str(row["created_at"]) if "created_at" in keys else "",
+        email_message_id=str(row["email_message_id"]) if "email_message_id" in keys and row["email_message_id"] is not None else "",
+        sent_at=str(row["sent_at"]) if "sent_at" in keys and row["sent_at"] is not None else "",
     )
 
 

@@ -174,3 +174,46 @@ def test_order_created_from_lead_keeps_original_order_text(tmp_path):
 
     assert storage.get_lead(lead_id).post_text == post_text
     assert storage.get_order(order_id).brief == post_text
+
+
+def test_list_leads_returns_latest_first_with_post_metadata_and_sent_state(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    old_post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=100,
+        post_url="https://kwork.ru/projects/100/view",
+        text="📌 Старый заказ\nПредложений: 2",
+        posted_at="2026-05-04T09:00:00+03:00",
+    )
+    new_post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=101,
+        post_url="https://kwork.ru/projects/101/view",
+        text="📌 Новый заказ\nПредложений: 1",
+        posted_at="2026-05-04T11:00:00+03:00",
+    )
+    old_lead_id = storage.create_lead(
+        post_id=old_post_id,
+        score=80,
+        summary="Старый",
+        draft_reply="Здравствуйте! Сделаю.",
+        contact="https://kwork.ru/projects/100/view",
+    )
+    new_lead_id = storage.create_lead(
+        post_id=new_post_id,
+        score=90,
+        summary="Новый",
+        draft_reply="Здравствуйте! Сделаю.",
+        contact="https://kwork.ru/projects/101/view",
+    )
+
+    storage.mark_sent(old_lead_id, "https://kwork.ru/projects/100/view", "kwork-project-100")
+
+    leads = storage.list_leads()
+
+    assert [lead.id for lead in leads] == [new_lead_id, old_lead_id]
+    assert leads[0].channel == "kwork-web"
+    assert leads[0].message_id == 101
+    assert leads[0].posted_at == "2026-05-04T11:00:00+03:00"
+    assert leads[1].sent_at

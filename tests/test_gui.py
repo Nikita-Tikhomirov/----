@@ -3,10 +3,14 @@ from pathlib import Path
 import pytest
 
 from app.gui import (
+    _lead_details_text,
     _extract_days,
+    _extract_offer_count,
     _extract_price,
+    _extract_remaining_time,
     _lead_title,
     _parse_optional_int,
+    build_lead_row_values,
     build_app_command,
     build_script_command,
     normalize_filter_settings,
@@ -129,3 +133,47 @@ def test_lead_gui_helpers_extract_editable_fields():
 def test_parse_optional_int_rejects_negative_values():
     with pytest.raises(ValueError, match="больше 0"):
         _parse_optional_int("-1", "Цена")
+
+
+def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
+    lead = Lead(
+        id=18,
+        post_id=7,
+        score=65,
+        summary="AI: maybe\nСрок: 5 дн.\nЦена: 12000 руб.\nЗадача: AI написал слишком общий заголовок",
+        draft_reply="Здравствуйте! Сделаю за 4 дня, цена 9000 руб.",
+        contact="https://kwork.ru/projects/3187247/view",
+        status="sent",
+        post_url="https://kwork.ru/projects/3187247/view",
+        post_text=(
+            "📌 Доработать форму заявки на WordPress\n"
+            "Осталось: 2 д. 17 ч.\n"
+            "Предложений: 4\n"
+            "Отклик: https://kwork.ru/projects/3187247/view"
+        ),
+        posted_at="2026-05-04T10:30:00+03:00",
+        sent_at="2026-05-04 10:45:12",
+    )
+
+    assert _lead_title(lead) == "Доработать форму заявки на WordPress"
+    assert _extract_offer_count(lead) == 4
+    assert _extract_remaining_time(lead) == "2 д. 17 ч."
+    assert build_lead_row_values(lead) == (
+        18,
+        "04.05 10:30",
+        4,
+        "отправлен 04.05 10:45",
+        "sent",
+        65,
+        9000,
+        4,
+        "Доработать форму заявки на WordPress",
+    )
+
+    details = _lead_details_text(lead)
+    assert "Название: Доработать форму заявки на WordPress" in details
+    assert "Ссылка: https://kwork.ru/projects/3187247/view" in details
+    assert "Предложений: 4" in details
+    assert "Осталось: 2 д. 17 ч." in details
+    assert "КАРТОЧКА KWORK" in details
+    assert "AI написал слишком общий заголовок" in details
