@@ -168,6 +168,46 @@ def test_embedded_kwork_projects_skip_old_active_cards():
     assert [post.message_id for post in posts] == [3219005]
 
 
+def test_embedded_freshness_wins_over_rendered_cards_when_both_are_present():
+    now = datetime(2026, 7, 18, 1, 30, tzinfo=timezone(timedelta(hours=3)))
+    html = """
+    <div class="want-card">
+      <a href="/projects/3020909/view">Старый проект из отрисованной карточки</a>
+      <span>Предложений: 1</span>
+    </div>
+    <script>
+      window.pageState = {
+        "wantsListData": {
+          "pagination": {
+            "data": [
+              {
+                "id": 3219006,
+                "name": "Свежая правка формы",
+                "description": "Починить отправку заявки",
+                "date_create": "2026-07-17 23:40:00",
+                "status": "active",
+                "isWantActive": true
+              },
+              {
+                "id": 3020909,
+                "name": "Старый зависший заказ",
+                "description": "Не должен попасть в подборку",
+                "date_create": "2025-11-16 03:46:06",
+                "status": "active",
+                "isWantActive": true
+              }
+            ]
+          }
+        }
+      };
+    </script>
+    """
+
+    posts = parse_kwork_project_cards(html, max_responses=5, max_age_hours=24, now=now)
+
+    assert [post.message_id for post in posts] == [3219006]
+
+
 def test_fetch_rendered_html_refreshes_page_before_reading(monkeypatch):
     import websocket
     import app.kwork_source as source

@@ -138,6 +138,18 @@ def parse_kwork_project_cards(
     base_url: str = "https://kwork.ru/projects",
     now: datetime | None = None,
 ) -> list[TelegramPost]:
+    # Kwork keeps the canonical publication timestamps in this hydrated payload.
+    # Prefer it even when its freshness filter returns no posts: falling back to
+    # rendered cards in that case could resurrect stale active projects.
+    embedded_posts = _posts_from_embedded_wants(
+        html_text,
+        base_url=base_url,
+        max_age_hours=max_age_hours,
+        now=now,
+    )
+    if embedded_posts is not None:
+        return embedded_posts
+
     posts: list[TelegramPost] = []
     seen_ids: set[int] = set()
     card_blocks = CARD_PATTERN.findall(html_text)
@@ -147,14 +159,7 @@ def parse_kwork_project_cards(
             continue
         seen_ids.add(post.message_id)
         posts.append(post)
-    if card_blocks:
-        return posts
-    return _posts_from_embedded_wants(
-        html_text,
-        base_url=base_url,
-        max_age_hours=max_age_hours,
-        now=now,
-    )
+    return posts
 
 
 def _post_from_card(block: str, max_responses: int, base_url: str) -> TelegramPost | None:
@@ -194,7 +199,7 @@ def _posts_from_embedded_wants(
     base_url: str,
     max_age_hours: int | None = None,
     now: datetime | None = None,
-) -> list[TelegramPost]:
+) -> list[TelegramPost] | None:
     """Read Kwork's hydrated list when the SPA has not rendered want-card nodes."""
     decoder = json.JSONDecoder()
     for match in re.finditer(r'"wantsListData"\s*:\s*', html_text):
@@ -213,7 +218,7 @@ def _posts_from_embedded_wants(
             if (post := _post_from_embedded_want(item, base_url, max_age_hours=max_age_hours, now=now)) is not None
         ]
         return sorted(posts, key=lambda post: (bool(post.posted_at), post.posted_at), reverse=True)
-    return []
+    return None
 
 
 def _post_from_embedded_want(
