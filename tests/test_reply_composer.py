@@ -313,6 +313,27 @@ def test_wordpress_catalog_payment_fallback_uses_explicit_order_scope():
     assert reply_quality_issues(reply, context) == ()
 
 
+def test_catalog_selection_fallback_names_the_customer_flow_from_order_facts():
+    context = ReplyDraftContext(
+        title="Разработка каталога для выбора стройматериалов",
+        task_summary="Каталог стройматериалов с выбором позиций",
+        source_text=(
+            "Нужно сделать каталог с карточками материалов и чекбоксами. "
+            "Посетитель выбирает позиции, формирует список и отправляет данные заказчику."
+        ),
+        attachment_context="",
+        estimated_days=5,
+    )
+
+    reply = compose_customer_reply(context, "Цена 10000 руб.")
+
+    lowered = reply.lower()
+    assert "карточки материалов" in lowered
+    assert "сформировать нужный список" in lowered
+    assert "передачу сформированного списка" in lowered
+    assert reply_quality_issues(reply, context) == ()
+
+
 def test_writer_prompt_distinguishes_payment_feature_from_payment_terms():
     prompt = _writer_prompt(
         ReplyDraftContext(

@@ -84,6 +84,15 @@ INTEGRATION_TASK_PATTERN = re.compile(
 )
 PAYMENT_TASK_PATTERN = re.compile(r"\b(?:платеж\w*|оплат\w*|эквайринг\w*)\b", re.IGNORECASE)
 CATALOG_TASK_PATTERN = re.compile(r"\b(?:каталог\w*|товар\w*|карточк\w*)\b", re.IGNORECASE)
+CATALOG_SELECTION_TASK_PATTERN = re.compile(
+    r"\b(?:чекбокс\w*|выбор\w*|подбор\w*|сформир\w*\s+спис\w*)\b",
+    re.IGNORECASE,
+)
+CATALOG_SUBMISSION_TASK_PATTERN = re.compile(
+    r"\b(?:отправ\w*\s+(?:данн\w*|заявк\w*|спис\w*|выбран\w*)|"
+    r"передач\w*\s+(?:данн\w*|заявк\w*|спис\w*))\b",
+    re.IGNORECASE,
+)
 CATALOG_FILL_ACTION_PATTERN = re.compile(
     r"\b(?:добав\w*|наполн\w*|загруж\w*)\s+(?:товар\w*|каталог\w*)\b",
     re.IGNORECASE,
@@ -596,6 +605,16 @@ def _fallback_actions(details: str) -> tuple[str, str]:
         return (
             "Сначала разберу сценарий работы формы и обработку заявок, затем внесу нужные правки в разметку и логику.",
             "После изменений пройду основной пользовательский сценарий и проверю, что заявки доходят корректно.",
+        )
+    if CATALOG_TASK_PATTERN.search(details) and CATALOG_SELECTION_TASK_PATTERN.search(details):
+        if CATALOG_SUBMISSION_TASK_PATTERN.search(details):
+            return (
+                "Соберу карточки материалов и сценарий выбора позиций, чтобы посетитель мог сформировать нужный список.",
+                "Проверю выбор позиций и передачу сформированного списка, чтобы данные поступали заказчику в понятном виде.",
+            )
+        return (
+            "Соберу карточки материалов и сценарий выбора позиций, чтобы посетитель мог сформировать нужный список.",
+            "После этого проверю карточки и основной пользовательский сценарий каталога.",
         )
     if WORDPRESS_TASK_PATTERN.search(details):
         if CATALOG_TASK_PATTERN.search(details) and PAYMENT_TASK_PATTERN.search(details):
