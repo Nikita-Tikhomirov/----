@@ -46,6 +46,18 @@ class LeadAttachment:
 
 
 @dataclass(frozen=True)
+class PostRejection:
+    post_id: int
+    channel: str
+    message_id: int
+    post_url: str
+    post_text: str
+    posted_at: str
+    reason: str
+    rejected_at: str
+
+
+@dataclass(frozen=True)
 class Order:
     id: int
     lead_id: int | None
@@ -208,6 +220,39 @@ class Storage:
                 (post_id,),
             ).fetchone()
         return str(row["reason"]) if row is not None else ""
+
+    def list_post_rejections(self, limit: int = 100) -> list[PostRejection]:
+        safe_limit = max(1, min(int(limit), 500))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT post_rejections.post_id, post_rejections.reason, post_rejections.rejected_at,
+                       posts.channel, posts.message_id, posts.post_url, posts.raw_text, posts.posted_at
+                FROM post_rejections
+                JOIN posts ON posts.id = post_rejections.post_id
+                ORDER BY COALESCE(NULLIF(posts.posted_at, ''), post_rejections.rejected_at) DESC,
+                         post_rejections.post_id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return [
+            PostRejection(
+                post_id=int(row["post_id"]),
+                channel=str(row["channel"]),
+                message_id=int(row["message_id"]),
+                post_url=str(row["post_url"]),
+                post_text=str(row["raw_text"]),
+                posted_at=str(row["posted_at"]),
+                reason=str(row["reason"]),
+                rejected_at=str(row["rejected_at"]),
+            )
+            for row in rows
+        ]
+
+    def clear_post_rejection(self, post_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM post_rejections WHERE post_id = ?", (post_id,))
 
     def create_lead(
         self,

@@ -18,6 +18,7 @@ from app.gui import (
     _lead_title,
     _kwork_price_limit,
     _parse_optional_int,
+    _post_title,
     _reply_context_from_lead,
     _should_refresh_after_process,
     direct_send_confirmation,
@@ -30,7 +31,7 @@ from app.gui import (
     read_env_values,
     update_env_values,
 )
-from app.storage import Lead, LeadAttachment
+from app.storage import Lead, LeadAttachment, PostRejection
 
 
 def test_build_app_command_runs_module_with_src_pythonpath(tmp_path, monkeypatch):
@@ -465,6 +466,59 @@ def test_parse_optional_int_rejects_negative_values():
 def test_kwork_price_limit_reads_maximum_from_live_form_error():
     assert _kwork_price_limit("Стоимость может быть не более 3 000 руб.") == 3000
     assert _kwork_price_limit("Kwork reply field was not found") is None
+
+
+def test_post_title_uses_kwork_card_heading():
+    assert _post_title("📌 Правки формы заявки\nОсталось: 2 д.\nПредложений: 1") == "Правки формы заявки"
+
+
+def test_restore_selected_rejection_only_clears_rejection_mark():
+    class Table:
+        def selection(self):
+            return ("rejection-7",)
+
+    class Storage:
+        def __init__(self):
+            self.cleared = []
+
+        def clear_post_rejection(self, post_id):
+            self.cleared.append(post_id)
+
+    class Value:
+        def __init__(self):
+            self.value = ""
+
+        def set(self, value):
+            self.value = value
+
+    rejection = PostRejection(
+        post_id=7,
+        channel="kwork-web",
+        message_id=123,
+        post_url="https://kwork.ru/projects/123/view",
+        post_text="📌 Правки формы заявки\nПредложений: 1",
+        posted_at="2026-07-18 10:00:00",
+        reason="AI: сложнее недельного лимита",
+        rejected_at="2026-07-18 10:02:00",
+    )
+    storage = Storage()
+    logs = []
+    refreshed = []
+    dummy = SimpleNamespace(
+        rejections_table=Table(),
+        rejection_rows={"rejection-7": rejection},
+        _storage=lambda: storage,
+        status_var=Value(),
+        write_log=logs.append,
+        refresh_rejections=lambda: refreshed.append(True),
+    )
+
+    LeadFunnelGui.restore_selected_rejection(dummy)
+
+    assert storage.cleared == [7]
+    assert "Правки формы заявки" in dummy.status_var.value
+    assert logs == ["Заказ 7 возвращен в проверку.\n"]
+    assert refreshed == [True]
 
 
 def test_apply_kwork_price_limit_only_updates_the_editable_price_field():

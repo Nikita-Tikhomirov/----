@@ -19,7 +19,7 @@ from app.reply_composer import (
     reply_delivery_issue_labels,
     reply_delivery_issue_summary,
 )
-from app.storage import Lead, LeadAttachment, Storage
+from app.storage import Lead, LeadAttachment, PostRejection, Storage
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -94,6 +94,7 @@ class LeadFunnelGui:
         self.current_lead_id: int | None = None
         self.lead_rows: dict[str, int] = {}
         self.attachment_rows: dict[str, LeadAttachment] = {}
+        self.rejection_rows: dict[str, PostRejection] = {}
         self.in_flight_lead_ids: set[int] = set()
         self.pending_replies: dict[int, str] = {}
         self.lead_action_errors: dict[int, str] = {}
@@ -113,13 +114,16 @@ class LeadFunnelGui:
         self.notebook.pack(fill=BOTH, expand=True, pady=(12, 0))
 
         self.leads_tab = ttk.Frame(self.notebook, style="Panel.TFrame", padding=14)
+        self.rejections_tab = ttk.Frame(self.notebook, style="Panel.TFrame", padding=14)
         self.settings_tab = ttk.Frame(self.notebook, style="Panel.TFrame", padding=14)
         self.log_tab = ttk.Frame(self.notebook, style="Panel.TFrame", padding=14)
         self.notebook.add(self.leads_tab, text="Лиды")
+        self.notebook.add(self.rejections_tab, text="Отсев")
         self.notebook.add(self.settings_tab, text="Настройки")
         self.notebook.add(self.log_tab, text="Лог")
 
         self._create_leads_panel(self.leads_tab)
+        self._create_rejections_panel(self.rejections_tab)
         self._create_settings_panel(self.settings_tab)
         self._create_log_panel(self.log_tab)
         self.write_log("Открой Kwork Chrome, войди в Kwork один раз, затем запускай сканирование или мониторинг.\n")
@@ -367,6 +371,32 @@ class LeadFunnelGui:
         ttk.Button(attachment_buttons, text="Открыть ссылку", command=self.open_selected_attachment_link, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(attachment_buttons, text="Скопировать отчет", command=self.copy_selected_attachment_report, style="Modern.TButton").pack(side="left", padx=6)
 
+    def _create_rejections_panel(self, parent: ttk.Frame) -> None:
+        frame = ttk.Frame(parent, style="Panel.TFrame")
+        frame.pack(fill=BOTH, expand=True)
+        ttk.Label(frame, text="Отсев", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(anchor="w")
+        ttk.Label(frame, text="Заказы, которые система уже проверила и осознанно пропустила.", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
+
+        table_frame = ttk.Frame(frame)
+        table_frame.pack(fill=BOTH, expand=True)
+        columns = ("posted", "title", "reason")
+        self.rejections_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=16)
+        headings = {"posted": "Дата", "title": "Название заказа", "reason": "Причина"}
+        widths = {"posted": 120, "title": 440, "reason": 500}
+        for column in columns:
+            self.rejections_table.heading(column, text=headings[column])
+            self.rejections_table.column(column, width=widths[column], anchor="w")
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.rejections_table.yview)
+        self.rejections_table.configure(yscrollcommand=scrollbar.set)
+        self.rejections_table.pack(side="left", fill=BOTH, expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(10, 0))
+        ttk.Button(buttons, text="Обновить", command=self.refresh_rejections, style="Modern.TButton").pack(side="left", padx=(0, 6))
+        ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_rejection, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Вернуть в проверку", command=self.restore_selected_rejection, style="Accent.TButton").pack(side="left", padx=6)
+
     def _create_log_panel(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Лог", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(anchor="w")
         ttk.Label(parent, text="Здесь видны сканирование, ошибки отправки и действия с лидами.", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
@@ -421,6 +451,55 @@ class LeadFunnelGui:
             self.on_lead_select()
         else:
             self._clear_lead_details()
+        self.refresh_rejections()
+
+    def refresh_rejections(self) -> None:
+        table = getattr(self, "rejections_table", None)
+        if table is None:
+            return
+        try:
+            rejections = self._storage().list_post_rejections(limit=200)
+        except Exception as exc:
+            self.write_log(f"Не удалось загрузить отсев: {exc}\n")
+            return
+        self.rejection_rows.clear()
+        table.delete(*table.get_children())
+        for rejection in rejections:
+            item_id = table.insert(
+                "",
+                END,
+                values=(
+                    _format_datetime(rejection.posted_at or rejection.rejected_at),
+                    _post_title(rejection.post_text),
+                    rejection.reason,
+                ),
+            )
+            self.rejection_rows[item_id] = rejection
+
+    def _selected_rejection(self) -> PostRejection | None:
+        selected = self.rejections_table.selection()
+        if not selected:
+            messagebox.showwarning("Заказ не выбран", "Выбери заказ в таблице отсева.")
+            return None
+        return self.rejection_rows.get(selected[0])
+
+    def open_selected_rejection(self) -> None:
+        rejection = LeadFunnelGui._selected_rejection(self)
+        if rejection is None:
+            return
+        self._run_lead_action(
+            "Открытие отклоненного заказа",
+            lambda: self._open_url_in_kwork_chrome(rejection.post_url),
+        )
+
+    def restore_selected_rejection(self) -> None:
+        rejection = LeadFunnelGui._selected_rejection(self)
+        if rejection is None:
+            return
+        self._storage().clear_post_rejection(rejection.post_id)
+        self.status_var.set(f"Заказ возвращен в проверку: {_post_title(rejection.post_text)}")
+        self.write_log(f"Заказ {rejection.post_id} возвращен в проверку.\n")
+        self.refresh_rejections()
 
     def on_lead_select(self, _event=None) -> None:
         selected = self.leads_table.selection()
@@ -1265,6 +1344,14 @@ def _lead_title(lead: Lead) -> str:
             return clean.removeprefix("Задача:").strip()[:70]
     first_line = next((line.strip() for line in lead.summary.splitlines() if line.strip()), "")
     return (first_line or f"Kwork lead {lead.id}")[:70]
+
+
+def _post_title(post_text: str) -> str:
+    for line in post_text.splitlines():
+        clean = line.strip().lstrip("📌").strip()
+        if clean and not _looks_like_kwork_meta_line(clean):
+            return clean[:180]
+    return "Заказ без названия"
 
 
 def _is_placeholder_lead_title(value: str) -> bool:

@@ -40,6 +40,15 @@ def test_records_and_reads_durable_post_rejection(tmp_path):
     storage.record_post_rejection(post_id, "AI: задача сложнее недельного лимита")
 
     assert storage.get_post_rejection(post_id) == "AI: задача сложнее недельного лимита"
+    rejections = storage.list_post_rejections()
+    assert len(rejections) == 1
+    assert rejections[0].post_id == post_id
+    assert rejections[0].post_url == "https://kwork.ru/projects/99/view"
+    assert rejections[0].reason == "AI: задача сложнее недельного лимита"
+
+    storage.clear_post_rejection(post_id)
+
+    assert storage.get_post_rejection(post_id) == ""
 
 
 def test_get_lead_for_post_returns_existing_lead(tmp_path):
