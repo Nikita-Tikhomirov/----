@@ -1,6 +1,8 @@
+import smtplib
 from email.message import EmailMessage
 
 from app.email_client import (
+    EmailClient,
     build_customer_proposal,
     build_lead_email,
     build_order_approval_email,
@@ -8,6 +10,59 @@ from app.email_client import (
     parse_order_review_messages,
 )
 from app.storage import Lead, Order
+
+
+def test_send_lead_retries_connection_drop_before_message_submission(monkeypatch):
+    attempts = []
+
+    class FakeSmtp:
+        def __init__(self, *_args, **_kwargs):
+            attempts.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def starttls(self):
+            if len(attempts) == 1:
+                raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+
+        def login(self, *_args):
+            return None
+
+        def send_message(self, _message):
+            return None
+
+    monkeypatch.setattr("app.email_client.smtplib.SMTP", FakeSmtp)
+    client = EmailClient(
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_user="bot@example.com",
+        smtp_password="secret",
+        mail_from="bot@example.com",
+        mail_to="me@example.com",
+        imap_host="imap.example.com",
+        imap_port=993,
+        imap_user="bot@example.com",
+        imap_password="secret",
+    )
+    lead = Lead(
+        id=12,
+        post_id=3,
+        score=86,
+        summary="HTML/CSS лендинг на 1-2 дня",
+        draft_reply="Здравствуйте! Готов быстро помочь с лендингом.",
+        contact="@client_dev",
+        status="new",
+        post_url="https://t.me/jobs/42",
+    )
+
+    message_id = client.send_lead(lead)
+
+    assert message_id == "<lead-12@telegram-lead-funnel.local>"
+    assert len(attempts) == 2
 
 
 def test_build_lead_email_contains_reply_instruction():

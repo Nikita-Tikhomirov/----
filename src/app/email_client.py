@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import imaplib
+import logging
 import re
 import smtplib
 from dataclasses import dataclass
@@ -11,6 +12,8 @@ from typing import Iterable
 
 from app.storage import Lead, Order
 
+
+logger = logging.getLogger(__name__)
 
 APPROVAL_PATTERN = re.compile(r"^\s*OK\s+(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
 ORDER_APPROVAL_PATTERN = re.compile(r"^\s*(DONE|APPROVE)\s+(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
@@ -62,10 +65,7 @@ class EmailClient:
             self.mail_to,
             manual_reply_only=self.manual_reply_only,
         )
-        with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as smtp:
-            smtp.starttls()
-            smtp.login(self.smtp_user, self.smtp_password)
-            smtp.send_message(message)
+        self._send_smtp_message(message)
         return message["Message-ID"]
 
     def fetch_approvals(self, seen_message_ids: set[str]) -> list[tuple[int, str]]:
@@ -74,11 +74,26 @@ class EmailClient:
 
     def send_order_for_approval(self, order: Order) -> str:
         message = build_order_approval_email(order, self.mail_from, self.mail_to)
-        with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as smtp:
-            smtp.starttls()
-            smtp.login(self.smtp_user, self.smtp_password)
-            smtp.send_message(message)
+        self._send_smtp_message(message)
         return message["Message-ID"]
+
+    def _send_smtp_message(self, message: EmailMessage) -> None:
+        for attempt in range(1, 3):
+            submission_started = False
+            try:
+                with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as smtp:
+                    smtp.starttls()
+                    smtp.login(self.smtp_user, self.smtp_password)
+                    submission_started = True
+                    smtp.send_message(message)
+                return
+            except (OSError, smtplib.SMTPServerDisconnected) as exc:
+                if submission_started or attempt == 2:
+                    raise
+                logger.warning(
+                    "SMTP connection failed before email submission; retrying once: %s",
+                    exc,
+                )
 
     def fetch_order_reviews(self, seen_message_ids: set[str]) -> list[OrderReviewCommand]:
         messages = self._fetch_unseen_messages()
