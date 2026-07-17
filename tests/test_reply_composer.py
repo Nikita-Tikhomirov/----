@@ -417,3 +417,35 @@ def test_quality_gate_rejects_overly_detailed_reply():
     issues = reply_quality_issues(reply, _form_context())
 
     assert "too many sentences" in issues
+
+
+def test_quality_gate_rejects_robotic_intro_and_unfounded_guarantee():
+    reply = (
+        "Привет. Понял задачу: нужно, чтобы форма на лендинге гарантированно передавала заявки в CRM. "
+        "Сделаю следующее: проверю обработку данных, исправлю отправку и настрою нужную связку. "
+        "Затем проверю адаптив формы и основной пользовательский сценарий на мобильных. "
+        "На всё уйдёт до двух дней, готов приступить сразу."
+    )
+
+    issues = reply_quality_issues(reply, _form_context())
+
+    assert "robotic phrasing" in issues
+    assert "unfounded guarantee" in issues
+
+
+def test_writer_prompt_requires_a_human_specific_opening():
+    prompt = _writer_prompt(_form_context()).lower()
+
+    assert "начни с «здравствуйте!»" in prompt
+    assert "не используй фразы «понял задачу»" in prompt
+
+
+def test_quality_gate_rejects_plain_hi_opening_without_other_robotic_markers():
+    reply = (
+        "Привет. По форме заявки на лендинге нужно восстановить корректную отправку и адаптив. "
+        "Проверю обработку данных и логику формы, затем внесу нужные правки. "
+        "После этого протестирую отправку заявки и отображение на мобильных. "
+        "Могу приступить сразу."
+    )
+
+    assert "robotic phrasing" in reply_quality_issues(reply, _form_context())
