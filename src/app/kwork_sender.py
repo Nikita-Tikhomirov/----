@@ -25,6 +25,10 @@ class ReplyTerms:
     days: int | None = None
 
 
+class KworkProjectUnavailableError(RuntimeError):
+    """Raised when Kwork no longer exposes the project to receive a reply."""
+
+
 class KworkReplySender:
     can_send_replies = True
 
@@ -145,6 +149,8 @@ class KworkReplySender:
             self._wait_for_page_text(ws)
             self._wait_for_reply_field(ws)
             return True
+        except KworkProjectUnavailableError:
+            raise
         except Exception as exc:
             logger.info("Kwork direct offer page failed, falling back to project button: %s", exc)
             return False
@@ -188,6 +194,9 @@ class KworkReplySender:
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:
             text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
+            unavailable_message = _project_unavailable_message(text)
+            if unavailable_message:
+                raise KworkProjectUnavailableError(unavailable_message)
             if len(text.strip()) > 100:
                 return
             time.sleep(0.4)
@@ -242,6 +251,9 @@ class KworkReplySender:
             if kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT):
                 return
             text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
+            unavailable_message = _project_unavailable_message(text)
+            if unavailable_message:
+                raise KworkProjectUnavailableError(unavailable_message)
             if _login_required_message(text, has_reply_field=False):
                 return
             time.sleep(0.5)
@@ -345,6 +357,26 @@ def _login_required_message(page_text: str, has_reply_field: bool) -> str:
         return ""
     if "вход" in lowered and "регистрация" in lowered and "предложить услугу" in lowered:
         return "Kwork Chrome is not logged in; open the bot Chrome window and sign in to Kwork once."
+    return ""
+
+
+def _project_unavailable_message(page_text: str) -> str:
+    lowered = page_text.lower()
+    unavailable_markers = (
+        "страница не найдена",
+        "проект не найден",
+        "заказ не найден",
+        "проект недоступен",
+        "заказ недоступен",
+        "проект закрыт",
+        "заказ закрыт",
+        "заказ снят",
+        "page not found",
+        "project not found",
+        "project is unavailable",
+    )
+    if any(marker in lowered for marker in unavailable_markers):
+        return "Kwork project is unavailable: page not found, closed, or removed."
     return ""
 
 

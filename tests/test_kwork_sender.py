@@ -39,6 +39,34 @@ def test_login_required_message_allows_page_with_reply_field():
     assert _login_required_message(page_text, has_reply_field=True) == ""
 
 
+def test_wait_for_reply_field_reports_unavailable_kwork_project(monkeypatch):
+    from app import kwork_source
+
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda ws, script: "СТРАНИЦА НЕ НАЙДЕНА" if "document.body" in script else False,
+    )
+
+    with pytest.raises(RuntimeError, match="Kwork project is unavailable"):
+        KworkReplySender(timeout_seconds=0.1)._wait_for_reply_field(object())
+
+
+def test_direct_offer_does_not_fallback_when_project_is_unavailable(monkeypatch):
+    from app import kwork_source
+    from app.kwork_sender import KworkProjectUnavailableError
+
+    monkeypatch.setattr(kwork_source, "_refresh_page", lambda ws, url, timeout: None)
+    monkeypatch.setattr(
+        KworkReplySender,
+        "_wait_for_page_text",
+        lambda self, ws: (_ for _ in ()).throw(KworkProjectUnavailableError("Kwork project is unavailable: page not found")),
+    )
+
+    with pytest.raises(RuntimeError, match="Kwork project is unavailable"):
+        KworkReplySender()._try_open_direct_offer(object(), "https://kwork.ru/new_offer?project=3190074")
+
+
 def test_kwork_reply_sender_keeps_autologin_credentials_in_memory_only():
     sender = KworkReplySender(login_email="me@example.com", login_password="secret")
 
