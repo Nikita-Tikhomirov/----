@@ -28,7 +28,7 @@
 - Produces: `ReplyDraftContext`, `ReplyQualityResult`, and `compose_customer_reply(...) -> str`.
 - Consumes: `clean_customer_reply` only as the final commercial-term safety net.
 
-- [ ] **Step 1: Write failing quality tests**
+- [x] **Step 1: Write failing quality tests**
 
 ```python
 def test_compose_rejects_price_and_generic_reply_without_provider():
@@ -48,13 +48,13 @@ def test_compose_rejects_price_and_generic_reply_without_provider():
     assert "форм" in reply.lower()
 ```
 
-- [ ] **Step 2: Run the focused test and confirm the missing module failure**
+- [x] **Step 2: Run the focused test and confirm the missing module failure**
 
 Run: `python -m pytest tests/test_reply_composer.py -q`
 
 Expected: collection fails because `app.reply_composer` does not exist.
 
-- [ ] **Step 3: Implement factual redaction, quality checks, and deterministic fallback**
+- [x] **Step 3: Implement factual redaction, quality checks, and deterministic fallback**
 
 ```python
 def compose_customer_reply(context, seed_reply, api_key="", model="deepseek-chat"):
@@ -66,7 +66,7 @@ The fallback selects actions from task keywords such as form, layout, WordPress,
 domain, API, or generic site fix. It describes only actions that are supported
 by the supplied context.
 
-- [ ] **Step 4: Add provider composition and one repair pass behind the same interface**
+- [x] **Step 4: Add provider composition and one repair pass behind the same interface**
 
 ```python
 if api_key:
@@ -76,7 +76,7 @@ if api_key:
         candidate = _repair_with_deepseek(candidate, review.issues, context, api_key, model)
 ```
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run: `python -m pytest tests/test_reply_composer.py -q`
 
