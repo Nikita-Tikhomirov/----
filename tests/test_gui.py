@@ -20,6 +20,7 @@ from app.gui import (
     _reply_context_from_lead,
     _should_refresh_after_process,
     direct_send_confirmation,
+    lead_status_summary,
     lead_send_block_reason,
     build_lead_row_values,
     build_app_command,
@@ -641,6 +642,24 @@ def test_direct_send_blocks_second_click_while_first_send_is_running():
     )
 
     assert lead_send_block_reason(lead, in_flight_lead_ids={21}) == "Отправка этого лида уже выполняется."
+
+
+def test_lead_status_summary_keeps_action_error_after_list_refresh():
+    lead = Lead(
+        id=28,
+        post_id=11,
+        score=82,
+        summary="Доработать форму",
+        draft_reply="Здравствуйте! Исправлю форму.",
+        contact="https://kwork.ru/projects/28/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/28/view",
+    )
+
+    status = lead_status_summary(lead, pending_reply=False, action_error="Стоимость может быть не более 3 000 руб.")
+
+    assert "Лид #28" in status
+    assert "ошибка: Стоимость может быть не более 3 000 руб." in status
 
 
 def test_gui_direct_send_blocks_stale_reply_with_unsupported_task_action(monkeypatch):

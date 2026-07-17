@@ -96,6 +96,7 @@ class LeadFunnelGui:
         self.attachment_rows: dict[str, LeadAttachment] = {}
         self.in_flight_lead_ids: set[int] = set()
         self.pending_replies: dict[int, str] = {}
+        self.lead_action_errors: dict[int, str] = {}
         self.reply_regeneration_in_flight = False
         self.status_var = StringVar(value="Готово")
 
@@ -429,10 +430,6 @@ class LeadFunnelGui:
         self.lead_price_var.set(str(_extract_price(lead) or ""))
         self.lead_days_var.set(str(_extract_days(lead) or ""))
         self.lead_url_var.set(lead.contact or lead.post_url)
-        status = (
-            f"Лид #{lead.id}: {lead.status}; score {lead.score}; "
-            f"предложений: {_extract_offer_count(lead) or 'не видно'}; наш отклик: {_reply_state(lead)}"
-        )
         draft_reply = self.pending_replies.get(lead.id, lead.draft_reply)
         attachments = self._attachments_for_lead(lead)
         reply_context = _reply_context_from_lead(
@@ -442,12 +439,12 @@ class LeadFunnelGui:
             attachments=attachments,
         )
         reply_notice = reply_delivery_issue_summary(draft_reply, reply_context)
-        if reply_notice:
-            status += f"; {reply_notice}"
-        if lead.id in self.pending_replies:
-            status += "; новый черновик не сохранен"
-        if lead.last_error:
-            status += f"; ошибка: {lead.last_error}"
+        status = lead_status_summary(
+            lead,
+            pending_reply=lead.id in self.pending_replies,
+            reply_notice=reply_notice,
+            action_error=getattr(self, "lead_action_errors", {}).get(lead.id, ""),
+        )
         self.lead_status_var.set(status)
         self.summary_text.delete("1.0", END)
         self.summary_text.insert("1.0", _lead_details_text(lead))
@@ -666,6 +663,8 @@ class LeadFunnelGui:
         on_finished=None,
         mark_failed: bool = False,
     ) -> None:
+        if lead_id is not None:
+            self.lead_action_errors.pop(lead_id, None)
         self.status_var.set(f"{label}: выполняется")
         self.write_log(f"=== {label}: старт ===\n")
         threading.Thread(
@@ -703,6 +702,9 @@ class LeadFunnelGui:
             self.root.after(0, self.refresh_leads)
 
     def _show_lead_action_error(self, lead_id: int, error: str) -> None:
+        action_errors = getattr(self, "lead_action_errors", None)
+        if action_errors is not None:
+            action_errors[lead_id] = error
         if getattr(self, "current_lead_id", None) != lead_id:
             return
         lead_status = getattr(self, "lead_status_var", None)
@@ -1322,6 +1324,29 @@ def _reply_state(lead: Lead) -> str:
     if lead.status == "sent":
         return "отправлен"
     return "нет"
+
+
+def lead_status_summary(
+    lead: Lead,
+    *,
+    pending_reply: bool,
+    reply_notice: str = "",
+    action_error: str = "",
+) -> str:
+    """Build the concise state shown above the selected lead's editable fields."""
+    status = (
+        f"Лид #{lead.id}: {lead.status}; score {lead.score}; "
+        f"предложений: {_extract_offer_count(lead) or 'не видно'}; наш отклик: {_reply_state(lead)}"
+    )
+    if reply_notice:
+        status += f"; {reply_notice}"
+    if pending_reply:
+        status += "; новый черновик не сохранен"
+
+    errors = [error.strip() for error in (lead.last_error, action_error) if error.strip()]
+    for error in dict.fromkeys(errors):
+        status += f"; ошибка: {error}"
+    return status
 
 
 def lead_send_block_reason(lead: Lead, in_flight_lead_ids: set[int]) -> str:
