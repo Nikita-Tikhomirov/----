@@ -521,6 +521,12 @@ def test_gui_names_mail_check_and_direct_submission_actions_clearly():
     assert 'text="OK и отправить отклик"' in source
 
 
+def test_primary_lead_actions_are_created_before_long_lead_details():
+    source = (Path(__file__).resolve().parents[1] / "src" / "app" / "gui.py").read_text(encoding="utf-8")
+
+    assert source.index("buttons = ttk.Frame(frame)") < source.index("text_frame = ttk.Frame(frame)")
+
+
 def test_monitoring_schedules_periodic_lead_refresh():
     source = (Path(__file__).resolve().parents[1] / "src" / "app" / "gui.py").read_text(encoding="utf-8")
 

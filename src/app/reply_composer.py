@@ -38,6 +38,17 @@ CURRENT_STATE_ENVIRONMENT_GROUPS = (
     ("десктоп", "desktop", "компьютер"),
     ("мобиль", "телефон", "ios", "android"),
 )
+UNCERTAIN_COMMITMENT_PATTERN = re.compile(
+    r"(?:\b(?:пока\s+исхожу|это\s+уточняется|потребуется\s+уточнен\w*|"
+    r"предположительно|скорее\s+всего)\b|"
+    r"\bесли\s+[^.!?]{0,100}\b(?:действительно\s+)?(?:нужн[аоы]?|понадобится)\b)",
+    re.IGNORECASE,
+)
+CUSTOMER_SKILL_ASSUMPTION_PATTERN = re.compile(
+    r"\b(?:если\s+вы\s+(?:(?:не\s+)?(?:работали|знакомы|разбираетесь|использовали|умеете)|новичок)|"
+    r"вам\s+(?:будет\s+)?(?:сложно|непонятно)|для\s+новичка)\b",
+    re.IGNORECASE,
+)
 AI_MENTION_PATTERN = re.compile(
     r"(?:\b(?:ai|gpt|chatgpt)\b|нейросет\w*|искусственн\w*\s+интеллект\w*|"
     r"(?:ai|ии)[-\s]?агент\w*)",
@@ -128,6 +139,10 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
         issues.append("unapproved clarification")
     if _has_unsupported_current_state_claim(clean, context):
         issues.append("unsupported current state")
+    if UNCERTAIN_COMMITMENT_PATTERN.search(clean):
+        issues.append("uncertain commitment")
+    if CUSTOMER_SKILL_ASSUMPTION_PATTERN.search(clean):
+        issues.append("customer skill assumption")
     if clean.count("?") > 1:
         issues.append("too many questions")
     if len(clean) < MIN_REPLY_LENGTH:
@@ -246,6 +261,8 @@ def _writer_prompt(context: ReplyDraftContext) -> str:
         else "Не задавай вопросов и не проси уточнения, файлы, доступы или подтверждения. "
         "Если детали неизвестны, не выдумывай их и продолжай по фактам задачи. "
         "Не добавляй факты о текущем состоянии сайта, устройствах, доступах или технологиях, если их нет в фактах."
+        " Не описывай внутренние сомнения и условные обещания: не пиши «пока исхожу», «это уточняется» или «если понадобится»."
+        " Не оценивай навыки заказчика и не пиши «если вы не работали с этим раньше» или «вам будет сложно»."
     )
     return "\n\n".join(
         part
@@ -280,6 +297,8 @@ def _review_prompt(candidate: str, context: ReplyDraftContext) -> str:
         "не содержит коммерческих условий, выдуманных утверждений, AI-слов и пустых фраз. "
         "Утверждение о том, что что-то уже работает или не работает на конкретном устройстве или в среде, "
         "допустимо только если это прямо есть в фактах. "
+        "Отклони условные обещания и фразы про внутреннюю неопределенность, например «пока исхожу» или «это уточняется». "
+        "Отклони оценку навыков заказчика, например «если вы не работали с этим раньше» или «вам будет сложно». "
         f"{question_policy} "
         "Верни строго JSON: {\"approved\": true|false, \"issues\": [\"краткая причина\"]}.\n\n"
         f"Факты:\n{_redacted_facts(context)}\n\n"
@@ -300,6 +319,8 @@ def _repair_prompt(candidate: str, issues: tuple[str, ...], context: ReplyDraftC
         "Сохрани спокойный человеческий тон, 4-5 предложений и 350-850 символов. "
         "Не добавляй коммерческие условия, выдуманный опыт или AI-слова. "
         "Не добавляй неподтвержденные факты о текущем состоянии сайта, устройствах, доступах или технологиях. "
+        "Не описывай внутренние сомнения, условные обещания или фразы «пока исхожу» и «это уточняется». "
+        "Не оценивай навыки заказчика и не добавляй формулировки про его опыт или сложность для него. "
         f"{question_policy}\n\n"
         f"Причины правки: {issue_text}\n\n"
         f"Факты:\n{_redacted_facts(context)}\n\n"
@@ -397,8 +418,7 @@ def _has_unsupported_current_state_claim(reply: str, context: ReplyDraftContext)
 
 
 def _fallback_reply(context: ReplyDraftContext) -> str:
-    summary = _redact_commercial_context(context.task_summary) or _redact_commercial_context(context.title)
-    summary = summary[:180].rstrip(" .,:;-") or "вашу задачу по сайту"
+    summary = _safe_fallback_summary(context)
     details = " ".join((context.title, context.task_summary, context.source_text, context.attachment_context)).lower()
     actions, check = _fallback_actions(details)
     return (
@@ -406,6 +426,27 @@ def _fallback_reply(context: ReplyDraftContext) -> str:
         f"{actions} "
         f"{check} "
         f"На работу ориентируюсь на {max(1, context.estimated_days)} дн., могу приступить сразу."
+    )
+
+
+def _safe_fallback_summary(context: ReplyDraftContext) -> str:
+    for value in (context.task_summary, context.title):
+        summary = _redact_commercial_context(value)
+        if summary and not _has_unsafe_summary_language(summary):
+            return summary[:180].rstrip(" .,:;-")
+    return "вашу задачу по сайту"
+
+
+def _has_unsafe_summary_language(value: str) -> bool:
+    return any(
+        pattern.search(value) is not None
+        for pattern in (
+            AI_MENTION_PATTERN,
+            GENERIC_PHRASE_PATTERN,
+            CLARIFICATION_REQUEST_PATTERN,
+            UNCERTAIN_COMMITMENT_PATTERN,
+            CUSTOMER_SKILL_ASSUMPTION_PATTERN,
+        )
     )
 
 

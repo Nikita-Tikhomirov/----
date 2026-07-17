@@ -161,3 +161,30 @@ Detect only state claims matching a named desktop/mobile environment. Compare th
 Run: `python -m pytest -q tests/test_reply_composer.py -k "unconfirmed_current_state or writer_prompt"`
 
 Observed: PASS. A DeepSeek preview for a mobile-only form task produced no question, no clarification request, no desktop claim, and no quality issues. It did not open Kwork or send a message.
+
+### Task 5: Keep replies professional when the model or fallback is uncertain
+
+**Files:**
+- Modify: `src/app/reply_composer.py`
+- Modify: `tests/test_reply_composer.py`
+- Modify: `README.md`
+
+**Interfaces:**
+- Produces: quality issues `"uncertain commitment"` and `"customer skill assumption"`.
+- Produces: `_safe_fallback_summary(context) -> str` that never promotes an AI risk judgment into customer-facing text.
+
+- [x] **Step 1: Reproduce with live no-send previews and failing unit tests**
+
+The actual lead #81 produced phrases such as `"пока исхожу из того, что это уточняется"` and `"если вы не работали с этим раньше"`. Tests asserted that both patterns are rejected and that a fallback selects the order title when an AI summary says a task is hard for a novice.
+
+- [x] **Step 2: Add prompt and deterministic guards**
+
+Reject narrow patterns for internal hedging and customer-skill assumptions. Add the same instruction to writer, reviewer, and repair prompts.
+
+- [x] **Step 3: Make fallback summaries customer-safe**
+
+Try the task summary only when it contains no commercial, AI, generic-request, hedge, or customer-skill language; otherwise use the title, then a neutral default.
+
+- [x] **Step 4: Verify through tests and the actual GUI preview**
+
+Focused reply and GUI tests pass. A fresh GUI run regenerated lead #81 as an unsaved preview with no Kwork send; the action row, including `OK и отправить отклик`, remains visible on the normal application window.

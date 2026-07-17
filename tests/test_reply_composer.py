@@ -189,11 +189,43 @@ def test_quality_gate_rejects_unconfirmed_current_state_claim():
     assert "unsupported current state" in issues
 
 
+def test_quality_gate_rejects_uncertain_commitment_about_unknown_requirement():
+    issues = reply_quality_issues(
+        (
+            "Здравствуйте! Вижу проблему с отправкой формы заявки и адаптивом лендинга. "
+            "Проверю текущую валидацию и обработку данных, затем внесу правки в разметку и стили. "
+            "Если интеграция с CRM действительно нужна, смогу её реализовать, но пока исхожу из того, что это уточняется. "
+            "После изменений протестирую сценарий на телефоне и в основных браузерах. "
+            "Готов приступить сразу."
+        ),
+        _form_context(),
+    )
+
+    assert "uncertain commitment" in issues
+
+
+def test_quality_gate_rejects_assumption_about_customer_skill():
+    issues = reply_quality_issues(
+        (
+            "Здравствуйте! Вижу проблему с отправкой формы заявки и адаптивом лендинга. "
+            "Проверю текущую валидацию и обработку данных, затем внесу правки в разметку и стили. "
+            "Интеграция с CRM может потребовать дополнительных настроек, особенно если вы не работали с этим раньше. "
+            "После изменений протестирую сценарий на телефоне и в основных браузерах. "
+            "Готов приступить сразу."
+        ),
+        _form_context(),
+    )
+
+    assert "customer skill assumption" in issues
+
+
 def test_writer_prompt_forbids_questions_without_blocking_question():
     prompt = _writer_prompt(_form_context()).lower()
 
     assert "не задавай вопросов" in prompt
     assert "не добавляй факты о текущем состоянии" in prompt
+    assert "не описывай внутренние сомнения" in prompt
+    assert "не оценивай навыки заказчика" in prompt
 
 
 def test_composer_falls_back_when_provider_keeps_prohibited_clarification():
@@ -222,6 +254,19 @@ def test_composer_falls_back_when_provider_keeps_prohibited_clarification():
 
     assert "напишите, куда" not in reply.lower()
     assert "unapproved clarification" not in reply_quality_issues(reply, _form_context())
+
+
+def test_fallback_uses_title_when_task_summary_judges_customer_skill():
+    context = replace(
+        _form_context(),
+        task_summary="Есть риск, что интеграция с CRM будет сложной для новичка.",
+    )
+
+    reply = compose_customer_reply(context, "Цена 5000 руб.")
+
+    assert "нович" not in reply.lower()
+    assert "исправить форму заявки" in reply.lower()
+    assert reply_quality_issues(reply, context) == ()
 
 
 def test_quality_gate_rejects_overly_detailed_reply():

@@ -285,6 +285,28 @@ class LeadFunnelGui:
         ttk.Label(fields, textvariable=self.lead_status_var, style="Muted.TLabel", anchor="w").grid(row=2, column=0, columnspan=6, sticky="ew", pady=2)
         fields.columnconfigure(1, weight=1)
 
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(4, 6))
+        ttk.Button(buttons, text="Обновить", command=self.refresh_leads, style="Modern.TButton").pack(side="left", padx=(0, 6))
+        ttk.Button(buttons, text="Сохранить", command=self.save_lead_edits, style="Modern.TButton").pack(side="left", padx=6)
+        self.regenerate_reply_button = ttk.Button(
+            buttons,
+            text="Пересобрать отклик",
+            command=self.regenerate_selected_reply,
+            style="Accent.TButton",
+        )
+        self.regenerate_reply_button.pack(side="left", padx=6)
+        ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
+        self.send_lead_button = ttk.Button(
+            buttons,
+            text="OK и отправить отклик",
+            command=self.send_selected_lead,
+            style="Danger.TButton",
+        )
+        self.send_lead_button.pack(side="right")
+
         text_frame = ttk.Frame(frame)
         text_frame.pack(fill="both", expand=True, pady=6)
         ttk.Label(text_frame, text="Данные заказа и AI-оценка", style="Muted.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
@@ -327,28 +349,6 @@ class LeadFunnelGui:
         ttk.Button(attachment_buttons, text="Открыть файл", command=self.open_selected_attachment, style="Modern.TButton").pack(side="left", padx=(0, 6))
         ttk.Button(attachment_buttons, text="Открыть ссылку", command=self.open_selected_attachment_link, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(attachment_buttons, text="Скопировать отчет", command=self.copy_selected_attachment_report, style="Modern.TButton").pack(side="left", padx=6)
-
-        buttons = ttk.Frame(frame)
-        buttons.pack(fill="x", pady=(4, 0))
-        ttk.Button(buttons, text="Обновить", command=self.refresh_leads, style="Modern.TButton").pack(side="left", padx=(0, 6))
-        ttk.Button(buttons, text="Сохранить", command=self.save_lead_edits, style="Modern.TButton").pack(side="left", padx=6)
-        self.regenerate_reply_button = ttk.Button(
-            buttons,
-            text="Пересобрать отклик",
-            command=self.regenerate_selected_reply,
-            style="Accent.TButton",
-        )
-        self.regenerate_reply_button.pack(side="left", padx=6)
-        ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
-        ttk.Button(buttons, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
-        ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
-        self.send_lead_button = ttk.Button(
-            buttons,
-            text="OK и отправить отклик",
-            command=self.send_selected_lead,
-            style="Danger.TButton",
-        )
-        self.send_lead_button.pack(side="right")
 
     def _create_log_panel(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Лог", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(anchor="w")
