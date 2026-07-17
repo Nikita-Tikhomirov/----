@@ -396,3 +396,72 @@ def test_lead_attachments_are_saved_and_replaced(tmp_path):
     assert attachments[0].status == "скачан, OCR прочитан"
     assert attachments[0].ocr_scanned is True
     assert attachments[0].opened_archive is False
+
+
+def test_replace_lead_attachments_deduplicates_same_file_url(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=201,
+        post_url="https://kwork.ru/projects/201/view",
+        text="Заказ с вложением",
+        posted_at="2026-06-03T12:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=80,
+        summary="AI summary",
+        draft_reply="Здравствуйте! Сделаю.",
+        contact="https://kwork.ru/projects/201/view",
+    )
+    attachment = LeadAttachment(
+        id=0,
+        lead_id=lead_id,
+        label="ТЗ.pdf",
+        url="https://kwork.ru/files/tz.pdf",
+        local_path="C:/tmp/tz.pdf",
+        status="скачан, текст прочитан",
+        summary="Техническое задание",
+        kind="pdf",
+        opened_archive=False,
+        ocr_scanned=False,
+    )
+
+    storage.replace_lead_attachments(lead_id, [attachment, attachment])
+
+    assert [item.url for item in storage.list_lead_attachments(lead_id)] == [attachment.url]
+
+
+def test_initialize_removes_duplicate_attachment_urls_from_legacy_database(tmp_path):
+    database_path = tmp_path / "leads.sqlite3"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE lead_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lead_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                url TEXT NOT NULL,
+                local_path TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL DEFAULT 'file',
+                opened_archive INTEGER NOT NULL DEFAULT 0,
+                ocr_scanned INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO lead_attachments (lead_id, label, url, status)
+            VALUES (42, 'ТЗ.pdf', 'https://kwork.ru/files/tz.pdf', 'скачан')
+            """,
+            [(), ()],
+        )
+
+    storage = Storage(database_path)
+    storage.initialize()
+
+    assert len(storage.list_lead_attachments(42)) == 1

@@ -172,6 +172,14 @@ class Storage:
             _ensure_column(conn, "leads", "proposal_title", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "proposal_price_rub", "INTEGER")
             _ensure_column(conn, "leads", "proposal_days", "INTEGER")
+            _deduplicate_lead_attachment_urls(conn)
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_lead_attachments_unique_url
+                ON lead_attachments(lead_id, url)
+                WHERE url <> ''
+                """
+            )
             _backfill_generated_order_titles(conn)
 
     def save_post(
@@ -431,6 +439,7 @@ class Storage:
             )
 
     def replace_lead_attachments(self, lead_id: int, attachments: Iterable) -> None:
+        values = _attachment_rows(lead_id, attachments)
         with self._connect() as conn:
             conn.execute("DELETE FROM lead_attachments WHERE lead_id = ?", (lead_id,))
             conn.executemany(
@@ -439,21 +448,7 @@ class Storage:
                     (lead_id, label, url, local_path, status, summary, kind, opened_archive, ocr_scanned)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                [
-                    (
-                        lead_id,
-                        str(getattr(attachment, "label", "")).strip(),
-                        str(getattr(attachment, "url", "")).strip(),
-                        str(getattr(attachment, "local_path", "")).strip(),
-                        str(getattr(attachment, "status", "")).strip(),
-                        str(getattr(attachment, "summary", "")).strip(),
-                        str(getattr(attachment, "kind", "file")).strip() or "file",
-                        1 if bool(getattr(attachment, "opened_archive", False)) else 0,
-                        1 if bool(getattr(attachment, "ocr_scanned", False)) else 0,
-                    )
-                    for attachment in attachments
-                    if str(getattr(attachment, "label", "")).strip() or str(getattr(attachment, "url", "")).strip()
-                ],
+                values,
             )
 
     def list_lead_attachments(self, lead_id: int) -> list[LeadAttachment]:
@@ -468,7 +463,6 @@ class Storage:
                 (lead_id,),
             ).fetchall()
         return [_lead_attachment_from_row(row) for row in rows]
-
     def get_lead(self, lead_id: int) -> Lead:
         with self._connect() as conn:
             row = conn.execute(
@@ -681,6 +675,49 @@ class Storage:
                 """,
                 (next_status, order_id),
             )
+
+
+def _attachment_rows(lead_id: int, attachments: Iterable) -> list[tuple]:
+    values: list[tuple] = []
+    seen_urls: set[str] = set()
+    for attachment in attachments:
+        label = str(getattr(attachment, "label", "")).strip()
+        url = str(getattr(attachment, "url", "")).strip()
+        if not label and not url:
+            continue
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+        values.append(
+            (
+                lead_id,
+                label,
+                url,
+                str(getattr(attachment, "local_path", "")).strip(),
+                str(getattr(attachment, "status", "")).strip(),
+                str(getattr(attachment, "summary", "")).strip(),
+                str(getattr(attachment, "kind", "file")).strip() or "file",
+                1 if bool(getattr(attachment, "opened_archive", False)) else 0,
+                1 if bool(getattr(attachment, "ocr_scanned", False)) else 0,
+            )
+        )
+    return values
+
+
+def _deduplicate_lead_attachment_urls(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        DELETE FROM lead_attachments
+        WHERE url <> ''
+          AND id NOT IN (
+              SELECT MAX(id)
+              FROM lead_attachments
+              WHERE url <> ''
+              GROUP BY lead_id, url
+          )
+        """
+    )
 
 
 def _lead_from_row(row: sqlite3.Row) -> Lead:
