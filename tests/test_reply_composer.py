@@ -98,3 +98,19 @@ def test_quality_gate_marks_ai_and_multiple_questions_as_unsafe():
     assert "AI mention" in issues
     assert "too many questions" in issues
     assert "generic phrase" in issues
+
+
+def test_quality_gate_rejects_overly_detailed_reply():
+    reply = (
+        "Здравствуйте! Вижу проблему с отправкой формы заявки на мобильных. "
+        "Сначала проверю текущую валидацию и обработку данных. "
+        "Затем внесу правки в разметку и стили формы. "
+        "Проверю, чтобы кнопка оставалась видимой на всех разрешениях. "
+        "После этого протестирую отправку на телефоне и компьютере. "
+        "Покажу рабочий результат перед сдачей. "
+        "Готов приступить сразу."
+    )
+
+    issues = reply_quality_issues(reply, _form_context())
+
+    assert "too many sentences" in issues

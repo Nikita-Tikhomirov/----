@@ -16,7 +16,8 @@ COMMERCIAL_PATTERN = re.compile(
 )
 GENERIC_PHRASE_PATTERN = re.compile(
     r"(?:уточните\s+детали|обсудим\s+(?:детали|всё|все)|давайте\s+обсудим|"
-    r"я\s+правильно\s+понимаю|готов\s+помочь|буду\s+рад\s+помочь)",
+    r"я\s+правильно\s+понимаю|готов\s+помочь|буду\s+рад\s+помочь|"
+    r"если\s+(?:нужно|понадобится).{0,80}?(?:скажите|напишите))",
     re.IGNORECASE,
 )
 AI_MENTION_PATTERN = re.compile(
@@ -33,6 +34,7 @@ SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
 WORD_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё]{4,}")
 MAX_REPLY_LENGTH = 850
 MIN_REPLY_LENGTH = 260
+MAX_REPLY_SENTENCES = 6
 
 
 @dataclass(frozen=True)
@@ -110,8 +112,11 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
         issues.append("too short")
     if len(clean) > MAX_REPLY_LENGTH:
         issues.append("too long")
-    if len(_sentences(clean)) < 3:
+    sentence_count = len(_sentences(clean))
+    if sentence_count < 3:
         issues.append("too few sentences")
+    if sentence_count > MAX_REPLY_SENTENCES:
+        issues.append("too many sentences")
     if not ACTION_PATTERN.search(clean):
         issues.append("missing concrete action")
     if not _mentions_task(clean, context):
@@ -221,7 +226,9 @@ def _writer_prompt(context: ReplyDraftContext) -> str:
                 "Сначала покажи, что понял конечный результат, затем назови конкретные действия и проверку. "
                 f"Реалистичный срок: до {max(1, context.estimated_days)} дн. "
                 "Не упоминай коммерческие условия, скидки, оплату, AI, нейросети, портфолио или опыт, которого нет. "
-                "Не повторяй всё ТЗ и не пиши шаблонные фразы."
+                "Не повторяй всё ТЗ, не используй фразы «план такой» или «если нужно, скажите». "
+                "Не делай больше пяти предложений, или шести вместе с отдельным приветствием. "
+                "Последним предложением спокойно подтверди готовность начать."
             ),
             f"Единственный допустимый вопрос, если он действительно нужен: {question}" if question else "",
         )

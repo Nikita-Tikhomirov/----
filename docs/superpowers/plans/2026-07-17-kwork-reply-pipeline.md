@@ -190,11 +190,11 @@ Commit: `git commit -m "feat: enrich unreadable Kwork attachments with vision"`
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Verify all new settings and operator behavior are documented**
+- [x] **Step 1: Verify all new settings and operator behavior are documented**
 
 Document `OPENROUTER_VISION_MODE=smart` and the price-free reply invariant.
 
-- [ ] **Step 2: Run all Python tests and compile checks**
+- [x] **Step 2: Run all Python tests and compile checks**
 
 Run: `python -m pytest -q`
 
@@ -204,14 +204,14 @@ Run: `python -m compileall -q src`
 
 Expected: exit code 0.
 
-- [ ] **Step 3: Run a no-send composition check with a local test fixture**
+- [x] **Step 3: Run a no-send composition check with a local test fixture**
 
 Run: `python -m pytest tests/test_reply_composer.py tests/test_main.py -q`
 
 Expected: the generated reply is price-free, persisted only in the temporary
 test database, and no Kwork browser or email sender is invoked.
 
-- [ ] **Step 4: Inspect final diff, commit, and push**
+- [x] **Step 4: Inspect final diff, commit, and push**
 
 Run: `git diff --check`
 
