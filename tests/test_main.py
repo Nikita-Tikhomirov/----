@@ -1,6 +1,13 @@
 from dataclasses import dataclass
 
-from app.main import create_order_handoff, process_approvals, process_order_reviews, scan_once, submit_order
+from app.main import (
+    _proposal_title_from_text,
+    create_order_handoff,
+    process_approvals,
+    process_order_reviews,
+    scan_once,
+    submit_order,
+)
 from app.ai_lead_judge import LeadJudgeResult
 from app.attachments import AttachmentProcessingResult, AttachmentReport
 from app.kwork_client import KworkProjectInfo
@@ -586,10 +593,16 @@ def test_process_approvals_sends_kwork_web_reply_after_ok(tmp_path):
     )
 
     assert sent == 1
-    assert telegram_client.sent == [
-        ("https://kwork.ru/projects/3186746/view", "Здравствуйте! Сделаю за 3 дня, цена 10000 руб.")
-    ]
+    sent_text = telegram_client.sent[0][1].lower()
+    assert "10000" not in sent_text
+    assert "руб" not in sent_text
     assert storage.get_lead(lead_id).status == "sent"
+
+
+def test_proposal_title_ignores_inline_kwork_offer_metadata():
+    assert _proposal_title_from_text(
+        "Нужно поправить WordPress. Предложений: 4\nОтклик: https://kwork.ru/projects/1/view"
+    ) == "Нужно поправить WordPress"
 
 
 def test_process_approvals_passes_kwork_form_terms_without_price_in_reply_text(tmp_path):
@@ -666,6 +679,48 @@ def test_process_approvals_uses_saved_form_terms_after_ok(tmp_path):
     assert telegram_client.sent_details == [
         (project_url, reply_text, 14000, 5, "Сохраненное название")
     ]
+
+
+def test_process_approvals_removes_price_from_legacy_customer_reply(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    project_url = "https://kwork.ru/projects/3186748/view"
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=3186748,
+        post_url=project_url,
+        text="📌 Доработать форму\nПредложений: 2",
+        posted_at="",
+    )
+    legacy_reply = (
+        "Здравствуйте! Исправлю форму и адаптив за 3 дня, цена 10000 руб. "
+        "Сначала проверю текущую отправку, затем внесу правки и протестирую на телефоне."
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=86,
+        summary="Срок: 3 дн.\nЦена: 10 000 руб.\nЗадача: Доработать форму заявки",
+        draft_reply=legacy_reply,
+        contact=project_url,
+        proposal_title="Доработать форму",
+        proposal_price_rub=10000,
+        proposal_days=3,
+    )
+    storage.mark_lead_emailed(lead_id, "<lead@example.com>")
+    telegram_client = FakeTelegramClient()
+
+    sent = process_approvals(
+        storage=storage,
+        telegram_client=telegram_client,
+        email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
+    )
+
+    assert sent == 1
+    sent_text = telegram_client.sent_details[0][1].lower()
+    assert "10000" not in sent_text
+    assert "руб" not in sent_text
+    assert telegram_client.sent_details[0][2:] == (10000, 3, "Доработать форму")
+    assert "руб" not in storage.get_lead(lead_id).draft_reply.lower()
 
 
 def test_submit_order_sends_for_approval_and_review_can_request_revision(tmp_path):

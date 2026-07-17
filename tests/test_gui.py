@@ -149,6 +149,52 @@ def test_parse_optional_int_rejects_negative_values():
         _parse_optional_int("-1", "Цена")
 
 
+def test_gui_payload_removes_price_from_manually_edited_reply():
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+    class Text:
+        def get(self, *_args):
+            return (
+                "Здравствуйте! Исправлю форму за 3 дня, цена 9000 руб. "
+                "Проверю текущую отправку, внесу правки и протестирую результат."
+            )
+
+    lead = Lead(
+        id=13,
+        post_id=4,
+        score=80,
+        summary="Срок: 3 дн.\nЦена: 9000 руб.\nЗадача: Исправить форму заявки",
+        draft_reply="Старый отклик",
+        contact="https://kwork.ru/projects/2",
+        status="emailed",
+        post_url="https://kwork.ru/projects/2",
+        proposal_price_rub=9000,
+        proposal_days=3,
+    )
+    dummy = type(
+        "DummyGui",
+        (),
+        {
+            "reply_text": Text(),
+            "lead_title_var": Value("Исправить форму заявки"),
+            "lead_price_var": Value("9000"),
+            "lead_days_var": Value("3"),
+        },
+    )()
+
+    payload = LeadFunnelGui._lead_payload(dummy, lead)
+
+    assert "9000" not in payload["reply"]
+    assert "руб" not in payload["reply"].lower()
+    assert payload["price"] == 9000
+    assert payload["days"] == 3
+
+
 def test_format_datetime_displays_moscow_time():
     assert _format_datetime("2026-05-04T07:30:00+00:00") == "04.05 10:30 МСК"
     assert _format_datetime("2026-05-04T10:30:00+03:00") == "04.05 10:30 МСК"

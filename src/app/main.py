@@ -13,6 +13,7 @@ from app.ai_lead_judge import (
     DEFAULT_HARD_REJECT_KEYWORDS,
     LeadJudgeResult,
     judge_lead,
+    sanitize_customer_reply,
 )
 from app.attachments import AttachmentProcessingResult, build_attachment_report
 from app.chrome_cookies import chrome_cookie_header
@@ -309,6 +310,23 @@ def _approval_reply_title(lead) -> str:
     return lead.proposal_title or _proposal_title_from_text(lead.post_text, lead.summary)
 
 
+def _customer_reply_for_delivery(lead) -> str:
+    _, days, _ = _approval_reply_fields(lead)
+    return sanitize_customer_reply(
+        lead.draft_reply,
+        summary=_lead_task_summary(lead),
+        estimated_days=days or 3,
+    )
+
+
+def _lead_task_summary(lead) -> str:
+    for line in lead.summary.splitlines():
+        clean = line.strip()
+        if clean.startswith("Задача:"):
+            return clean.removeprefix("Задача:").strip() or _approval_reply_title(lead)
+    return _approval_reply_title(lead) or "вашу задачу"
+
+
 def _proposal_title_from_text(post_text: str, summary: str = "") -> str:
     meta_prefixes = ("осталось:", "предложений:", "бюджет:", "контакт:", "kwork facts:")
     for line in post_text.splitlines():
@@ -316,15 +334,25 @@ def _proposal_title_from_text(post_text: str, summary: str = "") -> str:
         if not clean:
             continue
         if clean.startswith("\U0001f4cc"):
-            return clean.lstrip("\U0001f4cc").strip()[:70]
+            return _strip_kwork_inline_metadata(clean.lstrip("\U0001f4cc").strip())[:70]
         if clean.lower().startswith(meta_prefixes):
             continue
-        return clean[:70]
+        return _strip_kwork_inline_metadata(clean)[:70]
     for line in summary.splitlines():
         clean = line.strip()
         if clean.startswith("Задача:"):
-            return clean.removeprefix("Задача:").strip()[:70]
+            return _strip_kwork_inline_metadata(clean.removeprefix("Задача:").strip())[:70]
     return ""
+
+
+def _strip_kwork_inline_metadata(value: str) -> str:
+    clean = re.split(
+        r"(?:[.,;]?\s+)(?:предложений|отклик|осталось|бюджет|контакт)\s*:",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    return clean.rstrip(" .,:;-")
 
 
 def process_approvals(
@@ -350,9 +378,12 @@ def process_approvals(
         lead = storage.get_lead(lead_id)
         try:
             price_rub, days, title = _approval_reply_fields(lead)
+            reply_text = _customer_reply_for_delivery(lead)
+            if reply_text != lead.draft_reply:
+                storage.update_lead_reply(lead.id, reply_text)
             telegram_message_id = telegram_client.send_message(
                 lead.contact,
-                lead.draft_reply,
+                reply_text,
                 price_rub=price_rub,
                 days=days,
                 title=title,

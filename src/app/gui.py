@@ -10,6 +10,7 @@ from pathlib import Path
 from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, TclError, Tk, messagebox, scrolledtext
 from tkinter import ttk
 
+from app.ai_lead_judge import sanitize_customer_reply
 from app.config import load_config
 from app.kwork_sender import KworkReplySender, _extract_reply_terms
 from app.storage import Lead, LeadAttachment, Storage
@@ -556,9 +557,14 @@ class LeadFunnelGui:
             self.root.after(0, self.refresh_leads)
 
     def _lead_payload(self, lead: Lead) -> dict:
-        reply = self.reply_text.get("1.0", END).strip()
-        if not reply:
+        raw_reply = self.reply_text.get("1.0", END).strip()
+        if not raw_reply:
             raise ValueError("Текст отклика пустой")
+        reply = sanitize_customer_reply(
+            raw_reply,
+            summary=_lead_task_summary(lead),
+            estimated_days=_extract_days(lead) or 3,
+        )
         return {
             "reply": reply,
             "title": self.lead_title_var.get().strip() or _lead_title(lead),
@@ -1036,6 +1042,14 @@ def _lead_title(lead: Lead) -> str:
             return clean.removeprefix("Задача:").strip()[:70]
     first_line = next((line.strip() for line in lead.summary.splitlines() if line.strip()), "")
     return (first_line or f"Kwork lead {lead.id}")[:70]
+
+
+def _lead_task_summary(lead: Lead) -> str:
+    for line in lead.summary.splitlines():
+        clean = line.strip()
+        if clean.startswith("Задача:"):
+            return clean.removeprefix("Задача:").strip() or _lead_title(lead)
+    return _lead_title(lead) or "вашу задачу"
 
 
 def build_lead_row_values(lead: Lead) -> tuple:

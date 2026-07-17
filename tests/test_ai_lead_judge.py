@@ -1,6 +1,7 @@
+import re
 from unittest.mock import MagicMock, patch
 
-from app.ai_lead_judge import _build_prompt, judge_lead, parse_judge_response
+from app.ai_lead_judge import _build_prompt, judge_lead, parse_judge_response, sanitize_customer_reply
 
 
 def test_parse_judge_response_accepts_medium_week_task():
@@ -170,6 +171,33 @@ def test_parse_judge_response_removes_price_and_generic_question_from_customer_r
     assert "уточните детали" not in reply
     assert "форм" in reply
     assert "телефон" in reply or "провер" in reply
+
+
+def test_sanitize_customer_reply_removes_commercial_terms_from_legacy_reply():
+    reply = sanitize_customer_reply(
+        "Здравствуйте! Исправлю форму и адаптив за 3 дня, цена 9000 руб. "
+        "Сначала проверю текущую отправку формы, затем внесу правки и проверю на телефоне.",
+        summary="Исправить форму заявки и адаптив на лендинге",
+        estimated_days=3,
+    )
+
+    lowered = reply.lower()
+    assert "9000" not in lowered
+    assert "руб" not in lowered
+    assert re.search(r"\bцена\b", lowered) is None
+    assert "форм" in lowered
+
+
+def test_sanitize_customer_reply_does_not_restore_budget_from_legacy_summary():
+    reply = sanitize_customer_reply(
+        "Здравствуйте! Сделаю парсер, бюджет 9000 руб.",
+        summary="Парсер товаров по категориям, бюджет до 500-1500 руб, есть скрин-пример.",
+        estimated_days=3,
+    )
+
+    assert re.search(r"\b(?:цена|бюджет|стоимость|оплата|ставка)\b", reply, re.IGNORECASE) is None
+    assert "руб" not in reply.lower()
+    assert "парсер" in reply.lower()
 
 
 def test_build_prompt_demands_specific_human_kwork_reply():

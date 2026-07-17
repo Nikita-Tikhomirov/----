@@ -19,6 +19,10 @@ COMMERCIAL_REPLY_PATTERN = re.compile(
     r"(?:\b(?:цена|стоим|бюджет|оплат|предоплат|ставка)\w*|\d[\d\s.,]*\s*(?:₽|руб(?:\.|лей)?|р\.?|тыс\.?|к\b))",
     re.IGNORECASE,
 )
+COMMERCIAL_SUMMARY_SEGMENT_PATTERN = re.compile(
+    r"\b(?:цена|бюджет|стоимость|оплата|ставка|price|budget|payment)\b\s*[:—-]?\s*[^,.;!?\n]*(?:[,.;!?]|$)",
+    re.IGNORECASE,
+)
 GENERIC_QUESTION_PATTERN = re.compile(
     r"(?:уточните\s+детали|обсудим\s+детали|расскажите\s+подробнее|"
     r"давайте\s+обсудим|можем\s+обсудить)",
@@ -372,6 +376,14 @@ def clean_customer_reply(reply: str, summary: str, estimated_days: int) -> str:
     return candidate
 
 
+def sanitize_customer_reply(reply: str, summary: str, estimated_days: int) -> str:
+    """Keep a manually written reply unless it leaks commercial terms to the customer."""
+    clean = _clean_text(reply)
+    if COMMERCIAL_REPLY_PATTERN.search(clean):
+        return clean_customer_reply(clean, summary=summary, estimated_days=estimated_days)
+    return clean
+
+
 def _reply_sentences(value: str) -> list[str]:
     clean = _clean_text(value)
     if not clean:
@@ -390,6 +402,7 @@ def _reply_needs_fallback(reply: str) -> bool:
 
 def _reply_safe_summary(summary: str) -> str:
     clean = _clean_text(summary)
+    clean = COMMERCIAL_SUMMARY_SEGMENT_PATTERN.sub(" ", clean)
     clean = re.sub(
         r"(?:\b(?:бюджет|цена|стоимость)\b\s*[:\-]?\s*)?\d[\d\s.,]*\s*(?:₽|руб(?:\.|лей)?|р\.?)",
         "",
