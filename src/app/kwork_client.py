@@ -50,6 +50,27 @@ class KworkProjectInfo:
         return self.reason == UNAVAILABLE_PROJECT_REASON
 
 
+class KworkProjectReplyabilityError(RuntimeError):
+    """Raised when the current Kwork project is unsafe to reply to."""
+
+
+def ensure_project_is_replyable(
+    info: KworkProjectInfo,
+    max_responses: int,
+) -> KworkProjectInfo:
+    """Return a verified project or explain why a reply must not be sent."""
+    if info.is_unavailable:
+        raise KworkProjectReplyabilityError(info.reason or UNAVAILABLE_PROJECT_REASON)
+    if not info.has_response_count:
+        reason = f" ({info.reason})" if info.reason else ""
+        raise KworkProjectReplyabilityError(f"Kwork response count is unavailable; reply was not sent{reason}")
+    if info.response_count > max_responses:
+        raise KworkProjectReplyabilityError(
+            f"Kwork project now has {info.response_count} responses; limit is {max_responses}. Reply was not sent."
+        )
+    return info
+
+
 class KworkProjectClient:
     def __init__(
         self,

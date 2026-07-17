@@ -1,5 +1,6 @@
 import pytest
 
+from app.kwork_client import KworkProjectInfo, KworkProjectReplyabilityError
 from app.kwork_sender import (
     KworkReplySender,
     _AUTO_LOGIN_SCRIPT,
@@ -119,6 +120,38 @@ def test_kwork_reply_sender_rejects_non_kwork_project_url():
 
     with pytest.raises(ValueError, match="Kwork project URL"):
         sender.send_message("https://example.com/project/1", "Здравствуйте!")
+
+
+def test_kwork_reply_sender_preflights_live_count_before_opening_reply_form(monkeypatch):
+    from app import kwork_client, kwork_source
+
+    chrome_actions = []
+
+    class FakeProjectClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def inspect(self, url):
+            return KworkProjectInfo(
+                url=url,
+                response_count=7,
+                title="Лендинг",
+                description="",
+            )
+
+    monkeypatch.setattr(kwork_client, "KworkProjectClient", FakeProjectClient)
+    monkeypatch.setattr(
+        kwork_source,
+        "_ensure_chrome_cdp",
+        lambda *args, **kwargs: chrome_actions.append("ensure"),
+    )
+
+    sender = KworkReplySender(max_responses=5)
+
+    with pytest.raises(KworkProjectReplyabilityError, match=r"7.*5"):
+        sender.send_message("https://kwork.ru/projects/123/view", "Здравствуйте! Готов разобраться.")
+
+    assert chrome_actions == []
 
 
 def test_kwork_reply_sender_passes_structured_terms_from_approval(monkeypatch):

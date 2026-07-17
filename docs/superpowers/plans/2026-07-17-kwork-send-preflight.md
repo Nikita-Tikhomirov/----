@@ -27,7 +27,7 @@
 - Produces `KworkProjectReplyabilityError(RuntimeError)` and
   `ensure_project_is_replyable(info: KworkProjectInfo, max_responses: int) -> KworkProjectInfo`.
 
-- [ ] **Step 1: Write failing validator tests**
+- [x] **Step 1: Write failing validator tests**
 
 ```python
 with pytest.raises(KworkProjectReplyabilityError, match="7.*5"):
@@ -35,11 +35,11 @@ with pytest.raises(KworkProjectReplyabilityError, match="7.*5"):
 assert ensure_project_is_replyable(KworkProjectInfo(..., response_count=5), 5).response_count == 5
 ```
 
-- [ ] **Step 2: Run focused tests and confirm the missing import failure**
+- [x] **Step 2: Run focused tests and confirm the missing import failure**
 
 Run: `python -m pytest tests/test_kwork_client.py -q`
 
-- [ ] **Step 3: Implement the validator**
+- [x] **Step 3: Implement the validator**
 
 ```python
 def ensure_project_is_replyable(info, max_responses):
@@ -54,7 +54,7 @@ def ensure_project_is_replyable(info, max_responses):
     return info
 ```
 
-- [ ] **Step 4: Run focused tests and commit**
+- [x] **Step 4: Run focused tests**
 
 Run: `python -m pytest tests/test_kwork_client.py -q`
 
@@ -69,7 +69,7 @@ Run: `python -m pytest tests/test_kwork_client.py -q`
   `_ensure_project_is_replyable(contact)` before Chrome form navigation when
   `max_responses` is configured.
 
-- [ ] **Step 1: Write a failing no-form-action test**
+- [x] **Step 1: Write a failing no-form-action test**
 
 ```python
 sender = KworkReplySender(max_responses=5)
@@ -78,11 +78,11 @@ with pytest.raises(KworkProjectReplyabilityError, match="7.*5"):
 assert chrome_actions == []
 ```
 
-- [ ] **Step 2: Run focused test and confirm it fails because preflight is absent**
+- [x] **Step 2: Run focused test and confirm it fails because preflight is absent**
 
 Run: `python -m pytest tests/test_kwork_sender.py -q`
 
-- [ ] **Step 3: Add a lazy `KworkProjectClient` inspection helper and call it from `send_reply`**
+- [x] **Step 3: Add a lazy `KworkProjectClient` inspection helper and call it from `send_reply`**
 
 ```python
 if self.max_responses is not None:
@@ -92,7 +92,7 @@ if self.max_responses is not None:
 The helper must use `timeout_seconds`, `cdp_url`, and `browser_profile_dir`
 from this sender and call the pure validator.
 
-- [ ] **Step 4: Run focused sender tests**
+- [x] **Step 4: Run focused sender tests**
 
 Run: `python -m pytest tests/test_kwork_sender.py -q`
 
@@ -109,21 +109,21 @@ Run: `python -m pytest tests/test_kwork_sender.py -q`
 - GUI sender and `KworkWebSource` sender pass `KWORK_MAX_RESPONSES` through to
   `KworkReplySender`.
 
-- [ ] **Step 1: Write failing forwarding tests**
+- [x] **Step 1: Write failing forwarding tests**
 
 ```python
 assert FakeSender.last_kwargs["max_responses"] == 5
 ```
 
-- [ ] **Step 2: Run focused tests and confirm the missing argument failure**
+- [x] **Step 2: Run focused tests and confirm the missing argument failure**
 
 Run: `python -m pytest tests/test_gui.py tests/test_kwork_source.py -q`
 
-- [ ] **Step 3: Pass the configured max response count into both constructors**
+- [x] **Step 3: Pass the configured max response count into both constructors**
 
-- [ ] **Step 4: Document preflight refusal in README**
+- [x] **Step 4: Document preflight refusal in README**
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `python -m pytest tests/test_gui.py tests/test_kwork_source.py tests/test_kwork_sender.py tests/test_kwork_client.py -q`
 

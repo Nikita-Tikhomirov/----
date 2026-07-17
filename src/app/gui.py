@@ -635,6 +635,8 @@ class LeadFunnelGui:
             browser_profile_dir=config.kwork_browser_profile_dir,
             login_email=config.kwork_login_email,
             login_password=config.kwork_login_password,
+            max_responses=config.kwork_max_responses,
+            cookie=config.kwork_cookie,
         )
 
     def _open_kwork_lead(self, lead: Lead) -> str:

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from tkinter import Text, Tk
 
 import pytest
@@ -45,6 +46,32 @@ def test_build_app_command_can_run_approvals_from_gui(tmp_path):
 
     assert command[-3:] == ["-m", "app.main", "approvals"]
     assert env["PYTHONPATH"] == str(tmp_path / "src")
+
+
+def test_gui_sender_passes_live_response_limit_to_kwork_sender(monkeypatch):
+    import app.gui as gui
+
+    captured = {}
+
+    class FakeSender:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    config = SimpleNamespace(
+        kwork_cdp_url="http://127.0.0.1:9222",
+        kwork_browser_profile_dir="C:/tmp/KworkChrome",
+        kwork_login_email="bot@example.com",
+        kwork_login_password="secret",
+        kwork_max_responses=5,
+        kwork_cookie="session=opaque",
+    )
+    monkeypatch.setattr(gui, "load_config", lambda: config)
+    monkeypatch.setattr(gui, "KworkReplySender", FakeSender)
+
+    LeadFunnelGui._sender(object())
+
+    assert captured["max_responses"] == 5
+    assert captured["cookie"] == "session=opaque"
 
 
 def test_build_script_command_uses_cmd_runner(tmp_path):

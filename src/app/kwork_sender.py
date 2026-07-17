@@ -41,12 +41,16 @@ class KworkReplySender:
         browser_profile_dir: str = "",
         login_email: str = "",
         login_password: str = "",
+        max_responses: int | None = None,
+        cookie: str = "",
     ):
         self.timeout_seconds = timeout_seconds
         self.cdp_url = cdp_url.rstrip("/")
         self.browser_profile_dir = browser_profile_dir
         self.login_email = login_email
         self.login_password = login_password
+        self.max_responses = max_responses
+        self.cookie = cookie
 
     def send_message(
         self,
@@ -90,6 +94,8 @@ class KworkReplySender:
         clean_text = text.strip()
         if not clean_text:
             raise ValueError("Kwork reply text must not be empty")
+        if self.max_responses is not None:
+            self._ensure_project_is_replyable(contact)
         offer_url = _offer_url(contact)
 
         from app import kwork_source
@@ -142,6 +148,21 @@ class KworkReplySender:
             return f"kwork-project-{project_id}"
         finally:
             ws.close()
+
+    def _ensure_project_is_replyable(self, contact: str) -> None:
+        from app.kwork_client import KworkProjectClient, ensure_project_is_replyable
+
+        max_responses = self.max_responses
+        if max_responses is None:
+            return
+        client = KworkProjectClient(
+            timeout_seconds=self.timeout_seconds,
+            cookie=self.cookie,
+            use_browser=True,
+            cdp_url=self.cdp_url,
+            browser_profile_dir=self.browser_profile_dir,
+        )
+        ensure_project_is_replyable(client.inspect(contact), max_responses)
 
     def _try_open_direct_offer(self, ws, offer_url: str) -> bool:
         from app import kwork_source

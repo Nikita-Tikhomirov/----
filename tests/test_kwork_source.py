@@ -328,6 +328,7 @@ def test_kwork_web_source_can_send_when_replies_enabled(monkeypatch):
     ]
     assert FakeSender.last_kwargs["login_email"] == "bot@example.com"
     assert FakeSender.last_kwargs["login_password"] == "secret"
+    assert FakeSender.last_kwargs["max_responses"] == 5
 
 
 def test_kwork_web_source_stays_read_only_when_replies_disabled():

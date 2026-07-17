@@ -110,6 +110,8 @@ class KworkWebSource:
             browser_profile_dir=self.browser_profile_dir,
             login_email=self.login_email,
             login_password=self.login_password,
+            max_responses=self.max_responses,
+            cookie=self.cookie,
         )
         return sender.send_message(
             contact,

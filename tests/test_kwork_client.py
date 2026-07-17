@@ -1,4 +1,12 @@
-from app.kwork_client import KworkProjectClient, parse_kwork_project_html
+import pytest
+
+from app.kwork_client import (
+    KworkProjectClient,
+    KworkProjectInfo,
+    KworkProjectReplyabilityError,
+    ensure_project_is_replyable,
+    parse_kwork_project_html,
+)
 
 
 def test_parse_kwork_project_html_extracts_visible_offer_count_and_meta():
@@ -73,6 +81,51 @@ def test_kwork_client_rejects_non_kwork_links_without_fetching():
 
     assert result.response_count is None
     assert "не Kwork" in result.reason
+
+
+def test_replyability_accepts_project_at_response_limit():
+    info = KworkProjectInfo(
+        url="https://kwork.ru/projects/1/view",
+        response_count=5,
+        title="Лендинг",
+        description="",
+    )
+
+    assert ensure_project_is_replyable(info, max_responses=5) is info
+
+
+def test_replyability_rejects_project_above_live_response_limit():
+    info = KworkProjectInfo(
+        url="https://kwork.ru/projects/1/view",
+        response_count=7,
+        title="Лендинг",
+        description="",
+    )
+
+    with pytest.raises(KworkProjectReplyabilityError, match=r"7.*5"):
+        ensure_project_is_replyable(info, max_responses=5)
+
+
+def test_replyability_rejects_unavailable_or_unreadable_project():
+    unavailable = KworkProjectInfo(
+        url="https://kwork.ru/projects/1/view",
+        response_count=None,
+        title="",
+        description="",
+        reason="Kwork project is unavailable: page not found, closed, or removed.",
+    )
+    unreadable = KworkProjectInfo(
+        url="https://kwork.ru/projects/2/view",
+        response_count=None,
+        title="",
+        description="",
+        reason="на странице не найдено поле 'Предложений'",
+    )
+
+    with pytest.raises(KworkProjectReplyabilityError, match="unavailable"):
+        ensure_project_is_replyable(unavailable, max_responses=5)
+    with pytest.raises(KworkProjectReplyabilityError, match="response count is unavailable"):
+        ensure_project_is_replyable(unreadable, max_responses=5)
 
 
 def test_parse_kwork_project_html_extracts_attachments():
