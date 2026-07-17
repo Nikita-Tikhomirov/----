@@ -17,6 +17,8 @@ from app.gui import (
     _lead_title,
     _parse_optional_int,
     _should_refresh_after_process,
+    direct_send_confirmation,
+    lead_send_block_reason,
     build_lead_row_values,
     build_app_command,
     build_script_command,
@@ -202,6 +204,43 @@ def test_gui_payload_removes_price_from_manually_edited_reply():
     assert payload["days"] == 3
 
 
+def test_gui_payload_requires_order_title():
+    class Value:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+    class Text:
+        def get(self, *_args):
+            return "Здравствуйте! Проверю форму и внесу нужные правки."
+
+    lead = Lead(
+        id=14,
+        post_id=5,
+        score=80,
+        summary="",
+        draft_reply="Старый отклик",
+        contact="https://kwork.ru/projects/3",
+        status="emailed",
+        post_url="https://kwork.ru/projects/3",
+    )
+    dummy = type(
+        "DummyGui",
+        (),
+        {
+            "reply_text": Text(),
+            "lead_title_var": Value(""),
+            "lead_price_var": Value("9000"),
+            "lead_days_var": Value("3"),
+        },
+    )()
+
+    with pytest.raises(ValueError, match="Название заказа обязательно"):
+        LeadFunnelGui._lead_payload(dummy, lead)
+
+
 def test_format_datetime_displays_moscow_time():
     assert _format_datetime("2026-05-04T07:30:00+00:00") == "04.05 10:30 МСК"
     assert _format_datetime("2026-05-04T10:30:00+03:00") == "04.05 10:30 МСК"
@@ -210,8 +249,69 @@ def test_format_datetime_displays_moscow_time():
 
 def test_scan_and_approval_processes_trigger_lead_refresh():
     assert _should_refresh_after_process("Сканирование")
-    assert _should_refresh_after_process("Проверка OK")
+    assert _should_refresh_after_process("Проверка почты")
     assert not _should_refresh_after_process("Kwork Chrome")
+
+
+def test_direct_send_confirmation_names_order_and_kwork_terms():
+    lead = Lead(
+        id=19,
+        post_id=7,
+        score=82,
+        summary="Доработать форму",
+        draft_reply="Здравствуйте! Исправлю форму и проверю отправку.",
+        contact="https://kwork.ru/projects/19/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/19/view",
+    )
+
+    message = direct_send_confirmation(
+        lead,
+        {"title": "Доработать форму заявки", "price": 12000, "days": 3},
+    )
+
+    assert "Доработать форму заявки" in message
+    assert "12 000" in message
+    assert "3 дн." in message
+    assert "Kwork" in message
+
+
+def test_direct_send_blocks_already_sent_lead():
+    lead = Lead(
+        id=20,
+        post_id=8,
+        score=82,
+        summary="Лендинг",
+        draft_reply="Здравствуйте! Сделаю лендинг.",
+        contact="https://kwork.ru/projects/20/view",
+        status="sent",
+        post_url="https://kwork.ru/projects/20/view",
+        sent_at="2026-05-04 10:45:12",
+    )
+
+    assert lead_send_block_reason(lead, in_flight_lead_ids=set()) == "Отклик по этому лиду уже отправлен."
+
+
+def test_direct_send_blocks_second_click_while_first_send_is_running():
+    lead = Lead(
+        id=21,
+        post_id=9,
+        score=82,
+        summary="Лендинг",
+        draft_reply="Здравствуйте! Сделаю лендинг.",
+        contact="https://kwork.ru/projects/21/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/21/view",
+    )
+
+    assert lead_send_block_reason(lead, in_flight_lead_ids={21}) == "Отправка этого лида уже выполняется."
+
+
+def test_gui_names_mail_check_and_direct_submission_actions_clearly():
+    source = (Path(__file__).resolve().parents[1] / "src" / "app" / "gui.py").read_text(encoding="utf-8")
+
+    assert 'text="Проверить почту"' in source
+    assert 'text="OK и отправить отклик"' in source
 
 
 def test_monitoring_schedules_periodic_lead_refresh():

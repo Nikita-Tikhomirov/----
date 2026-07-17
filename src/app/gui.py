@@ -20,7 +20,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_PATH = ROOT_DIR / ".env"
 MOSCOW_TZ = timezone(timedelta(hours=3), "МСК")
 WATCH_REFRESH_MS = 5000
-REFRESH_AFTER_LABELS = {"Сканирование", "Проверка OK"}
+REFRESH_AFTER_LABELS = {"Сканирование", "Проверка почты"}
 
 FILTER_SETTINGS = (
     ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
@@ -86,6 +86,7 @@ class LeadFunnelGui:
         self.current_lead_id: int | None = None
         self.lead_rows: dict[str, int] = {}
         self.attachment_rows: dict[str, LeadAttachment] = {}
+        self.in_flight_lead_ids: set[int] = set()
         self.status_var = StringVar(value="Готово")
 
         self._configure_style()
@@ -168,7 +169,7 @@ class LeadFunnelGui:
         self.start_watch_button.pack(side="left", padx=8)
         self.stop_watch_button = ttk.Button(bar, text="Стоп", command=self.stop_watch, state=DISABLED, style="Danger.TButton")
         self.stop_watch_button.pack(side="left", padx=8)
-        self.approvals_button = ttk.Button(bar, text="Проверить OK", command=self.process_approvals, style="Modern.TButton")
+        self.approvals_button = ttk.Button(bar, text="Проверить почту", command=self.process_approvals, style="Modern.TButton")
         self.approvals_button.pack(side="left", padx=8)
         self.clear_button = ttk.Button(bar, text="Очистить лог", command=self.clear_log, style="Modern.TButton")
         self.clear_button.pack(side="right")
@@ -331,7 +332,13 @@ class LeadFunnelGui:
         ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
-        ttk.Button(buttons, text="Отправить отклик", command=self.send_selected_lead, style="Danger.TButton").pack(side="right")
+        self.send_lead_button = ttk.Button(
+            buttons,
+            text="OK и отправить отклик",
+            command=self.send_selected_lead,
+            style="Danger.TButton",
+        )
+        self.send_lead_button.pack(side="right")
 
     def _create_log_panel(self, parent: ttk.Frame) -> None:
         ttk.Label(parent, text="Лог", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(anchor="w")
@@ -354,7 +361,7 @@ class LeadFunnelGui:
 
     def process_approvals(self) -> None:
         command, env = build_app_command("approvals")
-        self._run_once(command, env, "Проверка OK")
+        self._run_once(command, env, "Проверка почты")
 
     def refresh_leads(self) -> None:
         try:
@@ -508,7 +515,9 @@ class LeadFunnelGui:
         lead = self._selected_lead()
         if lead is None:
             return
-        if not messagebox.askyesno("Отправить отклик", f"Реально отправить отклик по лиду #{lead.id}?"):
+        block_reason = lead_send_block_reason(lead, self.in_flight_lead_ids)
+        if block_reason:
+            messagebox.showinfo("Отправка отклика", block_reason)
             return
         try:
             payload = self._lead_payload(lead)
@@ -516,10 +525,15 @@ class LeadFunnelGui:
         except ValueError as exc:
             messagebox.showerror("Ошибка", str(exc))
             return
+        if not messagebox.askyesno("OK и отправить отклик", direct_send_confirmation(lead, payload)):
+            return
+        self.in_flight_lead_ids.add(lead.id)
+        self.send_lead_button.config(state=DISABLED)
         self._run_lead_action(
             f"Отправка лида #{lead.id}",
             lambda: self._send_lead_now(lead, payload),
             lead_id=lead.id,
+            on_finished=lambda: self._release_lead_send(lead.id),
         )
 
     def _send_lead_now(self, lead: Lead, payload: dict) -> str:
@@ -534,12 +548,20 @@ class LeadFunnelGui:
         self._storage().mark_sent(lead.id, lead.contact, message_id)
         return message_id
 
-    def _run_lead_action(self, label: str, action, lead_id: int | None = None) -> None:
+    def _release_lead_send(self, lead_id: int) -> None:
+        self.in_flight_lead_ids.discard(lead_id)
+        self.send_lead_button.config(state=NORMAL)
+
+    def _run_lead_action(self, label: str, action, lead_id: int | None = None, on_finished=None) -> None:
         self.status_var.set(f"{label}: выполняется")
         self.write_log(f"=== {label}: старт ===\n")
-        threading.Thread(target=self._run_lead_action_thread, args=(label, action, lead_id), daemon=True).start()
+        threading.Thread(
+            target=self._run_lead_action_thread,
+            args=(label, action, lead_id, on_finished),
+            daemon=True,
+        ).start()
 
-    def _run_lead_action_thread(self, label: str, action, lead_id: int | None) -> None:
+    def _run_lead_action_thread(self, label: str, action, lead_id: int | None, on_finished=None) -> None:
         try:
             result = action()
         except Exception as exc:
@@ -554,12 +576,17 @@ class LeadFunnelGui:
             self.write_log(f"=== {label}: готово ({result}) ===\n")
             self.root.after(0, lambda: self.status_var.set(f"{label}: готово"))
         finally:
+            if on_finished is not None:
+                self.root.after(0, on_finished)
             self.root.after(0, self.refresh_leads)
 
     def _lead_payload(self, lead: Lead) -> dict:
         raw_reply = self.reply_text.get("1.0", END).strip()
         if not raw_reply:
             raise ValueError("Текст отклика пустой")
+        title = self.lead_title_var.get().strip() or _lead_title(lead)
+        if not title or _is_placeholder_lead_title(title):
+            raise ValueError("Название заказа обязательно")
         reply = sanitize_customer_reply(
             raw_reply,
             summary=_lead_task_summary(lead),
@@ -567,7 +594,7 @@ class LeadFunnelGui:
         )
         return {
             "reply": reply,
-            "title": self.lead_title_var.get().strip() or _lead_title(lead),
+            "title": title,
             "price": _parse_optional_int(self.lead_price_var.get(), "Цена"),
             "days": _parse_optional_int(self.lead_days_var.get(), "Срок"),
         }
@@ -1044,6 +1071,10 @@ def _lead_title(lead: Lead) -> str:
     return (first_line or f"Kwork lead {lead.id}")[:70]
 
 
+def _is_placeholder_lead_title(value: str) -> bool:
+    return bool(re.fullmatch(r"Kwork lead \d+", value.strip(), re.IGNORECASE))
+
+
 def _lead_task_summary(lead: Lead) -> str:
     for line in lead.summary.splitlines():
         clean = line.strip()
@@ -1117,6 +1148,28 @@ def _reply_state(lead: Lead) -> str:
     if lead.status == "sent":
         return "отправлен"
     return "нет"
+
+
+def lead_send_block_reason(lead: Lead, in_flight_lead_ids: set[int]) -> str:
+    if lead.status == "sent" or lead.sent_at:
+        return "Отклик по этому лиду уже отправлен."
+    if lead.id in in_flight_lead_ids:
+        return "Отправка этого лида уже выполняется."
+    return ""
+
+
+def direct_send_confirmation(lead: Lead, payload: dict) -> str:
+    title = str(payload.get("title") or _lead_title(lead) or f"лид #{lead.id}").strip()
+    price = payload.get("price")
+    days = payload.get("days")
+    price_text = f"{int(price):,}".replace(",", " ") + " руб." if isinstance(price, int) else "не указана"
+    days_text = f"{days} дн." if isinstance(days, int) else "не указан"
+    return (
+        f"Отправить отклик по заказу:\n{title}\n\n"
+        f"Цена: {price_text}\n"
+        f"Срок: {days_text}\n\n"
+        "Сообщение и параметры будут отправлены на Kwork сейчас."
+    )
 
 
 def _lead_row_tags(lead: Lead) -> tuple[str, ...]:
