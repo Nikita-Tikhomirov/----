@@ -119,7 +119,7 @@ Expected: all commands exit with code 0.
 
 Create temporary RAR and 7Z archives from a small text fixture, list them through the new adapters, and confirm that their selected text is returned. Delete the temporary files after the command completes.
 
-- [ ] **Step 4: Commit and push**
+- [x] **Step 4: Commit and push**
 
 ```powershell
 git add src/app/attachments.py tests/test_attachments.py README.md docs/superpowers
