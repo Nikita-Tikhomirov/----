@@ -142,6 +142,73 @@ def test_reply_context_for_regeneration_excludes_ai_summary_from_task_facts():
     assert "сложной для новичка" not in context.task_summary
 
 
+def test_selected_lead_shows_reply_repair_warning_before_send():
+    lead = Lead(
+        id=28,
+        post_id=14,
+        score=82,
+        summary="Задача: Посадить каталог на WordPress",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу по посадке сайта и каталога на WordPress. "
+            "Сначала проверю текущую отправку формы и валидацию на мобильных, затем внесу нужные правки в разметку и стили. "
+            "После изменений протестирую сценарий на телефоне и в основных браузерах, чтобы заявки стабильно доходили. "
+            "На работу ориентируюсь на 5 дн., могу приступить сразу."
+        ),
+        contact="https://kwork.ru/projects/28/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/28/view",
+        post_text="Посадить информационную страницу и каталог по PSD на WordPress.",
+    )
+
+    class Table:
+        def selection(self):
+            return ("lead-28",)
+
+    class Storage:
+        def get_lead(self, lead_id):
+            assert lead_id == 28
+            return lead
+
+    class Value:
+        def __init__(self):
+            self.value = ""
+
+        def set(self, value):
+            self.value = value
+
+    class Text:
+        def __init__(self):
+            self.value = ""
+
+        def delete(self, *_args):
+            self.value = ""
+
+        def insert(self, _index, value):
+            self.value = value
+
+    dummy = SimpleNamespace(
+        leads_table=Table(),
+        lead_rows={"lead-28": 28},
+        _storage=lambda: Storage(),
+        current_lead_id=None,
+        lead_title_var=Value(),
+        lead_price_var=Value(),
+        lead_days_var=Value(),
+        lead_url_var=Value(),
+        lead_status_var=Value(),
+        pending_replies={},
+        summary_text=Text(),
+        reply_text=Text(),
+        _attachments_for_lead=lambda _lead: [],
+        _load_lead_attachments=lambda *_args: None,
+    )
+
+    LeadFunnelGui.on_lead_select(dummy)
+
+    assert "требует правки" in dummy.lead_status_var.value
+    assert "действие, которого нет в заказе" in dummy.lead_status_var.value
+
+
 def test_apply_regenerated_reply_keeps_draft_in_memory_until_save():
     class Text:
         def __init__(self):

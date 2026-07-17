@@ -426,6 +426,17 @@ class LeadFunnelGui:
             f"Лид #{lead.id}: {lead.status}; score {lead.score}; "
             f"предложений: {_extract_offer_count(lead) or 'не видно'}; наш отклик: {_reply_state(lead)}"
         )
+        draft_reply = self.pending_replies.get(lead.id, lead.draft_reply)
+        attachments = self._attachments_for_lead(lead)
+        reply_context = _reply_context_from_lead(
+            lead,
+            title=_lead_title(lead),
+            days=_extract_days(lead) or 3,
+            attachments=attachments,
+        )
+        reply_notice = reply_delivery_issue_summary(draft_reply, reply_context)
+        if reply_notice:
+            status += f"; {reply_notice}"
         if lead.id in self.pending_replies:
             status += "; новый черновик не сохранен"
         if lead.last_error:
@@ -434,8 +445,8 @@ class LeadFunnelGui:
         self.summary_text.delete("1.0", END)
         self.summary_text.insert("1.0", _lead_details_text(lead))
         self.reply_text.delete("1.0", END)
-        self.reply_text.insert("1.0", self.pending_replies.get(lead.id, lead.draft_reply))
-        self._load_lead_attachments(lead)
+        self.reply_text.insert("1.0", draft_reply)
+        self._load_lead_attachments(lead, attachments)
 
     def save_lead_edits(self) -> None:
         lead = self._selected_lead()
@@ -896,10 +907,15 @@ class LeadFunnelGui:
             pass
         self.watch_refresh_after_id = None
 
-    def _load_lead_attachments(self, lead: Lead) -> None:
+    def _load_lead_attachments(
+        self,
+        lead: Lead,
+        attachments: list[LeadAttachment] | None = None,
+    ) -> None:
         self.attachment_rows.clear()
         self.attachments_table.delete(*self.attachments_table.get_children())
-        attachments = self._attachments_for_lead(lead)
+        if attachments is None:
+            attachments = self._attachments_for_lead(lead)
         for attachment in attachments:
             item_id = self.attachments_table.insert("", END, values=_attachment_row_values(attachment))
             self.attachment_rows[item_id] = attachment
@@ -1288,23 +1304,39 @@ def direct_send_confirmation(lead: Lead, payload: dict) -> str:
     )
 
 
+DELIVERY_ISSUE_LABELS = {
+    "commercial term": "упоминает цену или оплату",
+    "AI mention": "упоминает AI",
+    "generic phrase": "слишком общий",
+    "unapproved clarification": "просит неподтвержденное уточнение",
+    "unsupported current state": "заявляет непроверенное состояние сайта",
+    "unsupported task action": "обещает действие, которого нет в заказе",
+    "uncertain commitment": "содержит неуверенное обещание",
+    "customer skill assumption": "оценивает навыки заказчика",
+    "too many questions": "задает лишние вопросы",
+    "missing concrete action": "не описывает конкретное действие",
+    "missing task reference": "не ссылается на задачу",
+    "empty reply": "пустой",
+}
+
+
+def reply_delivery_issue_labels(reply: str, context: ReplyDraftContext) -> tuple[str, ...]:
+    return tuple(
+        DELIVERY_ISSUE_LABELS.get(issue, issue)
+        for issue in reply_delivery_issues(reply, context)
+    )
+
+
+def reply_delivery_issue_summary(reply: str, context: ReplyDraftContext) -> str:
+    labels = reply_delivery_issue_labels(reply, context)
+    if not labels:
+        return ""
+    return "отклик требует правки: " + "; ".join(labels[:2])
+
+
 def direct_send_reply_block_reason(reply: str, context: ReplyDraftContext) -> str:
     """Explain why a draft cannot be submitted until it is made fact-safe."""
-    issue_labels = {
-        "commercial term": "упоминает цену или оплату",
-        "AI mention": "упоминает AI",
-        "generic phrase": "слишком общий",
-        "unapproved clarification": "просит неподтвержденное уточнение",
-        "unsupported current state": "заявляет непроверенное состояние сайта",
-        "unsupported task action": "обещает действие, которого нет в заказе",
-        "uncertain commitment": "содержит неуверенное обещание",
-        "customer skill assumption": "оценивает навыки заказчика",
-        "too many questions": "задает лишние вопросы",
-        "missing concrete action": "не описывает конкретное действие",
-        "missing task reference": "не ссылается на задачу",
-        "empty reply": "пустой",
-    }
-    labels = [issue_labels.get(issue, issue) for issue in reply_delivery_issues(reply, context)]
+    labels = reply_delivery_issue_labels(reply, context)
     if not labels:
         return ""
     return (
