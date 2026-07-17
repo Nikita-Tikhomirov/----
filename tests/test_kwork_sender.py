@@ -3,8 +3,10 @@ import pytest
 from app.kwork_client import KworkProjectInfo, KworkProjectReplyabilityError
 from app.kwork_sender import (
     KworkReplySender,
+    ReplyTerms,
     _AUTO_LOGIN_SCRIPT,
     _extract_reply_terms,
+    _form_fill_errors,
     _login_required_message,
     _offer_url,
 )
@@ -98,6 +100,10 @@ def test_reply_form_opener_supports_kwork_span_buttons():
     assert "payload.submit" in _FILL_AND_SUBMIT_SCRIPT
     assert "input[type=tel]" in _FILL_AND_SUBMIT_SCRIPT
     assert "input[type=search]" in _FILL_AND_SUBMIT_SCRIPT
+    assert "const fieldValue" in _FILL_AND_SUBMIT_SCRIPT
+    assert "document.querySelectorAll('select')" in _FILL_AND_SUBMIT_SCRIPT
+    assert "async (payload)" in _FILL_AND_SUBMIT_SCRIPT
+    assert ".vs__dropdown-option" in _FILL_AND_SUBMIT_SCRIPT
 
 
 def test_reply_field_detector_ignores_generic_kwork_header_inputs():
@@ -113,6 +119,25 @@ def test_kwork_reply_sender_has_prepare_mode():
     sender = KworkReplySender()
 
     assert hasattr(sender, "prepare_reply")
+
+
+def test_kwork_form_fill_validation_rejects_unfilled_required_terms():
+    errors = _form_fill_errors(
+        {
+            "messageFilled": True,
+            "titleFilled": False,
+            "priceFilled": True,
+            "daysFilled": False,
+        },
+        ReplyTerms(price_rub=3000, days=3),
+        "Исправить форму заявки",
+    )
+
+    assert errors == ["название заказа", "срок выполнения"]
+
+
+def test_kwork_form_fill_validation_keeps_legacy_mock_results_compatible():
+    assert _form_fill_errors({"ok": True}, ReplyTerms(price_rub=3000, days=3), "Название") == []
 
 
 def test_kwork_reply_sender_rejects_non_kwork_project_url():

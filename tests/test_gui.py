@@ -555,6 +555,40 @@ def test_scan_and_approval_processes_trigger_lead_refresh():
     assert not _should_refresh_after_process("Kwork Chrome")
 
 
+def test_gui_shows_process_error_when_background_command_fails(monkeypatch):
+    import app.gui as gui_module
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    class Value:
+        def __init__(self):
+            self.values = []
+
+        def set(self, value):
+            self.values.append(value)
+
+    class Process:
+        returncode = 2
+
+    status = Value()
+    logs = []
+    gui = SimpleNamespace(
+        root=Root(),
+        status_var=status,
+        write_log=logs.append,
+        _stream_process=lambda _process, _label: None,
+        refresh_leads=lambda: None,
+    )
+    monkeypatch.setattr(gui_module.subprocess, "Popen", lambda *args, **kwargs: Process())
+
+    LeadFunnelGui._run_once_thread(gui, ["broken-command"], {}, "Сканирование")
+
+    assert status.values[-1] == "Сканирование: ошибка (код 2)"
+    assert "кодом 2" in logs[-1]
+
+
 def test_direct_send_confirmation_names_order_and_kwork_terms():
     lead = Lead(
         id=19,
@@ -767,6 +801,47 @@ def test_gui_direct_send_submits_kwork_reply_and_marks_lead_sent():
         )
     ]
     assert sent_marks == [(22, "https://kwork.ru/projects/22/view", "kwork-project-22")]
+
+
+@pytest.mark.parametrize(
+    ("mark_failed", "expected_failures"),
+    [(False, []), (True, [(42, "Kwork reply field was not found")])],
+)
+def test_gui_marks_lead_failed_only_for_actual_submission_errors(mark_failed, expected_failures):
+    failures = []
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    class Storage:
+        def mark_failed(self, lead_id, error):
+            failures.append((lead_id, error))
+
+    class Value:
+        def set(self, _value):
+            return None
+
+    def fail_action():
+        raise RuntimeError("Kwork reply field was not found")
+
+    gui = SimpleNamespace(
+        root=Root(),
+        _storage=lambda: Storage(),
+        write_log=lambda _text: None,
+        status_var=Value(),
+        refresh_leads=lambda: None,
+    )
+
+    LeadFunnelGui._run_lead_action_thread(
+        gui,
+        "Заполнение лида #42",
+        fail_action,
+        lead_id=42,
+        mark_failed=mark_failed,
+    )
+
+    assert failures == expected_failures
 
 
 def test_gui_names_mail_check_and_direct_submission_actions_clearly():

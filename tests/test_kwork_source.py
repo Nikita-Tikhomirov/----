@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from app.kwork_source import KworkWebSource, parse_kwork_project_cards
 
 
@@ -128,6 +130,42 @@ def test_kwork_web_source_uses_embedded_direct_html_without_waiting_for_browser_
     posts = KworkWebSource(use_browser=True).fetch_recent_posts()
 
     assert [post.message_id for post in posts] == [3219004]
+
+
+def test_embedded_kwork_projects_skip_old_active_cards():
+    now = datetime(2026, 7, 18, 1, 30, tzinfo=timezone(timedelta(hours=3)))
+    html = """
+    <script>
+      window.pageState = {
+        "wantsListData": {
+          "pagination": {
+            "data": [
+              {
+                "id": 3219005,
+                "name": "Свежая правка формы",
+                "description": "Починить форму заявки",
+                "date_create": "2026-07-17 23:40:00",
+                "status": "active",
+                "isWantActive": true
+              },
+              {
+                "id": 3020909,
+                "name": "Старый зависший заказ",
+                "description": "Не должен попасть в подборку",
+                "date_create": "2025-11-16 03:46:06",
+                "status": "active",
+                "isWantActive": true
+              }
+            ]
+          }
+        }
+      };
+    </script>
+    """
+
+    posts = parse_kwork_project_cards(html, max_responses=5, max_age_hours=24, now=now)
+
+    assert [post.message_id for post in posts] == [3219005]
 
 
 def test_fetch_rendered_html_refreshes_page_before_reading(monkeypatch):
@@ -352,6 +390,24 @@ def test_fetch_rendered_project_html_waits_for_offer_count_after_page_header(mon
     info = client.KworkProjectClient(use_browser=True).inspect("https://kwork.ru/projects/123/view")
 
     assert info.response_count == 3
+
+
+def test_cdp_evaluate_waits_for_async_kwork_form_updates(monkeypatch):
+    import app.kwork_source as source
+
+    captured = {}
+
+    class FakeWebSocket:
+        def send(self, payload):
+            captured["payload"] = payload
+
+        def recv(self):
+            return '{"id": 1, "result": {"result": {"value": "ok"}}}'
+
+    source._send_cdp.counter = 0
+
+    assert source._evaluate(FakeWebSocket(), "Promise.resolve('ok')") == "ok"
+    assert '"awaitPromise": true' in captured["payload"]
 
 
 def test_default_chrome_user_data_dir_uses_kwork_bot_profile(monkeypatch, tmp_path):

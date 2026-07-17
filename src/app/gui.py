@@ -30,6 +30,7 @@ REFRESH_AFTER_LABELS = {"Сканирование", "Проверка почты
 
 FILTER_SETTINGS = (
     ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
+    ("KWORK_MAX_AGE_HOURS", "Возраст заказа, часов (0 = без лимита)", "24"),
     ("SCAN_INTERVAL_SECONDS", "Интервал мониторинга, сек", "60"),
     ("MAX_POSTS_PER_CHANNEL", "Заказов за проход", "30"),
     ("LEAD_MIN_SCORE", "Мин. AI score", "60"),
@@ -47,6 +48,7 @@ FILTER_SETTINGS = (
 
 INTEGER_LIMITS = {
     "KWORK_MAX_RESPONSES": (0, 100),
+    "KWORK_MAX_AGE_HOURS": (0, 720),
     "SCAN_INTERVAL_SECONDS": (10, 3600),
     "MAX_POSTS_PER_CHANNEL": (1, 200),
     "LEAD_MIN_SCORE": (0, 100),
@@ -637,6 +639,7 @@ class LeadFunnelGui:
             lambda: self._send_lead_now(lead, payload),
             lead_id=lead.id,
             on_finished=lambda: self._release_lead_send(lead.id),
+            mark_failed=True,
         )
 
     def _send_lead_now(self, lead: Lead, payload: dict) -> str:
@@ -655,20 +658,34 @@ class LeadFunnelGui:
         self.in_flight_lead_ids.discard(lead_id)
         self.send_lead_button.config(state=NORMAL)
 
-    def _run_lead_action(self, label: str, action, lead_id: int | None = None, on_finished=None) -> None:
+    def _run_lead_action(
+        self,
+        label: str,
+        action,
+        lead_id: int | None = None,
+        on_finished=None,
+        mark_failed: bool = False,
+    ) -> None:
         self.status_var.set(f"{label}: выполняется")
         self.write_log(f"=== {label}: старт ===\n")
         threading.Thread(
             target=self._run_lead_action_thread,
-            args=(label, action, lead_id, on_finished),
+            args=(label, action, lead_id, on_finished, mark_failed),
             daemon=True,
         ).start()
 
-    def _run_lead_action_thread(self, label: str, action, lead_id: int | None, on_finished=None) -> None:
+    def _run_lead_action_thread(
+        self,
+        label: str,
+        action,
+        lead_id: int | None,
+        on_finished=None,
+        mark_failed: bool = False,
+    ) -> None:
         try:
             result = action()
         except Exception as exc:
-            if lead_id is not None:
+            if mark_failed and lead_id is not None:
                 try:
                     self._storage().mark_failed(lead_id, str(exc))
                 except Exception:
@@ -839,6 +856,7 @@ class LeadFunnelGui:
         return (
             "Текущий отбор: "
             f"откликов <= {values.get('KWORK_MAX_RESPONSES', '5')}, "
+            f"возраст <= {values.get('KWORK_MAX_AGE_HOURS', '24')} ч., "
             f"AI score >= {values.get('LEAD_MIN_SCORE', '60')}, "
             f"срок <= {values.get('LEAD_MAX_DAYS', '7')} дн., "
             f"решения: {values.get('LEAD_ACCEPT_DECISIONS', 'accept, maybe')}, "
@@ -856,20 +874,30 @@ class LeadFunnelGui:
         threading.Thread(target=self._run_once_thread, args=(command, env, label), daemon=True).start()
 
     def _run_once_thread(self, command: list[str], env: dict[str, str], label: str) -> None:
-        process = subprocess.Popen(
-            command,
-            cwd=ROOT_DIR,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        self._stream_process(process, label)
-        self.root.after(0, lambda: self.status_var.set(f"{label}: завершено"))
-        self.write_log(f"=== {label}: завершено с кодом {process.returncode} ===\n")
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=ROOT_DIR,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
+            self._stream_process(process, label)
+        except Exception as exc:
+            self.root.after(0, lambda: self.status_var.set(f"{label}: ошибка"))
+            self.write_log(f"=== {label}: не удалось запустить: {exc} ===\n")
+            return
+
+        return_code = process.returncode
+        if return_code == 0:
+            self.root.after(0, lambda: self.status_var.set(f"{label}: завершено"))
+        else:
+            self.root.after(0, lambda: self.status_var.set(f"{label}: ошибка (код {return_code})"))
+        self.write_log(f"=== {label}: завершено с кодом {return_code} ===\n")
         if _should_refresh_after_process(label):
             self.root.after(0, self.refresh_leads)
 

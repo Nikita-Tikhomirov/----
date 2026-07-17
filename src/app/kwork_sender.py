@@ -140,6 +140,9 @@ class KworkReplySender:
             if not submit_result.get("ok"):
                 reason = submit_result.get("reason") or "Kwork submit button was not found"
                 raise RuntimeError(str(reason))
+            form_errors = _form_fill_errors(submit_result, terms, project_title)
+            if form_errors:
+                raise RuntimeError("Kwork did not fill required form fields: " + ", ".join(form_errors))
             project_id = _project_id(contact)
             if not submit:
                 return f"kwork-project-{project_id}-prepared"
@@ -366,6 +369,17 @@ def _extract_reply_terms(text: str) -> ReplyTerms:
     return ReplyTerms(price_rub=price, days=days)
 
 
+def _form_fill_errors(result: dict, terms: ReplyTerms, title: str) -> list[str]:
+    """Return only fields explicitly reported as unfilled by the live Kwork form."""
+    checks = (
+        ("messageFilled", "текст отклика", True),
+        ("titleFilled", "название заказа", bool(title.strip())),
+        ("priceFilled", "стоимость", terms.price_rub is not None),
+        ("daysFilled", "срок выполнения", terms.days is not None),
+    )
+    return [label for key, label, required in checks if required and key in result and not result[key]]
+
+
 def _first_int(pattern: re.Pattern[str], text: str) -> int | None:
     match = pattern.search(text)
     if not match:
@@ -531,9 +545,14 @@ _CONFIRM_SUBMIT_SCRIPT = r"""
 """
 
 _FILL_AND_SUBMIT_SCRIPT = r"""
-(payload) => {
+async (payload) => {
   const norm = value => (value || '').replace(/\s+/g, ' ').trim();
   const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+  const fieldValue = el => norm(el && (el.isContentEditable ? el.innerText : el.value));
+  const digits = value => String(value || '').replace(/\D/g, '');
+  const matchesText = (el, value) => !value || fieldValue(el).includes(norm(value));
+  const matchesNumber = (el, value) => !value || digits(fieldValue(el)) === digits(value);
   const setValue = (el, value) => {
     if (!el) return false;
     el.focus();
@@ -579,7 +598,7 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
     || fields.find(el => /сообщ|опис|коммент|текст|message|comment|description|cover|letter/.test(meta(el)))
     || fields.find(el => el.matches && el.matches('.trumbowyg-editor'))
     || fields.find(el => el.tagName === 'TEXTAREA' || el.isContentEditable);
-  if (!messageField) return JSON.stringify({submitted: false, reason: 'Kwork reply field was not found'});
+  if (!messageField) return JSON.stringify({ok: false, submitted: false, messageFilled: false, reason: 'Kwork reply field was not found'});
   setValue(messageField, payload.text);
   if (messageTextarea) setValue(messageTextarea, payload.text);
   if (messageEditor && messageEditor !== messageField) setValue(messageEditor, payload.text);
@@ -594,15 +613,66 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
   });
   if (titleField && payload.title) setValue(titleField, payload.title.slice(0, 70));
   if (titleTextarea && payload.title) setValue(titleTextarea, payload.title.slice(0, 70));
-  const daysField = fields.find(el => /срок|дн|day|days|duration|deadline/.test(meta(el))) || document.querySelector('input[placeholder="Срок выполнения"], input.vs__search');
-  if (daysField && payload.days) setValue(daysField, payload.days);
+  const daysSelect = Array.from(document.querySelectorAll('select')).find(el => {
+    return visible(el) && (/срок|дн|day|days|duration|deadline/.test(meta(el))
+      || Array.from(el.options || []).some(option => /\d+\s*д(?:н|ень|ня|ней)/i.test(option.text)));
+  });
+  const daysField = daysSelect || fields.find(el => /срок|дн|day|days|duration|deadline/.test(meta(el))) || document.querySelector('input[placeholder="Срок выполнения"], input.vs__search');
+  const durationWidget = daysField?.closest('.v-select');
+  if (daysSelect && payload.days) {
+    const option = Array.from(daysSelect.options || []).find(item => {
+      return digits(item.value) === digits(payload.days) || digits(item.text) === digits(payload.days);
+    });
+    if (option) {
+      daysSelect.value = option.value;
+      daysSelect.dispatchEvent(new Event('input', {bubbles: true}));
+      daysSelect.dispatchEvent(new Event('change', {bubbles: true}));
+    }
+  } else if (durationWidget && payload.days) {
+    setValue(daysField, payload.days);
+    daysField.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true}));
+    await pause(120);
+    const option = Array.from(document.querySelectorAll('.vs__dropdown-option,[role="option"]')).find(item => {
+      return visible(item) && digits(item.innerText) === digits(payload.days);
+    });
+    if (option) {
+      option.click();
+      await pause(120);
+    }
+  } else if (daysField && payload.days) {
+    setValue(daysField, payload.days);
+  }
+  const messageFilled = matchesText(messageField, payload.text);
+  const priceFilled = !payload.price || matchesNumber(priceField, payload.price);
+  const titleFilled = !payload.title || matchesText(titleField, payload.title.slice(0, 70));
+  const selectedDuration = durationWidget?.querySelector('.vs__selected');
+  const daysFilled = !payload.days || (durationWidget
+    ? matchesNumber(selectedDuration, payload.days)
+    : matchesNumber(daysField, payload.days));
+  const missing = [];
+  if (!messageFilled) missing.push('reply text');
+  if (payload.title && !titleFilled) missing.push('order title');
+  if (payload.price && !priceFilled) missing.push('price');
+  if (payload.days && !daysFilled) missing.push('deadline');
+  if (missing.length) {
+    return JSON.stringify({
+      ok: false,
+      submitted: false,
+      messageFilled,
+      priceFilled,
+      titleFilled,
+      daysFilled,
+      reason: 'Kwork did not accept required fields: ' + missing.join(', ')
+    });
+  }
   if (!payload.submit) {
     return JSON.stringify({
       ok: true,
       submitted: false,
-      priceFilled: Boolean(priceField && payload.price),
-      titleFilled: Boolean(titleField && payload.title),
-      daysFilled: Boolean(daysField && payload.days)
+      messageFilled,
+      priceFilled,
+      titleFilled,
+      daysFilled
     });
   }
   const form = messageField.closest('form') || document;
@@ -611,11 +681,12 @@ _FILL_AND_SUBMIT_SCRIPT = r"""
   if (!submit) return JSON.stringify({ok: false, submitted: false, reason: 'Kwork submit button was not found'});
   submit.click();
   return JSON.stringify({
-    ok: true,
-    submitted: true,
-    priceFilled: Boolean(priceField && payload.price),
-    titleFilled: Boolean(titleField && payload.title),
-    daysFilled: Boolean(daysField && payload.days)
+      ok: true,
+      submitted: true,
+      messageFilled,
+      priceFilled,
+      titleFilled,
+      daysFilled
   });
 }
 """

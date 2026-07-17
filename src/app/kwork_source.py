@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import time
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request
 
@@ -20,6 +21,7 @@ from app.telegram_client import TelegramPost
 logger = logging.getLogger(__name__)
 
 DEFAULT_KWORK_PROJECTS_URL = "https://kwork.ru/projects?c=11"
+MOSCOW_TZ = timezone(timedelta(hours=3), "MSK")
 CARD_PATTERN = re.compile(
     r'<(?:div|article)[^>]*class=["\'][^"\']*\bwant-card\b[^"\']*["\'][^>]*>[\s\S]*?'
     r'(?=<(?:div|article)[^>]*class=["\'][^"\']*\bwant-card\b|$)',
@@ -43,6 +45,7 @@ class KworkWebSource:
         projects_url: str = DEFAULT_KWORK_PROJECTS_URL,
         max_posts: int = 30,
         max_responses: int = 5,
+        max_age_hours: int = 24,
         cookie: str = "",
         timeout_seconds: float = 30.0,
         use_browser: bool = True,
@@ -55,6 +58,7 @@ class KworkWebSource:
         self.projects_url = projects_url
         self.max_posts = max_posts
         self.max_responses = max_responses
+        self.max_age_hours = max(0, max_age_hours)
         self.cookie = cookie
         self.timeout_seconds = timeout_seconds
         self.use_browser = use_browser
@@ -74,7 +78,12 @@ class KworkWebSource:
         except Exception as exc:
             logger.warning("Failed to fetch Kwork projects page %s: %s", self.projects_url, exc)
             html_text = ""
-        posts = parse_kwork_project_cards(html_text, max_responses=self.max_responses, base_url=self.projects_url)
+        posts = parse_kwork_project_cards(
+            html_text,
+            max_responses=self.max_responses,
+            max_age_hours=self.max_age_hours,
+            base_url=self.projects_url,
+        )
         if not posts and self.use_browser:
             try:
                 rendered_html = _fetch_rendered_html(
@@ -86,6 +95,7 @@ class KworkWebSource:
                 posts = parse_kwork_project_cards(
                     rendered_html,
                     max_responses=self.max_responses,
+                    max_age_hours=self.max_age_hours,
                     base_url=self.projects_url,
                 )
             except Exception as exc:
@@ -124,7 +134,9 @@ class KworkWebSource:
 def parse_kwork_project_cards(
     html_text: str,
     max_responses: int,
+    max_age_hours: int | None = None,
     base_url: str = "https://kwork.ru/projects",
+    now: datetime | None = None,
 ) -> list[TelegramPost]:
     posts: list[TelegramPost] = []
     seen_ids: set[int] = set()
@@ -137,7 +149,12 @@ def parse_kwork_project_cards(
         posts.append(post)
     if card_blocks:
         return posts
-    return _posts_from_embedded_wants(html_text, base_url=base_url)
+    return _posts_from_embedded_wants(
+        html_text,
+        base_url=base_url,
+        max_age_hours=max_age_hours,
+        now=now,
+    )
 
 
 def _post_from_card(block: str, max_responses: int, base_url: str) -> TelegramPost | None:
@@ -172,7 +189,12 @@ def _post_from_card(block: str, max_responses: int, base_url: str) -> TelegramPo
     )
 
 
-def _posts_from_embedded_wants(html_text: str, base_url: str) -> list[TelegramPost]:
+def _posts_from_embedded_wants(
+    html_text: str,
+    base_url: str,
+    max_age_hours: int | None = None,
+    now: datetime | None = None,
+) -> list[TelegramPost]:
     """Read Kwork's hydrated list when the SPA has not rendered want-card nodes."""
     decoder = json.JSONDecoder()
     for match in re.finditer(r'"wantsListData"\s*:\s*', html_text):
@@ -185,12 +207,21 @@ def _posts_from_embedded_wants(html_text: str, base_url: str) -> list[TelegramPo
         items = payload.get("pagination", {}).get("data", [])
         if not isinstance(items, list):
             continue
-        posts = [post for item in items if (post := _post_from_embedded_want(item, base_url)) is not None]
+        posts = [
+            post
+            for item in items
+            if (post := _post_from_embedded_want(item, base_url, max_age_hours=max_age_hours, now=now)) is not None
+        ]
         return sorted(posts, key=lambda post: (bool(post.posted_at), post.posted_at), reverse=True)
     return []
 
 
-def _post_from_embedded_want(item: object, base_url: str) -> TelegramPost | None:
+def _post_from_embedded_want(
+    item: object,
+    base_url: str,
+    max_age_hours: int | None = None,
+    now: datetime | None = None,
+) -> TelegramPost | None:
     if not isinstance(item, dict):
         return None
     if item.get("isWantActive") is False or str(item.get("status", "active")).lower() != "active":
@@ -204,6 +235,9 @@ def _post_from_embedded_want(item: object, base_url: str) -> TelegramPost | None
     title = _clean_text(str(item.get("name", ""))) or f"Kwork project {project_id}"
     description = _clean_text(str(item.get("description", "")))
     remaining = _clean_text(str(item.get("timeLeft", "")))
+    posted_at = _clean_text(str(item.get("date_create", "")))
+    if max_age_hours is not None and not _is_recent_kwork_post(posted_at, max_age_hours, now):
+        return None
     project_url = urljoin(base_url, f"/projects/{project_id}/view")
     lines = [f"📌 {title}"]
     if description:
@@ -216,8 +250,24 @@ def _post_from_embedded_want(item: object, base_url: str) -> TelegramPost | None
         message_id=project_id,
         url=project_url,
         text="\n".join(lines),
-        posted_at=_clean_text(str(item.get("date_create", ""))),
+        posted_at=posted_at,
     )
+
+
+def _is_recent_kwork_post(posted_at: str, max_age_hours: int, now: datetime | None = None) -> bool:
+    if max_age_hours <= 0:
+        return True
+    try:
+        timestamp = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=MOSCOW_TZ)
+    reference = now or datetime.now(MOSCOW_TZ)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=MOSCOW_TZ)
+    age = reference.astimezone(MOSCOW_TZ) - timestamp.astimezone(MOSCOW_TZ)
+    return timedelta(minutes=-5) <= age <= timedelta(hours=max_age_hours)
 
 
 def _fetch_html(url: str, timeout_seconds: float, cookie: str = "") -> str:
@@ -360,7 +410,7 @@ def _evaluate(ws, expression: str):
     response = _send_cdp(
         ws,
         "Runtime.evaluate",
-        {"expression": expression, "returnByValue": True},
+        {"expression": expression, "returnByValue": True, "awaitPromise": True},
     )
     result = response.get("result", {}).get("result", {})
     if "exceptionDetails" in response:

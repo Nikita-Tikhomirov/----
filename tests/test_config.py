@@ -17,6 +17,7 @@ def test_load_config_reads_optional_kwork_login_credentials(tmp_path, monkeypatc
                 "IMAP_HOST=imap.example.com",
                 "IMAP_USER=bot@example.com",
                 "IMAP_PASSWORD=mail-secret",
+                "KWORK_MAX_AGE_HOURS=12",
                 "KWORK_LOGIN_EMAIL=kwork@example.com",
                 "KWORK_LOGIN_PASSWORD=kwork-secret",
             ]
@@ -31,6 +32,7 @@ def test_load_config_reads_optional_kwork_login_credentials(tmp_path, monkeypatc
 
     assert config.kwork_login_email == "kwork@example.com"
     assert config.kwork_login_password == "kwork-secret"
+    assert config.kwork_max_age_hours == 12
     assert config.lead_hard_reject_keywords == ()
 
 

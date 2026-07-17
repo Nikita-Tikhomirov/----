@@ -547,6 +547,7 @@ def build_runtime(config: AppConfig):
             projects_url=config.kwork_projects_url,
             max_posts=config.max_posts_per_channel,
             max_responses=config.kwork_max_responses,
+            max_age_hours=config.kwork_max_age_hours,
             cookie=kwork_cookie,
             use_browser=config.kwork_use_browser,
             cdp_url=config.kwork_cdp_url,
