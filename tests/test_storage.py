@@ -1,3 +1,5 @@
+import sqlite3
+
 from app.storage import LeadAttachment, Storage
 
 
@@ -77,6 +79,65 @@ def test_lead_reply_and_last_error_can_be_updated(tmp_path):
 
     storage.mark_lead_emailed(lead_id, "<lead@example.com>")
     assert storage.get_lead(lead_id).last_error == ""
+
+
+def test_lead_proposal_fields_are_persisted_independently_from_ai_summary(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=45,
+        post_url="https://kwork.ru/projects/45/view",
+        text="📌 Старое название заказа\nПредложений: 2",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=80,
+        summary="Срок: 3 дн.\nЦена: 7000 руб.",
+        draft_reply="Старый отклик",
+        contact="https://kwork.ru/projects/45/view",
+    )
+
+    storage.update_lead_proposal(
+        lead_id,
+        draft_reply="Новый отклик без цены для заказчика",
+        title="Новое название заказа",
+        price_rub=12000,
+        days=5,
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert lead.draft_reply == "Новый отклик без цены для заказчика"
+    assert lead.proposal_title == "Новое название заказа"
+    assert lead.proposal_price_rub == 12000
+    assert lead.proposal_days == 5
+
+
+def test_initialize_adds_proposal_fields_to_existing_leads_database(tmp_path):
+    database_path = tmp_path / "leads.sqlite3"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_id INTEGER NOT NULL,
+                score INTEGER NOT NULL,
+                summary TEXT NOT NULL,
+                draft_reply TEXT NOT NULL,
+                contact TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'new',
+                email_message_id TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+    Storage(database_path).initialize()
+
+    with sqlite3.connect(database_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(leads)")}
+    assert {"proposal_title", "proposal_price_rub", "proposal_days"} <= columns
 
 
 def test_approval_can_be_recorded_only_once(tmp_path):

@@ -418,16 +418,15 @@ class LeadFunnelGui:
         self._load_lead_attachments(lead)
 
     def save_lead_edits(self) -> None:
-        lead_id = self._selected_lead_id()
-        if lead_id is None:
+        lead = self._selected_lead()
+        if lead is None:
             return
-        reply = self.reply_text.get("1.0", END).strip()
         try:
-            self._storage().update_lead_reply(lead_id, reply)
+            self._save_lead_payload(lead, self._lead_payload(lead))
         except Exception as exc:
             messagebox.showerror("Ошибка", str(exc))
             return
-        self.write_log(f"Лид #{lead_id}: текст отклика сохранен.\n")
+        self.write_log(f"Лид #{lead.id}: название, цена, срок и текст отклика сохранены.\n")
         self.refresh_leads()
 
     def open_selected_lead(self) -> None:
@@ -486,9 +485,9 @@ class LeadFunnelGui:
         lead = self._selected_lead()
         if lead is None:
             return
-        self._save_selected_reply_if_changed(lead.id)
         try:
             payload = self._lead_payload(lead)
+            self._save_lead_payload(lead, payload)
         except ValueError as exc:
             messagebox.showerror("Ошибка", str(exc))
             return
@@ -510,9 +509,9 @@ class LeadFunnelGui:
             return
         if not messagebox.askyesno("Отправить отклик", f"Реально отправить отклик по лиду #{lead.id}?"):
             return
-        self._save_selected_reply_if_changed(lead.id)
         try:
             payload = self._lead_payload(lead)
+            self._save_lead_payload(lead, payload)
         except ValueError as exc:
             messagebox.showerror("Ошибка", str(exc))
             return
@@ -567,10 +566,14 @@ class LeadFunnelGui:
             "days": _parse_optional_int(self.lead_days_var.get(), "Срок"),
         }
 
-    def _save_selected_reply_if_changed(self, lead_id: int) -> None:
-        reply = self.reply_text.get("1.0", END).strip()
-        if reply:
-            self._storage().update_lead_reply(lead_id, reply)
+    def _save_lead_payload(self, lead: Lead, payload: dict) -> None:
+        self._storage().update_lead_proposal(
+            lead.id,
+            draft_reply=payload["reply"],
+            title=payload["title"],
+            price_rub=payload["price"],
+            days=payload["days"],
+        )
 
     def _selected_lead_id(self) -> int | None:
         selected = self.leads_table.selection()
@@ -992,6 +995,8 @@ def _attachment_kind_from_values(label: str, url: str, status: str) -> str:
 
 
 def _extract_price(lead: Lead) -> int | None:
+    if lead.proposal_price_rub is not None:
+        return lead.proposal_price_rub
     terms = _extract_reply_terms(lead.draft_reply)
     if terms.price_rub is not None:
         return terms.price_rub
@@ -1002,6 +1007,8 @@ def _extract_price(lead: Lead) -> int | None:
 
 
 def _extract_days(lead: Lead) -> int | None:
+    if lead.proposal_days is not None:
+        return lead.proposal_days
     terms = _extract_reply_terms(lead.draft_reply)
     if terms.days is not None:
         return terms.days
@@ -1012,6 +1019,8 @@ def _extract_days(lead: Lead) -> int | None:
 
 
 def _lead_title(lead: Lead) -> str:
+    if lead.proposal_title:
+        return lead.proposal_title
     for line in lead.post_text.splitlines():
         clean = line.strip()
         if not clean:

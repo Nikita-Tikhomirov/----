@@ -214,6 +214,9 @@ def scan_once(
             summary=summary,
             draft_reply=judge_result.draft_reply,
             contact=evaluation.contact,
+            proposal_title=_proposal_title_from_text(post.text),
+            proposal_price_rub=judge_result.price_rub or None,
+            proposal_days=judge_result.estimated_days or None,
         )
         if attachment_reports:
             storage.replace_lead_attachments(lead_id, attachment_reports)
@@ -292,15 +295,23 @@ def _approval_reply_fields(lead) -> tuple[int | None, int | None, str]:
     """Read Kwork form data stored in the lead while keeping the reply price-free."""
     price_match = re.search(r"Цена:\s*(\d[\d\s]*)\s*руб", lead.summary, re.IGNORECASE)
     days_match = re.search(r"Срок:\s*(\d{1,2})\s*дн", lead.summary, re.IGNORECASE)
-    price_rub = int(price_match.group(1).replace(" ", "")) if price_match else None
-    days = int(days_match.group(1)) if days_match else None
+    price_rub = lead.proposal_price_rub
+    if price_rub is None and price_match:
+        price_rub = int(price_match.group(1).replace(" ", ""))
+    days = lead.proposal_days
+    if days is None and days_match:
+        days = int(days_match.group(1))
     title = _approval_reply_title(lead)
     return price_rub, days, title
 
 
 def _approval_reply_title(lead) -> str:
+    return lead.proposal_title or _proposal_title_from_text(lead.post_text, lead.summary)
+
+
+def _proposal_title_from_text(post_text: str, summary: str = "") -> str:
     meta_prefixes = ("осталось:", "предложений:", "бюджет:", "контакт:", "kwork facts:")
-    for line in lead.post_text.splitlines():
+    for line in post_text.splitlines():
         clean = line.strip()
         if not clean:
             continue
@@ -309,7 +320,7 @@ def _approval_reply_title(lead) -> str:
         if clean.lower().startswith(meta_prefixes):
             continue
         return clean[:70]
-    for line in lead.summary.splitlines():
+    for line in summary.splitlines():
         clean = line.strip()
         if clean.startswith("Задача:"):
             return clean.removeprefix("Задача:").strip()[:70]

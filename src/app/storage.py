@@ -25,6 +25,9 @@ class Lead:
     created_at: str = ""
     email_message_id: str = ""
     sent_at: str = ""
+    proposal_title: str = ""
+    proposal_price_rub: int | None = None
+    proposal_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,9 @@ class Storage:
                     summary TEXT NOT NULL,
                     draft_reply TEXT NOT NULL,
                     contact TEXT NOT NULL,
+                    proposal_title TEXT NOT NULL DEFAULT '',
+                    proposal_price_rub INTEGER,
+                    proposal_days INTEGER,
                     status TEXT NOT NULL DEFAULT 'new',
                     email_message_id TEXT,
                     last_error TEXT NOT NULL DEFAULT '',
@@ -144,6 +150,9 @@ class Storage:
                 """
             )
             _ensure_column(conn, "leads", "last_error", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "leads", "proposal_title", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "leads", "proposal_price_rub", "INTEGER")
+            _ensure_column(conn, "leads", "proposal_days", "INTEGER")
 
     def save_post(
         self,
@@ -176,6 +185,9 @@ class Storage:
         summary: str,
         draft_reply: str,
         contact: str,
+        proposal_title: str = "",
+        proposal_price_rub: int | None = None,
+        proposal_days: int | None = None,
     ) -> int:
         with self._connect() as conn:
             existing = conn.execute(
@@ -186,10 +198,22 @@ class Storage:
                 return int(existing["id"])
             cursor = conn.execute(
                 """
-                INSERT INTO leads (post_id, score, summary, draft_reply, contact, status)
-                VALUES (?, ?, ?, ?, ?, 'new')
+                INSERT INTO leads (
+                    post_id, score, summary, draft_reply, contact,
+                    proposal_title, proposal_price_rub, proposal_days, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')
                 """,
-                (post_id, score, summary, draft_reply, contact),
+                (
+                    post_id,
+                    score,
+                    summary,
+                    draft_reply,
+                    contact,
+                    proposal_title.strip()[:70],
+                    _optional_positive_int(proposal_price_rub, "Lead proposal price"),
+                    _optional_positive_int(proposal_days, "Lead proposal days"),
+                ),
             )
             return int(cursor.lastrowid)
 
@@ -208,6 +232,37 @@ class Storage:
             conn.execute(
                 "UPDATE leads SET draft_reply = ?, last_error = '' WHERE id = ?",
                 (clean_reply, lead_id),
+            )
+
+    def update_lead_proposal(
+        self,
+        lead_id: int,
+        draft_reply: str,
+        title: str,
+        price_rub: int | None,
+        days: int | None,
+    ) -> None:
+        clean_reply = draft_reply.strip()
+        if not clean_reply:
+            raise ValueError("Lead draft reply must not be empty")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE leads
+                SET draft_reply = ?,
+                    proposal_title = ?,
+                    proposal_price_rub = ?,
+                    proposal_days = ?,
+                    last_error = ''
+                WHERE id = ?
+                """,
+                (
+                    clean_reply,
+                    title.strip()[:70],
+                    _optional_positive_int(price_rub, "Lead proposal price"),
+                    _optional_positive_int(days, "Lead proposal days"),
+                    lead_id,
+                ),
             )
 
     def has_lead_for_post(self, post_id: int) -> bool:
@@ -546,6 +601,17 @@ def _lead_from_row(row: sqlite3.Row) -> Lead:
         created_at=str(row["created_at"]) if "created_at" in keys else "",
         email_message_id=str(row["email_message_id"]) if "email_message_id" in keys and row["email_message_id"] is not None else "",
         sent_at=str(row["sent_at"]) if "sent_at" in keys and row["sent_at"] is not None else "",
+        proposal_title=str(row["proposal_title"] or "") if "proposal_title" in keys else "",
+        proposal_price_rub=(
+            int(row["proposal_price_rub"])
+            if "proposal_price_rub" in keys and row["proposal_price_rub"] is not None
+            else None
+        ),
+        proposal_days=(
+            int(row["proposal_days"])
+            if "proposal_days" in keys and row["proposal_days"] is not None
+            else None
+        ),
     )
 
 
@@ -603,3 +669,11 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _optional_positive_int(value: int | None, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return value

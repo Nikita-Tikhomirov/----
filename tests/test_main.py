@@ -227,6 +227,8 @@ def test_scan_once_uses_ai_judge_for_summary_reply_and_score(tmp_path):
     assert "Цена: 18000 руб." in lead.summary
     assert "понятный результат" in lead.summary
     assert "калькулятор" in lead.draft_reply
+    assert lead.proposal_price_rub == 18000
+    assert lead.proposal_days == 5
 
 
 def test_scan_once_passes_kwork_page_details_and_attachments_to_ai_judge(tmp_path):
@@ -622,6 +624,47 @@ def test_process_approvals_passes_kwork_form_terms_without_price_in_reply_text(t
     assert "10000" not in reply_text
     assert telegram_client.sent_details == [
         (project_url, reply_text, 10000, 3, "Название заказа")
+    ]
+
+
+def test_process_approvals_uses_saved_form_terms_after_ok(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    project_url = "https://kwork.ru/projects/3186747/view"
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=3186747,
+        post_url=project_url,
+        text="📌 Исходное название\nНужно доработать WordPress. Предложений: 2",
+        posted_at="",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=86,
+        summary="WordPress задача\nСрок: 3 дн.\nЦена: 10 000 руб.",
+        draft_reply="Старый текст",
+        contact=project_url,
+    )
+    reply_text = "Здравствуйте! Разберу текущую реализацию и внесу нужные изменения."
+    storage.update_lead_proposal(
+        lead_id,
+        draft_reply=reply_text,
+        title="Сохраненное название",
+        price_rub=14000,
+        days=5,
+    )
+    storage.mark_lead_emailed(lead_id, "<lead@example.com>")
+    telegram_client = FakeTelegramClient()
+
+    sent = process_approvals(
+        storage=storage,
+        telegram_client=telegram_client,
+        email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
+    )
+
+    assert sent == 1
+    assert telegram_client.sent_details == [
+        (project_url, reply_text, 14000, 5, "Сохраненное название")
     ]
 
 

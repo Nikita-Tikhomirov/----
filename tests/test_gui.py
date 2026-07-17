@@ -132,11 +132,14 @@ def test_lead_gui_helpers_extract_editable_fields():
         contact="https://kwork.ru/projects/1",
         status="emailed",
         post_url="https://kwork.ru/projects/1",
+        proposal_title="Сохраненное название заказа",
+        proposal_price_rub=12000,
+        proposal_days=5,
     )
 
-    assert _extract_price(lead) == 5000
-    assert _extract_days(lead) == 2
-    assert _lead_title(lead) == "Поправить форму заявки на WordPress"
+    assert _extract_price(lead) == 12000
+    assert _extract_days(lead) == 5
+    assert _lead_title(lead) == "Сохраненное название заказа"
     assert _parse_optional_int(" 12 000 ", "Цена") == 12000
     assert _parse_optional_int("", "Цена") is None
 
