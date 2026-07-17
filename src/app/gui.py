@@ -13,7 +13,12 @@ from tkinter import ttk
 from app.ai_lead_judge import sanitize_customer_reply
 from app.config import load_config
 from app.kwork_sender import KworkReplySender, _extract_reply_terms
-from app.reply_composer import ReplyDraftContext, compose_customer_reply, reply_delivery_issues
+from app.reply_composer import (
+    ReplyDraftContext,
+    compose_customer_reply,
+    reply_delivery_issue_labels,
+    reply_delivery_issue_summary,
+)
 from app.storage import Lead, LeadAttachment, Storage
 
 
@@ -1302,36 +1307,6 @@ def direct_send_confirmation(lead: Lead, payload: dict) -> str:
         f"Срок: {days_text}\n\n"
         "Сообщение и параметры будут отправлены на Kwork сейчас."
     )
-
-
-DELIVERY_ISSUE_LABELS = {
-    "commercial term": "упоминает цену или оплату",
-    "AI mention": "упоминает AI",
-    "generic phrase": "слишком общий",
-    "unapproved clarification": "просит неподтвержденное уточнение",
-    "unsupported current state": "заявляет непроверенное состояние сайта",
-    "unsupported task action": "обещает действие, которого нет в заказе",
-    "uncertain commitment": "содержит неуверенное обещание",
-    "customer skill assumption": "оценивает навыки заказчика",
-    "too many questions": "задает лишние вопросы",
-    "missing concrete action": "не описывает конкретное действие",
-    "missing task reference": "не ссылается на задачу",
-    "empty reply": "пустой",
-}
-
-
-def reply_delivery_issue_labels(reply: str, context: ReplyDraftContext) -> tuple[str, ...]:
-    return tuple(
-        DELIVERY_ISSUE_LABELS.get(issue, issue)
-        for issue in reply_delivery_issues(reply, context)
-    )
-
-
-def reply_delivery_issue_summary(reply: str, context: ReplyDraftContext) -> str:
-    labels = reply_delivery_issue_labels(reply, context)
-    if not labels:
-        return ""
-    return "отклик требует правки: " + "; ".join(labels[:2])
 
 
 def direct_send_reply_block_reason(reply: str, context: ReplyDraftContext) -> str:

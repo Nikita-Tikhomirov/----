@@ -308,7 +308,32 @@ class Storage:
                 )
             except sqlite3.IntegrityError:
                 return False
-            conn.execute("UPDATE leads SET status = 'approved' WHERE id = ?", (lead_id,))
+            conn.execute("UPDATE leads SET status = 'approved', last_error = '' WHERE id = ?", (lead_id,))
+            return True
+
+    def record_blocked_approval(self, lead_id: int, email_message_id: str, reason: str) -> bool:
+        """Remember a rejected email command while keeping the lead available for correction."""
+        with self._connect() as conn:
+            lead = conn.execute(
+                "SELECT status FROM leads WHERE id = ?",
+                (lead_id,),
+            ).fetchone()
+            if lead is None or lead["status"] in {"approved", "sent"}:
+                return False
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO approvals (lead_id, email_message_id, approval_status)
+                    VALUES (?, ?, 'blocked')
+                    """,
+                    (lead_id, email_message_id),
+                )
+            except sqlite3.IntegrityError:
+                return False
+            conn.execute(
+                "UPDATE leads SET last_error = ? WHERE id = ?",
+                (reason.strip()[:2000], lead_id),
+            )
             return True
 
     def mark_sent(self, lead_id: int, contact: str, telegram_message_id: str) -> None:

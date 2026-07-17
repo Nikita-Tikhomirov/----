@@ -24,7 +24,11 @@ from app.kwork_client import KworkProjectClient
 from app.kwork_source import KworkWebSource
 from app.lead_filter import evaluate_post
 from app.public_telegram_client import PublicTelegramClient
-from app.reply_composer import ReplyDraftContext, compose_customer_reply
+from app.reply_composer import (
+    ReplyDraftContext,
+    compose_customer_reply,
+    reply_delivery_issue_summary,
+)
 from app.storage import Storage
 from app.telegram_client import TelegramLeadClient
 
@@ -368,21 +372,34 @@ def _approval_reply_title(lead) -> str:
     return lead.proposal_title or _proposal_title_from_text(lead.post_text, lead.summary)
 
 
-def _customer_reply_for_delivery(lead) -> str:
-    _, days, _ = _approval_reply_fields(lead)
+def _customer_reply_for_delivery(lead, title: str, days: int | None) -> str:
     return sanitize_customer_reply(
         lead.draft_reply,
-        summary=_lead_task_summary(lead),
+        summary=title or _approval_reply_title(lead),
         estimated_days=days or 3,
     )
 
 
-def _lead_task_summary(lead) -> str:
-    for line in lead.summary.splitlines():
-        clean = line.strip()
-        if clean.startswith("Задача:"):
-            return clean.removeprefix("Задача:").strip() or _approval_reply_title(lead)
-    return _approval_reply_title(lead) or "вашу задачу"
+def _reply_context_for_delivery(
+    storage: Storage,
+    lead,
+    title: str,
+    days: int | None,
+) -> ReplyDraftContext:
+    attachments = storage.list_lead_attachments(lead.id)
+    attachment_context = "\n".join(
+        f"{attachment.label}: {(attachment.summary or attachment.status).strip()}"
+        for attachment in attachments
+        if attachment.label.strip() and (attachment.summary or attachment.status).strip()
+    )
+    safe_title = title or _approval_reply_title(lead) or "вашу задачу"
+    return ReplyDraftContext(
+        title=safe_title,
+        task_summary=safe_title,
+        source_text=lead.post_text.strip(),
+        attachment_context=attachment_context,
+        estimated_days=days or 3,
+    )
 
 
 def _proposal_title_from_text(post_text: str, summary: str = "") -> str:
@@ -429,14 +446,25 @@ def process_approvals(
         if sent >= max_sends:
             logger.warning("Send limit reached, skipping remaining approvals")
             break
+        try:
+            lead = storage.get_lead(lead_id)
+        except KeyError:
+            logger.info("Skipping approval for missing lead %s", lead_id)
+            continue
+        price_rub, days, title = _approval_reply_fields(lead)
+        reply_text = _customer_reply_for_delivery(lead, title, days)
+        reply_context = _reply_context_for_delivery(storage, lead, title, days)
+        block_reason = reply_delivery_issue_summary(reply_text, reply_context)
+        if block_reason:
+            if storage.record_blocked_approval(lead_id, approval_message_id, block_reason):
+                logger.warning("Blocked approved lead %s: %s", lead_id, block_reason)
+            else:
+                logger.info("Skipping duplicate or invalid approval for lead %s", lead_id)
+            continue
         if not storage.record_approval(lead_id, approval_message_id):
             logger.info("Skipping duplicate or invalid approval for lead %s", lead_id)
             continue
-
-        lead = storage.get_lead(lead_id)
         try:
-            price_rub, days, title = _approval_reply_fields(lead)
-            reply_text = _customer_reply_for_delivery(lead)
             if reply_text != lead.draft_reply:
                 storage.update_lead_reply(lead.id, reply_text)
             telegram_message_id = telegram_client.send_message(

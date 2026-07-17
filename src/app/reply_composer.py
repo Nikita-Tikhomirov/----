@@ -99,6 +99,20 @@ DELIVERY_BLOCKING_ISSUES = frozenset(
         "missing task reference",
     }
 )
+DELIVERY_ISSUE_LABELS = {
+    "commercial term": "упоминает цену или оплату",
+    "AI mention": "упоминает AI",
+    "generic phrase": "слишком общий",
+    "unapproved clarification": "просит неподтвержденное уточнение",
+    "unsupported current state": "заявляет непроверенное состояние сайта",
+    "unsupported task action": "обещает действие, которого нет в заказе",
+    "uncertain commitment": "содержит неуверенное обещание",
+    "customer skill assumption": "оценивает навыки заказчика",
+    "too many questions": "задает лишние вопросы",
+    "missing concrete action": "не описывает конкретное действие",
+    "missing task reference": "не ссылается на задачу",
+    "empty reply": "пустой",
+}
 MAX_REPLY_LENGTH = 850
 MIN_REPLY_LENGTH = 260
 MAX_REPLY_SENTENCES = 6
@@ -206,6 +220,21 @@ def reply_delivery_issues(reply: str, context: ReplyDraftContext) -> tuple[str, 
     return tuple(
         issue for issue in reply_quality_issues(reply, context) if issue in DELIVERY_BLOCKING_ISSUES
     )
+
+
+def reply_delivery_issue_labels(reply: str, context: ReplyDraftContext) -> tuple[str, ...]:
+    """Return customer-facing explanations for delivery blockers."""
+    return tuple(
+        DELIVERY_ISSUE_LABELS.get(issue, issue)
+        for issue in reply_delivery_issues(reply, context)
+    )
+
+
+def reply_delivery_issue_summary(reply: str, context: ReplyDraftContext) -> str:
+    labels = reply_delivery_issue_labels(reply, context)
+    if not labels:
+        return ""
+    return "отклик требует правки: " + "; ".join(labels[:2])
 
 
 def _compose_with_deepseek(

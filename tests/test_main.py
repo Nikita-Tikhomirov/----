@@ -605,7 +605,11 @@ def test_process_approvals_sends_only_approved_once(tmp_path):
         post_id=post_id,
         score=82,
         summary="HTML/CSS лендинг",
-        draft_reply="Здравствуйте! Готов помочь с лендингом.",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу по лендингу HTML/CSS/JS. "
+            "Сверстаю нужные блоки, настрою адаптивное отображение и проверю основной сценарий страницы. "
+            "После этого покажу готовый рабочий вариант."
+        ),
         contact="@client_dev",
     )
     storage.mark_lead_emailed(lead_id, "<lead@example.com>")
@@ -624,8 +628,115 @@ def test_process_approvals_sends_only_approved_once(tmp_path):
     )
 
     assert telegram_client.sent == [
-        ("@client_dev", "Здравствуйте! Готов помочь с лендингом.")
+        (
+            "@client_dev",
+            (
+                "Здравствуйте! Посмотрел задачу по лендингу HTML/CSS/JS. "
+                "Сверстаю нужные блоки, настрою адаптивное отображение и проверю основной сценарий страницы. "
+                "После этого покажу готовый рабочий вариант."
+            ),
+        )
     ]
+    assert storage.get_lead(lead_id).status == "sent"
+
+
+def test_process_approvals_blocks_stale_reply_that_invents_missing_form_work(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=28,
+        post_url="https://kwork.ru/projects/28/view",
+        text="Посадить информационную страницу и каталог по PSD на WordPress. Предложений: 2",
+        posted_at="2026-07-18T10:00:00+03:00",
+    )
+    stale_reply = (
+        "Здравствуйте! Посмотрел задачу по посадке сайта и каталога на WordPress. "
+        "Сначала проверю текущую отправку формы и валидацию на мобильных, затем внесу нужные правки в разметку и стили. "
+        "После изменений протестирую сценарий на телефоне и в основных браузерах, чтобы заявки стабильно доходили. "
+        "На работу ориентируюсь на 5 дн., могу приступить сразу."
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=82,
+        summary="Задача: Посадить каталог на WordPress",
+        draft_reply=stale_reply,
+        contact="https://kwork.ru/projects/28/view",
+        proposal_title="Посадить каталог на WordPress",
+        proposal_days=5,
+    )
+    storage.mark_lead_emailed(lead_id, "<lead@example.com>")
+    telegram_client = FakeTelegramClient()
+    approval_message_id = "<approval@example.com>"
+
+    sent = process_approvals(
+        storage=storage,
+        telegram_client=telegram_client,
+        email_client=FakeEmailClient(approvals=[(lead_id, approval_message_id)]),
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert sent == 0
+    assert telegram_client.sent == []
+    assert lead.status == "emailed"
+    assert "требует правки" in lead.last_error.lower()
+    assert approval_message_id in storage.seen_approval_message_ids()
+
+
+def test_process_approvals_can_retry_after_blocked_email_once_reply_is_corrected(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=29,
+        post_url="https://kwork.ru/projects/29/view",
+        text="Посадить информационную страницу и каталог по PSD на WordPress. Предложений: 2",
+        posted_at="2026-07-18T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=82,
+        summary="Задача: Посадить каталог на WordPress",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу по посадке сайта и каталога на WordPress. "
+            "Сначала проверю текущую отправку формы и валидацию на мобильных, затем внесу нужные правки в разметку и стили. "
+            "После изменений протестирую сценарий на телефоне и в основных браузерах, чтобы заявки стабильно доходили. "
+            "На работу ориентируюсь на 5 дн., могу приступить сразу."
+        ),
+        contact="https://kwork.ru/projects/29/view",
+        proposal_title="Посадить каталог на WordPress",
+        proposal_days=5,
+    )
+    storage.mark_lead_emailed(lead_id, "<lead@example.com>")
+    telegram_client = FakeTelegramClient()
+
+    first_sent = process_approvals(
+        storage=storage,
+        telegram_client=telegram_client,
+        email_client=FakeEmailClient(approvals=[(lead_id, "<blocked@example.com>")]),
+    )
+    storage.update_lead_proposal(
+        lead_id,
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу по посадке информационной страницы и каталога на WordPress. "
+            "Сверю структуру страниц и макеты PSD, затем соберу нужные разделы на WordPress. "
+            "Проверю карточки товаров и отображение каталога, чтобы страницы работали корректно. "
+            "Могу приступить сразу и покажу готовый рабочий вариант."
+        ),
+        title="Посадить каталог на WordPress",
+        price_rub=12000,
+        days=5,
+    )
+
+    second_sent = process_approvals(
+        storage=storage,
+        telegram_client=telegram_client,
+        email_client=FakeEmailClient(approvals=[(lead_id, "<retry@example.com>")]),
+    )
+
+    assert first_sent == 0
+    assert second_sent == 1
+    assert len(telegram_client.sent) == 1
     assert storage.get_lead(lead_id).status == "sent"
 
 
@@ -709,7 +820,10 @@ def test_process_approvals_passes_kwork_form_terms_without_price_in_reply_text(t
         text="Название заказа\nНужно поправить WordPress. Предложений: 4",
         posted_at="",
     )
-    reply_text = "Здравствуйте! Изучу текущую реализацию и аккуратно внесу нужные правки."
+    reply_text = (
+        "Здравствуйте! Посмотрел задачу по доработке WordPress. "
+        "Изучу текущую реализацию, внесу нужные правки и проверю результат на основном сценарии."
+    )
     lead_id = storage.create_lead(
         post_id=post_id,
         score=86,
@@ -751,7 +865,10 @@ def test_process_approvals_uses_saved_form_terms_after_ok(tmp_path):
         draft_reply="Старый текст",
         contact=project_url,
     )
-    reply_text = "Здравствуйте! Разберу текущую реализацию и внесу нужные изменения."
+    reply_text = (
+        "Здравствуйте! Разберу текущую реализацию WordPress и внесу нужные изменения. "
+        "После этого проверю основной сценарий и покажу готовый результат."
+    )
     storage.update_lead_proposal(
         lead_id,
         draft_reply=reply_text,
