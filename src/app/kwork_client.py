@@ -180,7 +180,8 @@ def _fetch_rendered_project_html(
     from app.kwork_source import _ensure_chrome_cdp, _evaluate, _find_or_create_page, _refresh_page
 
     _ensure_chrome_cdp(cdp_url, url, browser_profile_dir)
-    page = _find_or_create_page(cdp_url, url, tab_kind="project")
+    # Keep the scanner out of any unsent new_offer tab the user is reviewing.
+    page = _find_or_create_page(cdp_url, url, tab_kind="inspection")
 
     import websocket
 

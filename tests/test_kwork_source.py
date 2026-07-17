@@ -267,6 +267,59 @@ def test_kwork_project_tab_accepts_new_offer_page():
     assert source._is_kwork_project_tab("https://kwork.ru/new_offer?project=3187247")
 
 
+def test_project_inspection_does_not_reuse_unsent_offer_tab(monkeypatch):
+    import websocket
+    import app.kwork_source as source
+
+    calls = []
+
+    class FakeWebSocket:
+        def close(self):
+            return None
+
+    pages = [
+        [
+            {
+                "type": "page",
+                "url": "https://kwork.ru/new_offer?project=3187247",
+                "webSocketDebuggerUrl": "ws://offer",
+            }
+        ],
+        [
+            {
+                "type": "page",
+                "url": "https://kwork.ru/new_offer?project=3187247",
+                "webSocketDebuggerUrl": "ws://offer",
+            },
+            {
+                "type": "page",
+                "url": "https://kwork.ru/projects/3187248/view",
+                "webSocketDebuggerUrl": "ws://inspection",
+            },
+        ],
+    ]
+
+    def fake_cdp_json(_cdp_url, path, timeout):
+        if path == "/json/list":
+            return pages.pop(0) if pages else []
+        if path == "/json/version":
+            return {"webSocketDebuggerUrl": "ws://browser"}
+        return None
+
+    monkeypatch.setattr(source, "_cdp_json", fake_cdp_json)
+    monkeypatch.setattr(websocket, "create_connection", lambda *_args, **_kwargs: FakeWebSocket())
+    monkeypatch.setattr(source, "_send_cdp", lambda _ws, method, params: calls.append((method, params)) or {})
+
+    page = source._find_or_create_page(
+        "http://127.0.0.1:9222",
+        "https://kwork.ru/projects/3187248/view",
+        tab_kind="inspection",
+    )
+
+    assert page["webSocketDebuggerUrl"] == "ws://inspection"
+    assert calls == [("Target.createTarget", {"url": "https://kwork.ru/projects/3187248/view"})]
+
+
 def test_find_or_create_page_does_not_reuse_list_tab_for_project(monkeypatch):
     import websocket
     import app.kwork_source as source

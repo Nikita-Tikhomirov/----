@@ -493,16 +493,25 @@ def _is_kwork_project_tab(url: str) -> bool:
     return parsed.path == "/new_offer" and any(key == "project" and value.isdigit() for key, value in parse_qsl(parsed.query))
 
 
+def _is_kwork_inspection_tab(url: str) -> bool:
+    parsed = urlsplit(url)
+    return parsed.netloc.lower().endswith("kwork.ru") and re.match(
+        r"^/projects/\d+(?:/view)?/?$", parsed.path
+    ) is not None
+
+
 def _matches_tab_kind(url: str, tab_kind: str) -> bool:
     if tab_kind == "list":
         return _is_kwork_list_tab(url)
     if tab_kind == "project":
         return _is_kwork_project_tab(url)
+    if tab_kind == "inspection":
+        return _is_kwork_inspection_tab(url)
     return _is_kwork_tab(url)
 
 
 def _matches_created_tab(actual_url: str, expected_url: str, tab_kind: str) -> bool:
-    if tab_kind == "project":
+    if tab_kind in {"project", "inspection"}:
         return _is_same_kwork_page(expected_url, actual_url)
     if tab_kind == "list":
         return _is_kwork_list_tab(actual_url)
