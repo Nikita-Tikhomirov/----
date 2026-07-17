@@ -97,6 +97,7 @@ class LeadFunnelGui:
         self.in_flight_lead_ids: set[int] = set()
         self.pending_replies: dict[int, str] = {}
         self.lead_action_errors: dict[int, str] = {}
+        self.kwork_price_limits: dict[int, int] = {}
         self.reply_regeneration_in_flight = False
         self.status_var = StringVar(value="Готово")
 
@@ -304,6 +305,14 @@ class LeadFunnelGui:
             style="Accent.TButton",
         )
         self.regenerate_reply_button.pack(side="left", padx=6)
+        self.apply_kwork_price_button = ttk.Button(
+            buttons,
+            text="Применить максимум Kwork",
+            command=self.apply_kwork_price_limit,
+            state=DISABLED,
+            style="Modern.TButton",
+        )
+        self.apply_kwork_price_button.pack(side="left", padx=6)
         ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
@@ -446,6 +455,7 @@ class LeadFunnelGui:
             action_error=getattr(self, "lead_action_errors", {}).get(lead.id, ""),
         )
         self.lead_status_var.set(status)
+        LeadFunnelGui._sync_kwork_price_limit_button(self, lead.id)
         self.summary_text.delete("1.0", END)
         self.summary_text.insert("1.0", _lead_details_text(lead))
         self.reply_text.delete("1.0", END)
@@ -463,6 +473,21 @@ class LeadFunnelGui:
             return
         self.write_log(f"Лид #{lead.id}: название, цена, срок и текст отклика сохранены.\n")
         self.refresh_leads()
+
+    def apply_kwork_price_limit(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        price_limit = self.kwork_price_limits.get(lead.id)
+        if price_limit is None:
+            messagebox.showinfo("Лимит Kwork", "Kwork пока не сообщил допустимую цену для этого лида.")
+            return
+        self.lead_price_var.set(str(price_limit))
+        self.lead_status_var.set(
+            f"Лид #{lead.id}: цена заменена на максимум Kwork {price_limit:,} руб.".replace(",", " ")
+            + "; проверь и нажми «Сохранить» или «OK и отправить отклик»."
+        )
+        self.write_log(f"Лид #{lead.id}: в поле цены подставлен максимум Kwork {price_limit} руб.\n")
 
     def open_selected_lead(self) -> None:
         lead = self._selected_lead()
@@ -665,6 +690,8 @@ class LeadFunnelGui:
     ) -> None:
         if lead_id is not None:
             self.lead_action_errors.pop(lead_id, None)
+            self.kwork_price_limits.pop(lead_id, None)
+            LeadFunnelGui._sync_kwork_price_limit_button(self, lead_id)
         self.status_var.set(f"{label}: выполняется")
         self.write_log(f"=== {label}: старт ===\n")
         threading.Thread(
@@ -705,11 +732,25 @@ class LeadFunnelGui:
         action_errors = getattr(self, "lead_action_errors", None)
         if action_errors is not None:
             action_errors[lead_id] = error
+        price_limit = _kwork_price_limit(error)
+        if price_limit is not None:
+            price_limits = getattr(self, "kwork_price_limits", None)
+            if price_limits is not None:
+                price_limits[lead_id] = price_limit
         if getattr(self, "current_lead_id", None) != lead_id:
             return
+        LeadFunnelGui._sync_kwork_price_limit_button(self, lead_id)
         lead_status = getattr(self, "lead_status_var", None)
         if lead_status is not None:
             lead_status.set(f"Лид #{lead_id}: ошибка: {error}")
+
+    def _sync_kwork_price_limit_button(self, lead_id: int | None) -> None:
+        button = getattr(self, "apply_kwork_price_button", None)
+        if button is None:
+            return
+        price_limits = getattr(self, "kwork_price_limits", {})
+        state = NORMAL if lead_id is not None and lead_id in price_limits else DISABLED
+        button.config(state=state)
 
     def _lead_payload(self, lead: Lead) -> dict:
         raw_reply = self.reply_text.get("1.0", END).strip()
@@ -1434,6 +1475,15 @@ def _parse_optional_int(value: str, label: str) -> int | None:
     if number <= 0:
         raise ValueError(f"{label}: число должно быть больше 0")
     return number
+
+
+def _kwork_price_limit(error: str) -> int | None:
+    """Extract Kwork's allowed maximum from the inline validation error."""
+    match = re.search(r"стоимость\s+может\s+быть\s+не\s+более\s+(\d[\d\s]*)\s*руб", error, re.IGNORECASE)
+    if not match:
+        return None
+    value = re.sub(r"\D", "", match.group(1))
+    return int(value) if value else None
 
 
 if __name__ == "__main__":

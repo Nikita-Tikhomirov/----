@@ -16,6 +16,7 @@ from app.gui import (
     _extract_remaining_time,
     _format_datetime,
     _lead_title,
+    _kwork_price_limit,
     _parse_optional_int,
     _reply_context_from_lead,
     _should_refresh_after_process,
@@ -459,6 +460,47 @@ def test_lead_gui_helpers_extract_editable_fields():
 def test_parse_optional_int_rejects_negative_values():
     with pytest.raises(ValueError, match="больше 0"):
         _parse_optional_int("-1", "Цена")
+
+
+def test_kwork_price_limit_reads_maximum_from_live_form_error():
+    assert _kwork_price_limit("Стоимость может быть не более 3 000 руб.") == 3000
+    assert _kwork_price_limit("Kwork reply field was not found") is None
+
+
+def test_apply_kwork_price_limit_only_updates_the_editable_price_field():
+    class Value:
+        def __init__(self):
+            self.value = "5000"
+            self.values = []
+
+        def set(self, value):
+            self.value = value
+            self.values.append(value)
+
+    lead = Lead(
+        id=29,
+        post_id=12,
+        score=80,
+        summary="Правка формы",
+        draft_reply="Здравствуйте! Исправлю форму и проверю отправку.",
+        contact="https://kwork.ru/projects/29/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/29/view",
+    )
+    logs = []
+    dummy = SimpleNamespace(
+        _selected_lead=lambda: lead,
+        kwork_price_limits={29: 3000},
+        lead_price_var=Value(),
+        lead_status_var=Value(),
+        write_log=logs.append,
+    )
+
+    LeadFunnelGui.apply_kwork_price_limit(dummy)
+
+    assert dummy.lead_price_var.value == "3000"
+    assert "3 000 руб." in dummy.lead_status_var.value
+    assert logs == ["Лид #29: в поле цены подставлен максимум Kwork 3000 руб.\n"]
 
 
 def test_gui_payload_removes_price_from_manually_edited_reply():
