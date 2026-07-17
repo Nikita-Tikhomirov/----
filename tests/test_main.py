@@ -271,6 +271,60 @@ def test_scan_once_uses_ai_judge_for_summary_reply_and_score(tmp_path):
     assert lead.proposal_days == 5
 
 
+def test_scan_once_persists_composed_price_free_reply(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+    seen_contexts = []
+
+    def fake_judge(text, api_key="", model="deepseek-chat", **kwargs):
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=86,
+            complexity="simple",
+            estimated_days=2,
+            price_rub=5000,
+            summary="Исправить отправку формы заявки и адаптив лендинга",
+            reasons=["задача понятна"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте! Цена 5000 руб. Уточните детали.",
+        )
+
+    def fake_composer(context, seed_reply, api_key="", model="deepseek-chat"):
+        seen_contexts.append((context, seed_reply, api_key, model))
+        return (
+            "Здравствуйте! Проверю отправку формы и адаптив лендинга, затем внесу нужные правки. "
+            "После изменений протестирую сценарий на мобильных и покажу готовый результат."
+        )
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=FakeKworkProjectClient(
+            response_count=1,
+            facts=("Бюджет: до 5 000 ₽",),
+        ),
+        lead_judge=fake_judge,
+        reply_composer=fake_composer,
+        deepseek_api_key="sk-test",
+    )
+
+    assert created == 1
+    lead = storage.list_leads(status="emailed")[0]
+    assert lead.draft_reply == (
+        "Здравствуйте! Проверю отправку формы и адаптив лендинга, затем внесу нужные правки. "
+        "После изменений протестирую сценарий на мобильных и покажу готовый результат."
+    )
+    assert lead.proposal_price_rub == 5000
+    assert lead.proposal_days == 2
+    assert seen_contexts[0][1] == "Здравствуйте! Цена 5000 руб. Уточните детали."
+    assert "Бюджет" not in seen_contexts[0][0].source_text
+    assert seen_contexts[0][2:] == ("sk-test", "deepseek-chat")
+
+
 def test_scan_once_passes_kwork_page_details_and_attachments_to_ai_judge(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

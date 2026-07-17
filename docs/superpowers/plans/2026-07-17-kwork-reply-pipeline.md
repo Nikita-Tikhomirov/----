@@ -95,7 +95,7 @@ Commit: `git commit -m "feat: add Kwork reply quality pipeline"`
 - `scan_once(..., reply_composer=compose_customer_reply)` persists the composer output.
 - `reply_composer` receives `ReplyDraftContext`, `seed_reply`, `api_key`, and `model`.
 
-- [ ] **Step 1: Write an integration test with a price-leaking judge draft**
+- [x] **Step 1: Write an integration test with a price-leaking judge draft**
 
 ```python
 def test_scan_once_persists_composed_price_free_reply(...):
@@ -105,13 +105,13 @@ def test_scan_once_persists_composed_price_free_reply(...):
     assert lead.proposal_price_rub == 5000
 ```
 
-- [ ] **Step 2: Run the focused test and confirm the new argument failure**
+- [x] **Step 2: Run the focused test and confirm the new argument failure**
 
 Run: `python -m pytest tests/test_main.py::test_scan_once_persists_composed_price_free_reply -q`
 
 Expected: FAIL because `scan_once` has no `reply_composer` parameter.
 
-- [ ] **Step 3: Build a redacted reply context in `scan_once` and call the composer**
+- [x] **Step 3: Build a redacted reply context in `scan_once` and call the composer**
 
 ```python
 reply_context = ReplyDraftContext(
@@ -127,7 +127,7 @@ draft_reply = reply_composer(reply_context, judge_result.draft_reply, ...)
 
 `_reply_source_text` must omit Kwork budget, price, payment, and form terms.
 
-- [ ] **Step 4: Run focused integration tests and commit**
+- [x] **Step 4: Run focused integration tests and commit**
 
 Run: `python -m pytest tests/test_main.py tests/test_reply_composer.py -q`
 

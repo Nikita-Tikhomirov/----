@@ -24,6 +24,7 @@ from app.kwork_client import KworkProjectClient
 from app.kwork_source import KworkWebSource
 from app.lead_filter import evaluate_post
 from app.public_telegram_client import PublicTelegramClient
+from app.reply_composer import ReplyDraftContext, compose_customer_reply
 from app.storage import Storage
 from app.telegram_client import TelegramLeadClient
 
@@ -77,6 +78,7 @@ def scan_once(
     kwork_project_client: ProjectInspector | None = None,
     kwork_max_responses: int = 5,
     lead_judge=judge_lead,
+    reply_composer=compose_customer_reply,
     attachment_context_builder=build_attachment_report,
     kwork_cookie: str = "",
     kwork_use_browser: bool = True,
@@ -119,6 +121,9 @@ def scan_once(
         attachment_context = ""
         attachment_reports = ()
         kwork_facts: tuple[str, ...] = ()
+        project_title = ""
+        project_description = ""
+        project_page_text = ""
         if kwork_project_client is not None:
             project_info = kwork_project_client.inspect(evaluation.contact)
             if project_info.is_unavailable:
@@ -130,6 +135,9 @@ def scan_once(
                 )
                 continue
             kwork_facts = tuple(getattr(project_info, "facts", ()))
+            project_title = project_info.title
+            project_description = project_info.description
+            project_page_text = project_info.page_text
             if not project_info.has_response_count and post.channel != "kwork-web":
                 logger.info(
                     "Rejected post %s/%s: cannot verify Kwork responses (%s)",
@@ -211,6 +219,25 @@ def scan_once(
             )
             continue
 
+        reply_context = ReplyDraftContext(
+            title=_proposal_title_from_text(post.text, judge_result.summary),
+            task_summary=judge_result.summary,
+            source_text=_reply_source_text(
+                post_text=post.text,
+                project_title=project_title,
+                project_description=project_description,
+                project_page_text=project_page_text,
+            ),
+            attachment_context=attachment_context,
+            estimated_days=judge_result.estimated_days,
+            blocking_question=judge_result.questions[0] if judge_result.questions else "",
+        )
+        draft_reply = reply_composer(
+            reply_context,
+            judge_result.draft_reply,
+            api_key=deepseek_api_key,
+            model=deepseek_model,
+        )
         summary = f"{_summary_from_judge(judge_result)}{project_summary_suffix}"
         if kwork_facts:
             summary = "\n\n".join([summary, _format_kwork_facts(kwork_facts)])
@@ -221,7 +248,7 @@ def scan_once(
             post_id=post_id,
             score=judge_result.score,
             summary=summary,
-            draft_reply=judge_result.draft_reply,
+            draft_reply=draft_reply,
             contact=evaluation.contact,
             proposal_title=_proposal_title_from_text(post.text),
             proposal_price_rub=judge_result.price_rub or None,
@@ -257,6 +284,25 @@ def _build_attachment_processing_result(builder, attachments: tuple[str, ...], *
     if isinstance(result, AttachmentProcessingResult):
         return result
     return AttachmentProcessingResult(context=str(result or ""), reports=())
+
+
+def _reply_source_text(
+    post_text: str,
+    project_title: str = "",
+    project_description: str = "",
+    project_page_text: str = "",
+) -> str:
+    """Keep task facts for the reply writer separate from Kwork commercial metadata."""
+    return "\n\n".join(
+        part
+        for part in (
+            post_text,
+            f"Название Kwork: {project_title}" if project_title else "",
+            f"Описание Kwork: {project_description}" if project_description else "",
+            f"Текст страницы Kwork: {project_page_text}" if project_page_text else "",
+        )
+        if part
+    )
 
 
 def _email_lead(storage: Storage, email_client: LeadMailer, lead) -> bool:
