@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, TclError, Tk, messagebox, scrolledtext
 from tkinter import ttk
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from app.ai_lead_judge import sanitize_customer_reply
 from app.config import load_config
@@ -80,6 +82,101 @@ def build_script_command(script_path: Path) -> list[str]:
     return ["cmd", "/c", str(script_path)]
 
 
+def build_component_check_report(
+    values: dict[str, str],
+    *,
+    ocr_probe=None,
+    chrome_probe=None,
+    tesseract_command_resolver=None,
+) -> str:
+    """Build a no-cost readiness report for the desktop workflow."""
+    ocr_probe = ocr_probe or _tesseract_languages
+    chrome_probe = chrome_probe or _kwork_chrome_available
+    tesseract_command_resolver = tesseract_command_resolver or _configured_tesseract_command
+    lines: list[str] = []
+
+    try:
+        command = tesseract_command_resolver(values.get("TESSERACT_CMD", ""))
+    except Exception as exc:
+        lines.append(f"Tesseract OCR: ошибка настройки ({exc})")
+    else:
+        if not command.exists():
+            lines.append(f"Tesseract OCR: не найден ({command})")
+        else:
+            try:
+                languages = {language.lower() for language in ocr_probe(command)}
+            except Exception as exc:
+                lines.append(f"Tesseract OCR: ошибка запуска ({exc})")
+            else:
+                missing_languages = [language for language in ("rus", "eng") if language not in languages]
+                if missing_languages:
+                    lines.append("Tesseract OCR: не хватает языков: " + ", ".join(missing_languages))
+                else:
+                    lines.append("Tesseract OCR: готов (rus, eng)")
+
+    deepseek_model = values.get("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
+    if values.get("DEEPSEEK_API_KEY", "").strip():
+        lines.append(f"DeepSeek: настроен ({deepseek_model})")
+    else:
+        lines.append("DeepSeek: ключ не настроен")
+
+    vision_key = values.get("OPENROUTER_API_KEY", "").strip()
+    vision_model = values.get("OPENROUTER_VISION_MODEL", "").strip()
+    vision_mode = values.get("OPENROUTER_VISION_MODE", "smart").strip().lower() or "smart"
+    if vision_key and vision_model and vision_mode != "off":
+        lines.append(f"OpenRouter vision: настроен ({vision_model}, {vision_mode})")
+    elif vision_mode == "off":
+        lines.append("OpenRouter vision: отключен")
+    else:
+        lines.append("OpenRouter vision: ключ или модель не настроены")
+
+    cdp_url = values.get("KWORK_CDP_URL", "http://127.0.0.1:9222").strip() or "http://127.0.0.1:9222"
+    try:
+        chrome_available = chrome_probe(cdp_url)
+    except Exception:
+        chrome_available = False
+    lines.append("Kwork Chrome: доступен" if chrome_available else "Kwork Chrome: не запущен")
+    return "\n".join(lines)
+
+
+def _configured_tesseract_command(configured: str) -> Path:
+    value = configured.strip()
+    if value:
+        path = Path(value)
+        if path.drive.upper() != "D:":
+            raise ValueError("TESSERACT_CMD должен указывать на D: диск")
+        return path
+    return Path(r"D:\Tesseract-OCR\tesseract.exe")
+
+
+def _tesseract_languages(command: Path) -> set[str]:
+    result = subprocess.run(
+        [str(command), "--list-langs"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=8,
+        check=False,
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout).strip()
+        raise RuntimeError(details or f"код {result.returncode}")
+    return {
+        line.strip()
+        for line in result.stdout.splitlines()
+        if re.fullmatch(r"[A-Za-z0-9_]+", line.strip())
+    }
+
+
+def _kwork_chrome_available(cdp_url: str) -> bool:
+    try:
+        with urlopen(cdp_url.rstrip("/") + "/json/version", timeout=2) as response:
+            return response.status == 200
+    except (OSError, URLError):
+        return False
+
+
 class LeadFunnelGui:
     def __init__(self, root: Tk):
         self.root = root
@@ -102,6 +199,7 @@ class LeadFunnelGui:
         self.lead_action_errors: dict[int, str] = {}
         self.kwork_price_limits: dict[int, int] = {}
         self.reply_regeneration_in_flight = False
+        self.component_check_in_flight = False
         self.status_var = StringVar(value="Готово")
 
         self._configure_style()
@@ -232,6 +330,19 @@ class LeadFunnelGui:
             column=1,
             sticky="ew",
             pady=(12, 0),
+        )
+        self.component_check_button = ttk.Button(
+            frame,
+            text="Проверить компоненты",
+            command=self.check_components,
+            style="Modern.TButton",
+        )
+        self.component_check_button.grid(
+            row=button_row + 1,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=(8, 0),
         )
 
     def _create_leads_panel(self, parent: ttk.Frame) -> None:
@@ -990,6 +1101,25 @@ class LeadFunnelGui:
         for key, variable in self.setting_vars.items():
             variable.set(values.get(key, defaults.get(key, "")))
         self.write_log("Настройки перечитаны из .env.\n")
+
+    def check_components(self) -> None:
+        if self.component_check_in_flight:
+            return
+        self.component_check_in_flight = True
+        self.component_check_button.config(state=DISABLED)
+        self.status_var.set("Проверка компонентов: выполняется")
+        threading.Thread(target=self._check_components_thread, daemon=True).start()
+
+    def _check_components_thread(self) -> None:
+        report = build_component_check_report(read_env_values(ENV_PATH))
+        self.write_log("=== Проверка компонентов ===\n" + report + "\n")
+        self.root.after(0, lambda: self._finish_component_check(report))
+
+    def _finish_component_check(self, report: str) -> None:
+        self.component_check_in_flight = False
+        self.component_check_button.config(state=NORMAL)
+        self.status_var.set("Проверка компонентов завершена")
+        messagebox.showinfo("Проверка компонентов", report)
 
     def _filter_summary(self) -> str:
         values = {key: var.get() for key, var in self.setting_vars.items()}

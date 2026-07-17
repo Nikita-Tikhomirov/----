@@ -26,6 +26,7 @@ from app.gui import (
     lead_send_block_reason,
     build_lead_row_values,
     build_app_command,
+    build_component_check_report,
     build_script_command,
     normalize_filter_settings,
     read_env_values,
@@ -50,6 +51,59 @@ def test_build_app_command_can_run_approvals_from_gui(tmp_path):
 
     assert command[-3:] == ["-m", "app.main", "approvals"]
     assert env["PYTHONPATH"] == str(tmp_path / "src")
+
+
+def test_component_check_report_shows_ready_ocr_ai_and_kwork_chrome(tmp_path):
+    tesseract = tmp_path / "tesseract.exe"
+    tesseract.touch()
+
+    report = build_component_check_report(
+        {
+            "TESSERACT_CMD": str(tesseract),
+            "DEEPSEEK_API_KEY": "configured",
+            "DEEPSEEK_MODEL": "deepseek-chat",
+            "OPENROUTER_API_KEY": "configured",
+            "OPENROUTER_VISION_MODEL": "qwen/qwen3.7-plus",
+            "OPENROUTER_VISION_MODE": "smart",
+            "KWORK_CDP_URL": "http://127.0.0.1:9222",
+        },
+        ocr_probe=lambda _command: {"rus", "eng", "osd"},
+        chrome_probe=lambda _url: True,
+        tesseract_command_resolver=lambda value: Path(value),
+    )
+
+    assert "Tesseract OCR: готов (rus, eng)" in report
+    assert "DeepSeek: настроен (deepseek-chat)" in report
+    assert "OpenRouter vision: настроен (qwen/qwen3.7-plus, smart)" in report
+    assert "Kwork Chrome: доступен" in report
+
+
+def test_component_check_report_explains_missing_components(tmp_path):
+    missing_tesseract = tmp_path / "missing.exe"
+
+    report = build_component_check_report(
+        {
+            "TESSERACT_CMD": str(missing_tesseract),
+            "KWORK_CDP_URL": "http://127.0.0.1:9222",
+        },
+        chrome_probe=lambda _url: False,
+        tesseract_command_resolver=lambda value: Path(value),
+    )
+
+    assert f"Tesseract OCR: не найден ({missing_tesseract})" in report
+    assert "DeepSeek: ключ не настроен" in report
+    assert "OpenRouter vision: ключ или модель не настроены" in report
+    assert "Kwork Chrome: не запущен" in report
+
+
+def test_component_check_report_explains_invalid_non_d_tesseract_path():
+    report = build_component_check_report(
+        {"TESSERACT_CMD": r"C:\\Tesseract-OCR\\tesseract.exe"},
+        chrome_probe=lambda _url: False,
+    )
+
+    assert "Tesseract OCR: ошибка настройки" in report
+    assert "D: диск" in report
 
 
 def test_gui_sender_passes_live_response_limit_to_kwork_sender(monkeypatch):
