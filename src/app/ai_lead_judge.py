@@ -9,11 +9,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 BITRIX_PATTERN = re.compile(r"битрикс|bitrix", re.IGNORECASE)
-HARD_REJECT_PATTERN = re.compile(
-    r"\b(1c|1с|android|ios|flutter|react\s+native)\b|мобильн(?:ое|ое приложение|ые приложения)|"
-    r"блокчейн|crypto|крипто|devops|kubernetes|unity|unreal",
-    re.IGNORECASE,
-)
 SIMPLE_PATTERN = re.compile(
     r"верст|лендинг|landing|html|css|js|javascript|wordpress|вордпресс|wp|форма|"
     r"адаптив|правк|поправ|исправ|калькулятор|парсер|бот|интеграц",
@@ -36,23 +31,7 @@ ACTION_PATTERN = re.compile(
 )
 DEFAULT_ACCEPT_DECISIONS = ("accept", "maybe")
 DEFAULT_BLOCKED_KEYWORDS = ("битрикс", "bitrix")
-DEFAULT_HARD_REJECT_KEYWORDS = (
-    "1c",
-    "1с",
-    "android",
-    "ios",
-    "flutter",
-    "react native",
-    "мобильное приложение",
-    "мобильные приложения",
-    "devops",
-    "kubernetes",
-    "blockchain",
-    "crypto",
-    "крипто",
-    "сложная crm",
-    "erp",
-)
+DEFAULT_HARD_REJECT_KEYWORDS: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -183,9 +162,6 @@ def _judge_with_deepseek(
 
 
 def _fallback_judge(text: str) -> LeadJudgeResult:
-    if HARD_REJECT_PATTERN.search(text):
-        return _reject("слишком рискованный стек или не web-задача", text)
-
     simple = bool(SIMPLE_PATTERN.search(text))
     estimated_days = 2 if simple else 5
     price_rub = max(_first_budget(text), 5000 if simple else 12000)

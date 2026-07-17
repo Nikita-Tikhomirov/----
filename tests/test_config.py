@@ -31,6 +31,7 @@ def test_load_config_reads_optional_kwork_login_credentials(tmp_path, monkeypatc
 
     assert config.kwork_login_email == "kwork@example.com"
     assert config.kwork_login_password == "kwork-secret"
+    assert config.lead_hard_reject_keywords == ()
 
 
 def test_load_config_reads_lead_filter_settings(tmp_path, monkeypatch):

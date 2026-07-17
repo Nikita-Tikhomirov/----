@@ -116,7 +116,8 @@ def test_generates_contextual_customer_reply_from_order_text():
     assert "сверстать лендинг" in result.draft_reply
     assert "настроить форму" in result.draft_reply
     assert "Срок 1 день" in result.draft_reply
-    assert "Бюджет 5000 руб" in result.draft_reply
+    assert "5000" not in result.draft_reply
+    assert "бюджет" not in result.draft_reply.lower()
 
 
 def test_fallback_reply_does_not_ask_for_clarifications():

@@ -31,8 +31,8 @@ FILTER_SETTINGS = (
     ("LEAD_BLOCKED_KEYWORDS", "Стоп-слова", "битрикс, bitrix"),
     (
         "LEAD_HARD_REJECT_KEYWORDS",
-        "Сложные/чужие стеки",
-        "1c, 1с, android, ios, flutter, react native, мобильное приложение, devops, kubernetes, blockchain, crypto, крипто, сложная crm, erp",
+        "Доп. жёсткие стоп-слова (можно пусто)",
+        "",
     ),
     ("LEAD_REQUIRED_KEYWORDS", "Обязательные слова (можно пусто)", ""),
     ("KWORK_PROJECTS_URL", "Страница Kwork", "https://kwork.ru/projects?c=11"),

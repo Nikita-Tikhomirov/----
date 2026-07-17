@@ -44,7 +44,34 @@ def test_successful_api_call_returns_reply():
             budget="5000",
             api_key="sk-test-key",
         )
-        assert result == "Здравствуйте! Готов помочь с версткой."
+        assert "верст" in result.lower()
+        assert "руб" not in result.lower()
+        assert len(result) >= 180
+
+
+def test_successful_api_call_removes_price_from_customer_reply():
+    with patch("openai.OpenAI") as mock_openai_class:
+        mock_client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = (
+            "Здравствуйте! Сделаю правки по форме. Цена 9000 руб. "
+            "Сначала проверю текущую логику, затем внесу изменения и протестирую форму. "
+            "Готов приступить сразу."
+        )
+        mock_client.chat.completions.create.return_value.choices = [mock_choice]
+        mock_openai_class.return_value = mock_client
+
+        result = generate_reply(
+            text="Нужно исправить форму на лендинге",
+            positive=["форма"],
+            small_task=True,
+            budget="9000 руб",
+            api_key="sk-test-key",
+        )
+
+    assert "9000" not in result
+    assert "руб" not in result.lower()
+    assert "форма" in result.lower()
 
 
 def test_successful_call_passes_correct_prompt():
@@ -74,7 +101,8 @@ def test_successful_call_passes_correct_prompt():
         assert messages[0]["content"] == _SYSTEM_PROMPT
         assert messages[1]["role"] == "user"
         assert "WordPress" in messages[1]["content"]
-        assert "3000 руб" in messages[1]["content"]
+        assert "3000 руб" not in messages[1]["content"]
+        assert "не упоминай цену" in messages[0]["content"].lower()
 
 
 def test_custom_model_is_passed_through():
@@ -143,7 +171,7 @@ def test_build_prompt_includes_all_fields():
     assert "верстка, HTML/CSS/JS" in prompt
     assert "небольшая задача" in prompt
     assert "завтра" in prompt
-    assert "5000 руб" in prompt
+    assert "5000 руб" not in prompt
 
 
 def test_build_prompt_without_optional_fields():
@@ -169,3 +197,4 @@ def test_prompt_forbids_clarification_questions():
     assert "Не задавай вопросов" in prompt
     assert "уточня" not in prompt.lower()
     assert "Не проси" in _SYSTEM_PROMPT
+    assert "не упоминай цену" in _SYSTEM_PROMPT.lower()

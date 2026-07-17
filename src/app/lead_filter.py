@@ -181,9 +181,6 @@ def _draft_reply(
     elif small_task:
         details.append("по объему похоже на небольшую задачу")
 
-    if budget:
-        details.append(f"учту бюджет: {budget}")
-
     details_sentence = f" Также {', '.join(details)}." if details else ""
     return (
         f"Здравствуйте! Вижу задачу: {task}. "

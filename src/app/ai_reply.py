@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 
+from app.ai_lead_judge import clean_customer_reply
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,7 +61,9 @@ def generate_reply(
         )
         reply = response.choices[0].message.content
         if reply:
-            return reply.strip()
+            summary = ", ".join(positive) if positive else "вашу задачу по сайту"
+            estimated_days = 2 if small_task else 5
+            return clean_customer_reply(reply, summary=summary, estimated_days=estimated_days)
         logger.warning("DeepSeek returned empty response, using template fallback")
     except ImportError:
         logger.warning("openai package not installed, using template fallback")
@@ -89,9 +93,6 @@ def _build_prompt(
         parts.append("Объём: срок не определён")
     if deadline:
         parts.append(f"Срок: {deadline}")
-    if budget:
-        parts.append(f"Бюджет: {budget}")
-
     parts.append(
         "\nНапиши короткий профессиональный отклик от лица веб-разработчика "
         "(сайты, интеграции, правки, автоматизация, WordPress, HTML/CSS/JS). "
@@ -100,6 +101,7 @@ def _build_prompt(
         "Не задавай вопросов. "
         "Не проси доступы, макет, ТЗ или дополнительные детали. "
         "Пиши так, будто готов стартовать по уже описанной задаче. "
+        "Цена и бюджет не входят в сообщение заказчику. "
         "Не используй markdown, только чистый текст."
     )
     return "\n".join(parts)
@@ -111,7 +113,8 @@ _SYSTEM_PROMPT = (
     "Правила:\n"
     "- Начинай с приветствия.\n"
     "- Покажи, что понял суть задачи (1-2 предложения).\n"
-    "- Если указан бюджет/срок — отреагируй на них.\n"
+    "- Укажи реалистичный срок, если он есть в задаче.\n"
+    "- Не упоминай цену, бюджет, оплату, валюту или скидки.\n"
     "- Не проси уточнить детали, макет, доступы, ТЗ или требования.\n"
     "- Не задавай вопросов и не ставь знак вопроса.\n"
     "- Заверши уверенной фразой о готовности быстро приступить.\n"

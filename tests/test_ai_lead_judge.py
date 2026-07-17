@@ -119,6 +119,17 @@ def test_judge_lead_rejects_custom_hard_reject_keywords():
     assert "webgl" in result.reasons[0]
 
 
+def test_judge_lead_does_not_apply_extra_static_stack_rejections_by_default():
+    result = judge_lead(
+        "Нужна небольшая доработка сайта с обменом данными с 1С. "
+        "Отклик: https://kwork.ru/projects/10",
+        api_key="",
+    )
+
+    assert result.accepted is True
+    assert not any("рискованный стек" in reason for reason in result.reasons)
+
+
 def test_judge_lead_fallback_accepts_simple_site_task_without_questions():
     result = judge_lead(
         "Нужно поправить форму заявки на сайте и адаптив. Бюджет 5000 руб. "

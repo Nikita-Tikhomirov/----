@@ -46,23 +46,7 @@ class AppConfig:
     lead_max_days: int = 7
     lead_accept_decisions: tuple[str, ...] = ("accept", "maybe")
     lead_blocked_keywords: tuple[str, ...] = ("битрикс", "bitrix")
-    lead_hard_reject_keywords: tuple[str, ...] = (
-        "1c",
-        "1с",
-        "android",
-        "ios",
-        "flutter",
-        "react native",
-        "мобильное приложение",
-        "мобильные приложения",
-        "devops",
-        "kubernetes",
-        "blockchain",
-        "crypto",
-        "крипто",
-        "сложная crm",
-        "erp",
-    )
+    lead_hard_reject_keywords: tuple[str, ...] = ()
     lead_required_keywords: tuple[str, ...] = ()
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
@@ -110,26 +94,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         lead_max_days=_int_env("LEAD_MAX_DAYS", 7),
         lead_accept_decisions=_csv_env("LEAD_ACCEPT_DECISIONS", ("accept", "maybe")),
         lead_blocked_keywords=_csv_env("LEAD_BLOCKED_KEYWORDS", ("битрикс", "bitrix")),
-        lead_hard_reject_keywords=_csv_env(
-            "LEAD_HARD_REJECT_KEYWORDS",
-            (
-                "1c",
-                "1с",
-                "android",
-                "ios",
-                "flutter",
-                "react native",
-                "мобильное приложение",
-                "мобильные приложения",
-                "devops",
-                "kubernetes",
-                "blockchain",
-                "crypto",
-                "крипто",
-                "сложная crm",
-                "erp",
-            ),
-        ),
+        lead_hard_reject_keywords=_csv_env("LEAD_HARD_REJECT_KEYWORDS", ()),
         lead_required_keywords=_csv_env("LEAD_REQUIRED_KEYWORDS", ()),
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
