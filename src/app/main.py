@@ -75,6 +75,7 @@ def scan_once(
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
     openrouter_vision_model: str = "",
+    openrouter_vision_mode: str = "smart",
     kwork_project_client: ProjectInspector | None = None,
     kwork_max_responses: int = 5,
     lead_judge=judge_lead,
@@ -182,6 +183,7 @@ def scan_once(
                     openrouter_api_key=openrouter_api_key,
                     openrouter_base_url=openrouter_base_url,
                     openrouter_vision_model=openrouter_vision_model,
+                    openrouter_vision_mode=openrouter_vision_mode,
                 )
                 attachment_context = attachment_result.context
                 attachment_reports = attachment_result.reports
@@ -276,6 +278,7 @@ def _build_attachment_processing_result(builder, attachments: tuple[str, ...], *
             "openrouter_api_key",
             "openrouter_base_url",
             "openrouter_vision_model",
+            "openrouter_vision_mode",
         }
         if not any(key in str(exc) for key in optional_keys):
             raise
@@ -608,6 +611,7 @@ def main() -> int:
             openrouter_api_key=config.openrouter_api_key,
             openrouter_base_url=config.openrouter_base_url,
             openrouter_vision_model=config.openrouter_vision_model,
+            openrouter_vision_mode=config.openrouter_vision_mode,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
             kwork_cookie=_resolve_kwork_cookie(config),
@@ -666,6 +670,7 @@ def main() -> int:
             openrouter_api_key=config.openrouter_api_key,
             openrouter_base_url=config.openrouter_base_url,
             openrouter_vision_model=config.openrouter_vision_model,
+            openrouter_vision_mode=config.openrouter_vision_mode,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
             kwork_cookie=_resolve_kwork_cookie(config),

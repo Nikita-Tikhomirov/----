@@ -125,6 +125,7 @@ def test_load_config_reads_openrouter_vision_settings(tmp_path, monkeypatch):
                 "OPENROUTER_API_KEY=or-test-key",
                 "OPENROUTER_BASE_URL=https://openrouter.example/v1",
                 "OPENROUTER_VISION_MODEL=provider/vision-model",
+                "OPENROUTER_VISION_MODE=smart",
             ]
         ),
         encoding="utf-8",
@@ -132,9 +133,11 @@ def test_load_config_reads_openrouter_vision_settings(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
     monkeypatch.delenv("OPENROUTER_VISION_MODEL", raising=False)
+    monkeypatch.delenv("OPENROUTER_VISION_MODE", raising=False)
 
     config = load_config(env_file)
 
     assert config.openrouter_api_key == "or-test-key"
     assert config.openrouter_base_url == "https://openrouter.example/v1"
     assert config.openrouter_vision_model == "provider/vision-model"
+    assert config.openrouter_vision_mode == "smart"

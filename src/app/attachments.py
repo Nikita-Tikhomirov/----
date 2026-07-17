@@ -38,6 +38,7 @@ IMPORTANT_ARCHIVE_NAME_PARTS = (
     "скрин",
     "форма",
 )
+WORD_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё]{3,}")
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ def build_attachment_context(
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
     openrouter_vision_model: str = "",
+    openrouter_vision_mode: str = "fallback",
 ) -> str:
     """Download small readable attachments and return text for AI context."""
     return build_attachment_report(
@@ -108,6 +110,7 @@ def build_attachment_context(
         openrouter_api_key=openrouter_api_key,
         openrouter_base_url=openrouter_base_url,
         openrouter_vision_model=openrouter_vision_model,
+        openrouter_vision_mode=openrouter_vision_mode,
     ).context
 
 
@@ -126,6 +129,7 @@ def build_attachment_report(
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
     openrouter_vision_model: str = "",
+    openrouter_vision_mode: str = "fallback",
 ) -> AttachmentProcessingResult:
     """Download attachments, save readable originals, and return AI + UI metadata."""
     if not attachments:
@@ -156,6 +160,7 @@ def build_attachment_report(
                 openrouter_api_key=openrouter_api_key,
                 openrouter_base_url=openrouter_base_url,
                 openrouter_vision_model=openrouter_vision_model,
+                openrouter_vision_mode=openrouter_vision_mode,
             )
         except Exception as exc:
             logger.warning("Failed to read attachment %s: %s", ref.url, exc)
@@ -327,21 +332,27 @@ def inspect_attachment(
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
     openrouter_vision_model: str = "",
+    openrouter_vision_mode: str = "fallback",
 ) -> tuple[str, str]:
     ext = _extension(ref.url) or _extension(ref.label)
+    vision_mode = _normalize_vision_mode(openrouter_vision_mode)
     if ext in TEXT_EXTENSIONS:
         return "скачан, прочитан", _decode_text(content)
     if ext == ".docx":
         docx_text = _extract_docx(content)
-        if _docx_text_is_missing(docx_text):
-            vision_text = describe_docx_with_openrouter(
+        if _docx_text_is_missing(docx_text) or vision_mode == "smart":
+            vision_text = _vision_for_docx(
                 content,
-                api_key=openrouter_api_key,
-                model=openrouter_vision_model,
-                base_url=openrouter_base_url,
+                openrouter_api_key,
+                openrouter_vision_model,
+                openrouter_base_url,
+                vision_mode,
+                enrich=True,
             )
             if vision_text:
-                return "скачан, vision прочитан", "DOCX без обычного текста. Vision:\n" + vision_text
+                if _docx_text_is_missing(docx_text):
+                    return "скачан, vision прочитан", "DOCX без обычного текста. Vision:\n" + vision_text
+                return "скачан, текст + vision прочитан", f"DOCX текст:\n{docx_text}\n\nVision:\n{vision_text}"
         return "скачан, прочитан", docx_text
     if ext == ".pdf":
         return _extract_pdf(
@@ -349,6 +360,7 @@ def inspect_attachment(
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
             openrouter_vision_model=openrouter_vision_model,
+            vision_mode=vision_mode,
         )
     if ext in IMAGE_EXTENSIONS:
         return _extract_image_ocr(
@@ -357,6 +369,7 @@ def inspect_attachment(
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
             openrouter_vision_model=openrouter_vision_model,
+            vision_mode=vision_mode,
         )
     if ext in ARCHIVE_EXTENSIONS:
         return _extract_archive(
@@ -369,6 +382,7 @@ def inspect_attachment(
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
             openrouter_vision_model=openrouter_vision_model,
+            openrouter_vision_mode=vision_mode,
         )
     return "скачан, тип не поддержан", "Файл найден, но тип не поддержан для автоматического чтения."
 
@@ -413,7 +427,8 @@ def _extract_docx(content: bytes) -> str:
 
 
 def _docx_text_is_missing(text: str) -> bool:
-    return not text.strip() or "текст не найден" in text.lower()
+    lowered = text.lower()
+    return not text.strip() or "текст не найден" in lowered or "недоступен" in lowered
 
 
 def _validate_downloaded_content(ref: AttachmentRef, content: bytes) -> None:
@@ -459,7 +474,9 @@ def _extract_pdf(
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
     openrouter_vision_model: str = "",
+    vision_mode: str = "fallback",
 ) -> tuple[str, str]:
+    vision_mode = _normalize_vision_mode(vision_mode)
     try:
         from pypdf import PdfReader
     except ImportError:
@@ -473,26 +490,50 @@ def _extract_pdf(
         pages.append(page.extract_text() or "")
     extracted = "\n".join(text for text in pages if text.strip())
     if extracted.strip():
+        vision_text = _vision_for_pdf(
+            content,
+            openrouter_api_key,
+            openrouter_vision_model,
+            openrouter_base_url,
+            vision_mode,
+            enrich=_text_is_unreliable(extracted),
+        )
+        if vision_text:
+            return "скачан, текст + vision прочитан", f"PDF текст:\n{extracted}\n\nVision:\n{vision_text}"
         return "скачан, прочитан", extracted
     try:
         ocr_text = _extract_pdf_ocr(content)
     except Exception as exc:
-        vision_text = describe_pdf_with_openrouter(
+        vision_text = _vision_for_pdf(
             content,
-            api_key=openrouter_api_key,
-            model=openrouter_vision_model,
-            base_url=openrouter_base_url,
+            openrouter_api_key,
+            openrouter_vision_model,
+            openrouter_base_url,
+            vision_mode,
+            enrich=True,
         )
         if vision_text:
             return "скачан, vision прочитан", "PDF без текстового слоя. Vision:\n" + vision_text
         return "скачан, текст не извлечен", f"PDF без текстового слоя. OCR PDF не выполнен: {exc}"
     if ocr_text.strip():
+        vision_text = _vision_for_pdf(
+            content,
+            openrouter_api_key,
+            openrouter_vision_model,
+            openrouter_base_url,
+            vision_mode,
+            enrich=_text_is_unreliable(ocr_text),
+        )
+        if vision_text:
+            return "скачан, OCR + vision прочитан", f"PDF без текстового слоя. OCR:\n{ocr_text}\n\nVision:\n{vision_text}"
         return "скачан, OCR прочитан", "PDF без текстового слоя. OCR:\n" + ocr_text
-    vision_text = describe_pdf_with_openrouter(
+    vision_text = _vision_for_pdf(
         content,
-        api_key=openrouter_api_key,
-        model=openrouter_vision_model,
-        base_url=openrouter_base_url,
+        openrouter_api_key,
+        openrouter_vision_model,
+        openrouter_base_url,
+        vision_mode,
+        enrich=True,
     )
     if vision_text:
         return "скачан, vision прочитан", "PDF без текстового слоя. Vision:\n" + vision_text
@@ -525,33 +566,123 @@ def _extract_image_ocr(
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
     openrouter_vision_model: str = "",
+    vision_mode: str = "fallback",
 ) -> tuple[str, str]:
+    vision_mode = _normalize_vision_mode(vision_mode)
     try:
         text = _run_tesseract_ocr(content, ext)
     except Exception as exc:
-        vision_text = describe_image_with_openrouter(
+        vision_text = _vision_for_image(
             content,
             ext,
-            api_key=openrouter_api_key,
-            model=openrouter_vision_model,
-            base_url=openrouter_base_url,
+            openrouter_api_key,
+            openrouter_vision_model,
+            openrouter_base_url,
+            vision_mode,
+            enrich=True,
         )
         if vision_text:
             return "скачан, vision прочитан", vision_text
         return "скачан, OCR не выполнен", f"OCR не выполнен: {exc}"
     clean = _shorten(text, 2500)
     if clean:
+        vision_text = _vision_for_image(
+            content,
+            ext,
+            openrouter_api_key,
+            openrouter_vision_model,
+            openrouter_base_url,
+            vision_mode,
+            enrich=vision_mode == "smart",
+        )
+        if vision_text:
+            return "скачан, OCR + vision прочитан", f"OCR: {clean}\n\nVision: {vision_text}"
         return "скачан, OCR прочитан", clean
-    vision_text = describe_image_with_openrouter(
+    vision_text = _vision_for_image(
         content,
         ext,
-        api_key=openrouter_api_key,
-        model=openrouter_vision_model,
-        base_url=openrouter_base_url,
+        openrouter_api_key,
+        openrouter_vision_model,
+        openrouter_base_url,
+        vision_mode,
+        enrich=True,
     )
     if vision_text:
         return "скачан, vision прочитан", vision_text
     return "скачан, OCR не выполнен", "OCR выполнился, но текст на изображении не найден."
+
+
+def _vision_for_image(
+    content: bytes,
+    extension: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    mode: str,
+    enrich: bool,
+) -> str:
+    if mode == "off" or not enrich:
+        return ""
+    return describe_image_with_openrouter(
+        content,
+        extension,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
+
+
+def _vision_for_pdf(
+    content: bytes,
+    api_key: str,
+    model: str,
+    base_url: str,
+    mode: str,
+    enrich: bool,
+) -> str:
+    if mode == "off" or not enrich:
+        return ""
+    return describe_pdf_with_openrouter(
+        content,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
+
+
+def _vision_for_docx(
+    content: bytes,
+    api_key: str,
+    model: str,
+    base_url: str,
+    mode: str,
+    enrich: bool,
+) -> str:
+    if mode == "off" or not enrich:
+        return ""
+    return describe_docx_with_openrouter(
+        content,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
+
+
+def _text_is_unreliable(value: str) -> bool:
+    clean = " ".join(value.split())
+    if len(clean) < 160:
+        return True
+    words = WORD_PATTERN.findall(clean)
+    if len(words) < 15:
+        return True
+    letters = sum(char.isalpha() for char in clean)
+    symbols = sum(not (char.isalnum() or char.isspace() or char in ".,;:!?-()") for char in clean)
+    return symbols > max(20, letters // 2)
+
+
+def _normalize_vision_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    return normalized if normalized in {"off", "fallback", "smart"} else "fallback"
 
 
 def _extract_archive(
@@ -564,6 +695,7 @@ def _extract_archive(
     openrouter_api_key: str,
     openrouter_base_url: str,
     openrouter_vision_model: str,
+    openrouter_vision_mode: str,
 ) -> tuple[str, str]:
     ext = _extension(ref.url) or _extension(ref.label)
     if ext != ".zip":
@@ -579,6 +711,7 @@ def _extract_archive(
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
             openrouter_vision_model=openrouter_vision_model,
+            openrouter_vision_mode=openrouter_vision_mode,
         )
     except zipfile.BadZipFile:
         return "скачан, архив не открыт", "ZIP-архив поврежден или это не ZIP-файл."
@@ -598,6 +731,7 @@ def _read_zip_archive(
     openrouter_api_key: str,
     openrouter_base_url: str,
     openrouter_vision_model: str,
+    openrouter_vision_mode: str,
     max_entries: int = 8,
 ) -> tuple[list[str], ArchiveSelection]:
     lines: list[str] = []
@@ -648,6 +782,7 @@ def _read_zip_archive(
                 openrouter_api_key=openrouter_api_key,
                 openrouter_base_url=openrouter_base_url,
                 openrouter_vision_model=openrouter_vision_model,
+                openrouter_vision_mode=openrouter_vision_mode,
             )
             nested_status = status.removeprefix("скачан, ")
             lines.append(f"{name}: {nested_status}\n{_shorten(extracted, 1500)}")
@@ -876,7 +1011,7 @@ def describe_pdf_with_openrouter(
     base_url: str,
     timeout_seconds: float = 45.0,
 ) -> str:
-    """Render the first scan pages and ask OpenRouter vision only after local OCR fails."""
+    """Render the first PDF pages and ask OpenRouter for visual task evidence."""
     if not api_key.strip() or not model.strip():
         return ""
     try:
@@ -912,7 +1047,7 @@ def describe_docx_with_openrouter(
     base_url: str,
     timeout_seconds: float = 45.0,
 ) -> str:
-    """Describe embedded DOCX screenshots when ordinary text extraction finds nothing."""
+    """Describe embedded DOCX screenshots when visual task evidence is useful."""
     if not api_key.strip() or not model.strip():
         return ""
     try:

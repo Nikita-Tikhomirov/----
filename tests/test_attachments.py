@@ -156,6 +156,36 @@ def test_build_attachment_context_reads_image_with_tesseract(monkeypatch):
     assert "На скрине форма заявки" in context
 
 
+def test_build_attachment_context_smart_mode_combines_ocr_and_vision(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake image",
+    )
+    monkeypatch.setattr(
+        "app.attachments._run_tesseract_ocr",
+        lambda content, ext: "На скрине форма заявки и кнопка отправки.",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "app.attachments.describe_image_with_openrouter",
+        lambda content, extension, api_key, model, base_url, timeout_seconds=45.0: (
+            "На экране форма в первом блоке лендинга, кнопка должна оставаться видимой на мобильных."
+        ),
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("screen.png: https://kwork.ru/files/screen.png",),
+        openrouter_api_key="or-test-key",
+        openrouter_vision_model="provider/vision-model",
+        openrouter_vision_mode="smart",
+    )
+
+    assert "Статус: скачан, OCR + vision прочитан" in context
+    assert "OCR: На скрине форма заявки" in context
+    assert "Vision: На экране форма" in context
+
+
 def test_build_attachment_context_uses_openrouter_vision_when_ocr_has_no_text(monkeypatch):
     monkeypatch.setattr(
         "app.attachments.download_attachment",
@@ -179,6 +209,28 @@ def test_build_attachment_context_uses_openrouter_vision_when_ocr_has_no_text(mo
 
     assert "Статус: скачан, vision прочитан" in context
     assert "форма заявки и блок тарифов" in context
+
+
+def test_build_attachment_context_off_mode_never_calls_openrouter_vision(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake image",
+    )
+    monkeypatch.setattr("app.attachments._run_tesseract_ocr", lambda content, ext: "", raising=False)
+
+    def fail_vision(*args, **kwargs):
+        raise AssertionError("vision must stay disabled")
+
+    monkeypatch.setattr("app.attachments.describe_image_with_openrouter", fail_vision, raising=False)
+
+    context = build_attachment_context(
+        ("screen.png: https://kwork.ru/files/screen.png",),
+        openrouter_api_key="or-test-key",
+        openrouter_vision_model="provider/vision-model",
+        openrouter_vision_mode="off",
+    )
+
+    assert "Статус: скачан, OCR не выполнен" in context
 
 
 def test_build_attachment_context_uses_openrouter_vision_for_docx_without_text(monkeypatch):
@@ -336,6 +388,35 @@ def test_build_attachment_context_reads_scanned_pdf_with_ocr(monkeypatch):
 
     assert "Статус: скачан, OCR прочитан" in context
     assert "инструкция по cookie" in context
+
+
+def test_build_attachment_context_smart_mode_enriches_short_pdf_ocr(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: _blank_pdf_bytes(),
+    )
+    monkeypatch.setattr(
+        "app.attachments._extract_pdf_ocr",
+        lambda content: "Форма заявки и адаптив.",
+    )
+    monkeypatch.setattr(
+        "app.attachments.describe_pdf_with_openrouter",
+        lambda content, api_key, model, base_url, timeout_seconds=45.0: (
+            "На первой странице ТЗ показаны правки формы и мобильной версии лендинга."
+        ),
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("ТЗ.pdf: https://kwork.ru/files/tz.pdf",),
+        openrouter_api_key="or-test-key",
+        openrouter_vision_model="provider/vision-model",
+        openrouter_vision_mode="smart",
+    )
+
+    assert "Статус: скачан, OCR + vision прочитан" in context
+    assert "OCR: Форма заявки" in context
+    assert "Vision: На первой странице ТЗ" in context
 
 
 def test_build_attachment_context_reports_pdf_ocr_failure(monkeypatch):

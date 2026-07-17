@@ -53,6 +53,7 @@ class AppConfig:
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_vision_model: str = ""
+    openrouter_vision_mode: str = "smart"
 
 
 def load_config(env_path: str | Path = ".env") -> AppConfig:
@@ -101,6 +102,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
         openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         openrouter_vision_model=os.getenv("OPENROUTER_VISION_MODEL", ""),
+        openrouter_vision_mode=_vision_mode(os.getenv("OPENROUTER_VISION_MODE", "smart")),
     )
 
 
@@ -139,3 +141,8 @@ def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     if value in (None, ""):
         return default
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _vision_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    return normalized if normalized in {"off", "fallback", "smart"} else "smart"

@@ -150,7 +150,7 @@ Commit: `git commit -m "feat: compose Kwork replies after lead evaluation"`
 - Adds `AppConfig.openrouter_vision_mode: str` loaded from `OPENROUTER_VISION_MODE`.
 - `inspect_attachment(..., openrouter_vision_mode="smart")` returns combined local and vision evidence where useful.
 
-- [ ] **Step 1: Write failing smart-vision tests**
+- [x] **Step 1: Write failing smart-vision tests**
 
 ```python
 def test_image_in_smart_mode_keeps_ocr_and_adds_vision(monkeypatch):
@@ -159,13 +159,13 @@ def test_image_in_smart_mode_keeps_ocr_and_adds_vision(monkeypatch):
     assert "OCR:" in text and "Vision:" in text
 ```
 
-- [ ] **Step 2: Run focused tests and confirm the new argument failure**
+- [x] **Step 2: Run focused tests and confirm the new argument failure**
 
 Run: `python -m pytest tests/test_attachments.py tests/test_config.py -q`
 
 Expected: FAIL because the vision mode is not present.
 
-- [ ] **Step 3: Implement `off`, `fallback`, and `smart` modes**
+- [x] **Step 3: Implement `off`, `fallback`, and `smart` modes**
 
 ```python
 if mode == "smart" and _vision_should_enrich(kind, local_text):
@@ -175,13 +175,13 @@ if mode == "smart" and _vision_should_enrich(kind, local_text):
 `smart` enriches screenshots and visibly unreliable OCR. `fallback` retains the
 existing no-text behavior. A failed call leaves the local result untouched.
 
-- [ ] **Step 4: Thread mode through `main.py`, document it, and run focused tests**
+- [x] **Step 4: Thread mode through `main.py`, document it, and run focused tests**
 
 Run: `python -m pytest tests/test_attachments.py tests/test_config.py tests/test_main.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit: `git commit -m "feat: enrich unreadable Kwork attachments with vision"`
 
