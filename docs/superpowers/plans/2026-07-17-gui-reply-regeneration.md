@@ -93,6 +93,6 @@ Run: `python -m compileall -q src`
 
 Run: `git diff --check`
 
-- [ ] **Step 3: Mark plan complete, commit, and push**
+- [x] **Step 3: Mark plan complete, commit, and push**
 
 Commit: `git commit -m "feat: regenerate Kwork replies from GUI"`
