@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request
 
+from app.kwork_status import UNAVAILABLE_PROJECT_REASON, unavailable_project_message
+
 logger = logging.getLogger(__name__)
 
 TAG_PATTERN = re.compile(r"<[^>]+>")
@@ -42,6 +44,10 @@ class KworkProjectInfo:
     @property
     def has_response_count(self) -> bool:
         return self.response_count is not None
+
+    @property
+    def is_unavailable(self) -> bool:
+        return self.reason == UNAVAILABLE_PROJECT_REASON
 
 
 class KworkProjectClient:
@@ -87,6 +93,18 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
     attachments = tuple(_extract_attachments(url, html_text))
     facts = tuple(_extract_facts(visible_text, response_count=count_match.group(1) if count_match else ""))
     page_text = _shorten(visible_text, 4000)
+
+    if unavailable_project_message(visible_text):
+        return KworkProjectInfo(
+            url=url,
+            response_count=None,
+            title=title,
+            description=description,
+            page_text=page_text,
+            attachments=attachments,
+            facts=facts,
+            reason=UNAVAILABLE_PROJECT_REASON,
+        )
 
     if not count_match:
         return KworkProjectInfo(

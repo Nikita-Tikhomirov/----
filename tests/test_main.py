@@ -198,6 +198,39 @@ def test_scan_once_skips_kwork_projects_without_response_count(tmp_path):
     assert email_client.sent_leads == []
 
 
+def test_scan_once_skips_kwork_project_that_became_unavailable(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+    source = FakeTelegramClient()
+    source.fetch_recent_posts = lambda: [
+        FakePost(
+            channel="kwork-web",
+            message_id=2,
+            url="https://kwork.ru/projects/2/view",
+            text=(
+                "Нужно сверстать лендинг HTML/CSS/JS. Предложений: 2\n"
+                "Отклик: https://kwork.ru/projects/2/view"
+            ),
+            posted_at="",
+        )
+    ]
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=source,
+        email_client=email_client,
+        kwork_project_client=FakeKworkProjectClient(
+            response_count=None,
+            reason="Kwork project is unavailable: page not found, closed, or removed.",
+        ),
+    )
+
+    assert created == 0
+    assert storage.list_leads() == []
+    assert email_client.sent_leads == []
+
+
 def test_scan_once_uses_ai_judge_for_summary_reply_and_score(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

@@ -9,6 +9,8 @@ from urllib.parse import parse_qsl, urlparse
 
 import websocket
 
+from app.kwork_status import unavailable_project_message
+
 logger = logging.getLogger(__name__)
 
 PRICE_PATTERN = re.compile(
@@ -194,7 +196,7 @@ class KworkReplySender:
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:
             text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
-            unavailable_message = _project_unavailable_message(text)
+            unavailable_message = unavailable_project_message(text)
             if unavailable_message:
                 raise KworkProjectUnavailableError(unavailable_message)
             if len(text.strip()) > 100:
@@ -251,7 +253,7 @@ class KworkReplySender:
             if kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT):
                 return
             text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
-            unavailable_message = _project_unavailable_message(text)
+            unavailable_message = unavailable_project_message(text)
             if unavailable_message:
                 raise KworkProjectUnavailableError(unavailable_message)
             if _login_required_message(text, has_reply_field=False):
@@ -357,26 +359,6 @@ def _login_required_message(page_text: str, has_reply_field: bool) -> str:
         return ""
     if "вход" in lowered and "регистрация" in lowered and "предложить услугу" in lowered:
         return "Kwork Chrome is not logged in; open the bot Chrome window and sign in to Kwork once."
-    return ""
-
-
-def _project_unavailable_message(page_text: str) -> str:
-    lowered = page_text.lower()
-    unavailable_markers = (
-        "страница не найдена",
-        "проект не найден",
-        "заказ не найден",
-        "проект недоступен",
-        "заказ недоступен",
-        "проект закрыт",
-        "заказ закрыт",
-        "заказ снят",
-        "page not found",
-        "project not found",
-        "project is unavailable",
-    )
-    if any(marker in lowered for marker in unavailable_markers):
-        return "Kwork project is unavailable: page not found, closed, or removed."
     return ""
 
 

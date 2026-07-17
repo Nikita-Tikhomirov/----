@@ -121,6 +121,14 @@ def scan_once(
         kwork_facts: tuple[str, ...] = ()
         if kwork_project_client is not None:
             project_info = kwork_project_client.inspect(evaluation.contact)
+            if project_info.is_unavailable:
+                logger.info(
+                    "Rejected post %s/%s: %s",
+                    post.channel,
+                    post.message_id,
+                    project_info.reason,
+                )
+                continue
             kwork_facts = tuple(getattr(project_info, "facts", ()))
             if not project_info.has_response_count and post.channel != "kwork-web":
                 logger.info(

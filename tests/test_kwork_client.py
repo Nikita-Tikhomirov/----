@@ -51,6 +51,21 @@ def test_parse_kwork_project_html_does_not_use_worker_count_as_offer_count():
     assert "Предложений" in result_with_worker_count.reason
 
 
+def test_parse_kwork_project_html_detects_unavailable_project_page():
+    html = """
+    <html>
+      <head><title>Страница не найдена</title></head>
+      <body><h1>СТРАНИЦА НЕ НАЙДЕНА</h1></body>
+    </html>
+    """
+
+    result = parse_kwork_project_html("https://kwork.ru/projects/1", html)
+
+    assert result.response_count is None
+    assert result.is_unavailable is True
+    assert "unavailable" in result.reason.lower()
+
+
 def test_kwork_client_rejects_non_kwork_links_without_fetching():
     client = KworkProjectClient()
 
