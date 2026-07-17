@@ -34,7 +34,15 @@ class TelegramLeadClient:
     def fetch_recent_posts(self) -> list[TelegramPost]:
         return asyncio.run(self._fetch_recent_posts())
 
-    def send_message(self, contact: str, text: str) -> str:
+    def send_message(
+        self,
+        contact: str,
+        text: str,
+        *,
+        price_rub: int | None = None,
+        days: int | None = None,
+        title: str = "",
+    ) -> str:
         return asyncio.run(self._send_message(contact, text))
 
     async def _fetch_recent_posts(self) -> list[TelegramPost]:

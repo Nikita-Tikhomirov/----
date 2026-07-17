@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Protocol
@@ -32,7 +33,15 @@ class PostSource(Protocol):
     def fetch_recent_posts(self):
         ...
 
-    def send_message(self, contact: str, text: str) -> str:
+    def send_message(
+        self,
+        contact: str,
+        text: str,
+        *,
+        price_rub: int | None = None,
+        days: int | None = None,
+        title: str = "",
+    ) -> str:
         ...
 
 
@@ -279,6 +288,34 @@ def _format_kwork_facts(facts: tuple[str, ...], limit: int = 1200) -> str:
     return report[: limit - 1].rstrip() + "…"
 
 
+def _approval_reply_fields(lead) -> tuple[int | None, int | None, str]:
+    """Read Kwork form data stored in the lead while keeping the reply price-free."""
+    price_match = re.search(r"Цена:\s*(\d[\d\s]*)\s*руб", lead.summary, re.IGNORECASE)
+    days_match = re.search(r"Срок:\s*(\d{1,2})\s*дн", lead.summary, re.IGNORECASE)
+    price_rub = int(price_match.group(1).replace(" ", "")) if price_match else None
+    days = int(days_match.group(1)) if days_match else None
+    title = _approval_reply_title(lead)
+    return price_rub, days, title
+
+
+def _approval_reply_title(lead) -> str:
+    meta_prefixes = ("осталось:", "предложений:", "бюджет:", "контакт:", "kwork facts:")
+    for line in lead.post_text.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        if clean.startswith("\U0001f4cc"):
+            return clean.lstrip("\U0001f4cc").strip()[:70]
+        if clean.lower().startswith(meta_prefixes):
+            continue
+        return clean[:70]
+    for line in lead.summary.splitlines():
+        clean = line.strip()
+        if clean.startswith("Задача:"):
+            return clean.removeprefix("Задача:").strip()[:70]
+    return ""
+
+
 def process_approvals(
     storage: Storage,
     telegram_client: PostSource,
@@ -301,7 +338,14 @@ def process_approvals(
 
         lead = storage.get_lead(lead_id)
         try:
-            telegram_message_id = telegram_client.send_message(lead.contact, lead.draft_reply)
+            price_rub, days, title = _approval_reply_fields(lead)
+            telegram_message_id = telegram_client.send_message(
+                lead.contact,
+                lead.draft_reply,
+                price_rub=price_rub,
+                days=days,
+                title=title,
+            )
         except Exception as exc:
             logger.exception("Failed to send Telegram reply for lead %s", lead_id)
             storage.mark_failed(lead_id, str(exc))

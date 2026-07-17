@@ -93,7 +93,15 @@ class KworkWebSource:
         )
         return posts[: self.max_posts]
 
-    def send_message(self, contact: str, text: str) -> str:
+    def send_message(
+        self,
+        contact: str,
+        text: str,
+        *,
+        price_rub: int | None = None,
+        days: int | None = None,
+        title: str = "",
+    ) -> str:
         if not self.enable_replies:
             raise RuntimeError("Kwork web source is read-only; replies are sent manually.")
         sender = KworkReplySender(
@@ -103,7 +111,13 @@ class KworkWebSource:
             login_email=self.login_email,
             login_password=self.login_password,
         )
-        return sender.send_message(contact, text)
+        return sender.send_message(
+            contact,
+            text,
+            price_rub=price_rub,
+            days=days,
+            title=title,
+        )
 
 
 def parse_kwork_project_cards(

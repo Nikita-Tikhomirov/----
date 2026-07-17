@@ -93,6 +93,36 @@ def test_kwork_reply_sender_rejects_non_kwork_project_url():
         sender.send_message("https://example.com/project/1", "Здравствуйте!")
 
 
+def test_kwork_reply_sender_passes_structured_terms_from_approval(monkeypatch):
+    captured = {}
+
+    def fake_send_reply(self, contact, text, **kwargs):
+        captured["contact"] = contact
+        captured["text"] = text
+        captured.update(kwargs)
+        return "kwork-project-123"
+
+    monkeypatch.setattr(KworkReplySender, "send_reply", fake_send_reply)
+
+    result = KworkReplySender().send_message(
+        "https://kwork.ru/projects/123/view",
+        "Здравствуйте! Готов разобраться в задаче.",
+        price_rub=3000,
+        days=3,
+        title="Название заказа",
+    )
+
+    assert result == "kwork-project-123"
+    assert captured == {
+        "contact": "https://kwork.ru/projects/123/view",
+        "text": "Здравствуйте! Готов разобраться в задаче.",
+        "price_rub": 3000,
+        "days": 3,
+        "title": "Название заказа",
+        "submit": True,
+    }
+
+
 def test_offer_url_targets_kwork_new_offer_page():
     assert _offer_url("https://kwork.ru/projects/3190074/view") == "https://kwork.ru/new_offer?project=3190074"
 

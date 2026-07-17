@@ -42,8 +42,23 @@ class KworkReplySender:
         self.login_email = login_email
         self.login_password = login_password
 
-    def send_message(self, contact: str, text: str) -> str:
-        return self.send_reply(contact, text, submit=True)
+    def send_message(
+        self,
+        contact: str,
+        text: str,
+        *,
+        price_rub: int | None = None,
+        days: int | None = None,
+        title: str = "",
+    ) -> str:
+        return self.send_reply(
+            contact,
+            text,
+            price_rub=price_rub,
+            days=days,
+            title=title,
+            submit=True,
+        )
 
     def prepare_reply(
         self,

@@ -21,6 +21,7 @@ class FakeTelegramClient:
 
     def __init__(self):
         self.sent = []
+        self.sent_details = []
 
     def fetch_recent_posts(self):
         return [
@@ -36,8 +37,9 @@ class FakeTelegramClient:
             )
         ]
 
-    def send_message(self, contact, text):
+    def send_message(self, contact, text, *, price_rub=None, days=None, title=""):
         self.sent.append((contact, text))
+        self.sent_details.append((contact, text, price_rub, days, title))
         return "tg-message-1"
 
 
@@ -586,6 +588,41 @@ def test_process_approvals_sends_kwork_web_reply_after_ok(tmp_path):
         ("https://kwork.ru/projects/3186746/view", "Здравствуйте! Сделаю за 3 дня, цена 10000 руб.")
     ]
     assert storage.get_lead(lead_id).status == "sent"
+
+
+def test_process_approvals_passes_kwork_form_terms_without_price_in_reply_text(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    project_url = "https://kwork.ru/projects/3186746/view"
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=3186746,
+        post_url=project_url,
+        text="Название заказа\nНужно поправить WordPress. Предложений: 4",
+        posted_at="",
+    )
+    reply_text = "Здравствуйте! Изучу текущую реализацию и аккуратно внесу нужные правки."
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=86,
+        summary="WordPress задача\nСрок: 3 дн.\nЦена: 10 000 руб.",
+        draft_reply=reply_text,
+        contact=project_url,
+    )
+    storage.mark_lead_emailed(lead_id, "<lead@example.com>")
+    telegram_client = FakeTelegramClient()
+
+    sent = process_approvals(
+        storage=storage,
+        telegram_client=telegram_client,
+        email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
+    )
+
+    assert sent == 1
+    assert "10000" not in reply_text
+    assert telegram_client.sent_details == [
+        (project_url, reply_text, 10000, 3, "Название заказа")
+    ]
 
 
 def test_submit_order_sends_for_approval_and_review_can_request_revision(tmp_path):

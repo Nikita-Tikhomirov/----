@@ -76,7 +76,15 @@ class PublicTelegramClient:
             posts.extend(channel_posts[: self.max_posts_per_channel])
         return posts
 
-    def send_message(self, contact: str, text: str) -> str:
+    def send_message(
+        self,
+        contact: str,
+        text: str,
+        *,
+        price_rub: int | None = None,
+        days: int | None = None,
+        title: str = "",
+    ) -> str:
         raise RuntimeError(
             "Telegram API is not configured. Public fallback can read channels, "
             "but cannot send Telegram replies automatically."
