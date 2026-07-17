@@ -125,7 +125,7 @@ Run: `git diff --check`
 
 Expected: all commands exit with code 0.
 
-- [ ] **Step 5: Commit and push**
+- [x] **Step 5: Commit and push**
 
 ```powershell
 git add src/app/reply_composer.py tests/test_reply_composer.py README.md docs/superpowers
