@@ -13,6 +13,7 @@ from tkinter import ttk
 from app.ai_lead_judge import sanitize_customer_reply
 from app.config import load_config
 from app.kwork_sender import KworkReplySender, _extract_reply_terms
+from app.reply_composer import ReplyDraftContext, compose_customer_reply
 from app.storage import Lead, LeadAttachment, Storage
 
 
@@ -87,6 +88,8 @@ class LeadFunnelGui:
         self.lead_rows: dict[str, int] = {}
         self.attachment_rows: dict[str, LeadAttachment] = {}
         self.in_flight_lead_ids: set[int] = set()
+        self.pending_replies: dict[int, str] = {}
+        self.reply_regeneration_in_flight = False
         self.status_var = StringVar(value="Готово")
 
         self._configure_style()
@@ -329,6 +332,13 @@ class LeadFunnelGui:
         buttons.pack(fill="x", pady=(4, 0))
         ttk.Button(buttons, text="Обновить", command=self.refresh_leads, style="Modern.TButton").pack(side="left", padx=(0, 6))
         ttk.Button(buttons, text="Сохранить", command=self.save_lead_edits, style="Modern.TButton").pack(side="left", padx=6)
+        self.regenerate_reply_button = ttk.Button(
+            buttons,
+            text="Пересобрать отклик",
+            command=self.regenerate_selected_reply,
+            style="Accent.TButton",
+        )
+        self.regenerate_reply_button.pack(side="left", padx=6)
         ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
@@ -416,13 +426,15 @@ class LeadFunnelGui:
             f"Лид #{lead.id}: {lead.status}; score {lead.score}; "
             f"предложений: {_extract_offer_count(lead) or 'не видно'}; наш отклик: {_reply_state(lead)}"
         )
+        if lead.id in self.pending_replies:
+            status += "; новый черновик не сохранен"
         if lead.last_error:
             status += f"; ошибка: {lead.last_error}"
         self.lead_status_var.set(status)
         self.summary_text.delete("1.0", END)
         self.summary_text.insert("1.0", _lead_details_text(lead))
         self.reply_text.delete("1.0", END)
-        self.reply_text.insert("1.0", lead.draft_reply)
+        self.reply_text.insert("1.0", self.pending_replies.get(lead.id, lead.draft_reply))
         self._load_lead_attachments(lead)
 
     def save_lead_edits(self) -> None:
@@ -442,6 +454,69 @@ class LeadFunnelGui:
         if lead is None:
             return
         self._run_lead_action("Открытие заказа", lambda: self._open_kwork_lead(lead), lead_id=lead.id)
+
+    def regenerate_selected_reply(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        if self.reply_regeneration_in_flight:
+            messagebox.showinfo("Пересборка отклика", "Пересборка отклика уже выполняется.")
+            return
+        try:
+            title = self.lead_title_var.get().strip() or _lead_title(lead)
+            if not title or _is_placeholder_lead_title(title):
+                raise ValueError("Название заказа обязательно")
+            days = _parse_optional_int(self.lead_days_var.get(), "Срок") or _extract_days(lead) or 3
+        except ValueError as exc:
+            messagebox.showerror("Ошибка", str(exc))
+            return
+        attachments = self._attachments_for_lead(lead)
+        context = _reply_context_from_lead(lead, title=title, days=days, attachments=attachments)
+        seed_reply = self.reply_text.get("1.0", END).strip()
+        config = load_config()
+        self.reply_regeneration_in_flight = True
+        self.regenerate_reply_button.config(state=DISABLED)
+        self.status_var.set(f"Пересборка отклика #{lead.id}: выполняется")
+        self.write_log(f"=== Пересборка отклика #{lead.id}: старт ===\n")
+        threading.Thread(
+            target=self._regenerate_reply_thread,
+            args=(lead.id, context, seed_reply, config.deepseek_api_key, config.deepseek_model),
+            daemon=True,
+        ).start()
+
+    def _regenerate_reply_thread(
+        self,
+        lead_id: int,
+        context: ReplyDraftContext,
+        seed_reply: str,
+        api_key: str,
+        model: str,
+    ) -> None:
+        try:
+            reply = compose_customer_reply(context, seed_reply, api_key=api_key, model=model)
+        except Exception as exc:
+            self.write_log(f"=== Пересборка отклика #{lead_id}: ошибка: {exc} ===\n")
+            self.root.after(0, lambda: self.status_var.set(f"Пересборка отклика #{lead_id}: ошибка"))
+        else:
+            self.write_log(f"=== Пересборка отклика #{lead_id}: черновик готов ===\n")
+            self.root.after(0, lambda: self._apply_regenerated_reply(lead_id, reply))
+        finally:
+            self.root.after(0, self._finish_reply_regeneration)
+
+    def _apply_regenerated_reply(self, lead_id: int, reply: str) -> None:
+        clean_reply = reply.strip()
+        if not clean_reply:
+            self.write_log(f"=== Пересборка отклика #{lead_id}: пустой результат ===\n")
+            return
+        self.pending_replies[lead_id] = clean_reply
+        if self.current_lead_id == lead_id:
+            self.reply_text.delete("1.0", END)
+            self.reply_text.insert("1.0", clean_reply)
+            self.lead_status_var.set(f"Лид #{lead_id}: новый черновик готов, не сохранен.")
+
+    def _finish_reply_regeneration(self) -> None:
+        self.reply_regeneration_in_flight = False
+        self.regenerate_reply_button.config(state=NORMAL)
 
     def open_selected_lead_from_url(self, _event=None) -> str:
         self.open_selected_lead()
@@ -607,6 +682,7 @@ class LeadFunnelGui:
             price_rub=payload["price"],
             days=payload["days"],
         )
+        self.pending_replies.pop(lead.id, None)
 
     def _selected_lead_id(self) -> int | None:
         selected = self.leads_table.selection()
@@ -810,6 +886,12 @@ class LeadFunnelGui:
     def _load_lead_attachments(self, lead: Lead) -> None:
         self.attachment_rows.clear()
         self.attachments_table.delete(*self.attachments_table.get_children())
+        attachments = self._attachments_for_lead(lead)
+        for attachment in attachments:
+            item_id = self.attachments_table.insert("", END, values=_attachment_row_values(attachment))
+            self.attachment_rows[item_id] = attachment
+
+    def _attachments_for_lead(self, lead: Lead) -> list[LeadAttachment]:
         try:
             attachments = self._storage().list_lead_attachments(lead.id)
         except Exception as exc:
@@ -817,9 +899,7 @@ class LeadFunnelGui:
             attachments = []
         if not attachments:
             attachments = _fallback_attachments_from_summary(lead)
-        for attachment in attachments:
-            item_id = self.attachments_table.insert("", END, values=_attachment_row_values(attachment))
-            self.attachment_rows[item_id] = attachment
+        return attachments
 
     def _selected_attachment(self) -> LeadAttachment | None:
         selected = self.attachments_table.selection()
@@ -1083,6 +1163,27 @@ def _lead_task_summary(lead: Lead) -> str:
         if clean.startswith("Задача:"):
             return clean.removeprefix("Задача:").strip() or _lead_title(lead)
     return _lead_title(lead) or "вашу задачу"
+
+
+def _reply_context_from_lead(
+    lead: Lead,
+    title: str,
+    days: int,
+    attachments: list[LeadAttachment],
+) -> ReplyDraftContext:
+    attachment_context = "\n".join(
+        f"{attachment.label}: {(attachment.summary or attachment.status).strip()}"
+        for attachment in attachments
+        if attachment.label.strip() and (attachment.summary or attachment.status).strip()
+    )
+    source_text = "\n\n".join(part for part in (lead.post_text.strip(), lead.summary.strip()) if part)
+    return ReplyDraftContext(
+        title=title,
+        task_summary=_lead_task_summary(lead),
+        source_text=source_text,
+        attachment_context=attachment_context,
+        estimated_days=max(1, days),
+    )
 
 
 def build_lead_row_values(lead: Lead) -> tuple:

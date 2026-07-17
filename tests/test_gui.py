@@ -17,6 +17,7 @@ from app.gui import (
     _format_datetime,
     _lead_title,
     _parse_optional_int,
+    _reply_context_from_lead,
     _should_refresh_after_process,
     direct_send_confirmation,
     lead_send_block_reason,
@@ -27,7 +28,7 @@ from app.gui import (
     read_env_values,
     update_env_values,
 )
-from app.storage import Lead
+from app.storage import Lead, LeadAttachment
 
 
 def test_build_app_command_runs_module_with_src_pythonpath(tmp_path, monkeypatch):
@@ -72,6 +73,185 @@ def test_gui_sender_passes_live_response_limit_to_kwork_sender(monkeypatch):
 
     assert captured["max_responses"] == 5
     assert captured["cookie"] == "session=opaque"
+
+
+def test_reply_context_for_regeneration_uses_selected_terms_and_attachment_reports():
+    lead = Lead(
+        id=23,
+        post_id=9,
+        score=82,
+        summary="Задача: Исправить форму заявки\nСрок: 3 дн.",
+        draft_reply="Старый черновик",
+        contact="https://kwork.ru/projects/23/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/23/view",
+        post_text="На мобильном не отправляется форма заявки.",
+    )
+    attachment = LeadAttachment(
+        id=1,
+        lead_id=23,
+        label="ТЗ.pdf",
+        url="https://kwork.ru/files/tz.pdf",
+        local_path="C:/tmp/tz.pdf",
+        status="скачан, текст прочитан",
+        summary="Нужно проверить отправку формы на iPhone.",
+        kind="pdf",
+        opened_archive=False,
+        ocr_scanned=False,
+    )
+
+    context = _reply_context_from_lead(
+        lead,
+        title="Исправить форму заявки",
+        days=2,
+        attachments=[attachment],
+    )
+
+    assert context.title == "Исправить форму заявки"
+    assert context.estimated_days == 2
+    assert "На мобильном не отправляется" in context.source_text
+    assert "ТЗ.pdf" in context.attachment_context
+    assert "iPhone" in context.attachment_context
+
+
+def test_apply_regenerated_reply_keeps_draft_in_memory_until_save():
+    class Text:
+        def __init__(self):
+            self.value = "Старый текст"
+
+        def delete(self, *_args):
+            self.value = ""
+
+        def insert(self, _index, value):
+            self.value = value
+
+    class Value:
+        def __init__(self):
+            self.value = ""
+
+        def set(self, value):
+            self.value = value
+
+    dummy = type(
+        "DummyGui",
+        (),
+        {
+            "current_lead_id": 23,
+            "pending_replies": {},
+            "reply_text": Text(),
+            "lead_status_var": Value(),
+        },
+    )()
+
+    LeadFunnelGui._apply_regenerated_reply(dummy, 23, "Новый человеческий текст отклика.")
+
+    assert dummy.pending_replies == {23: "Новый человеческий текст отклика."}
+    assert dummy.reply_text.value == "Новый человеческий текст отклика."
+    assert "не сохранен" in dummy.lead_status_var.value
+
+
+def test_save_lead_payload_clears_pending_reply_after_storage_write():
+    calls = []
+
+    class FakeStorage:
+        def update_lead_proposal(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    lead = Lead(
+        id=24,
+        post_id=10,
+        score=82,
+        summary="Задача: Исправить форму",
+        draft_reply="Старый",
+        contact="https://kwork.ru/projects/24/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/24/view",
+    )
+    dummy = type(
+        "DummyGui",
+        (),
+        {"pending_replies": {24: "Новый текст"}, "_storage": lambda self: FakeStorage()},
+    )()
+
+    LeadFunnelGui._save_lead_payload(
+        dummy,
+        lead,
+        {"reply": "Новый текст", "title": "Исправить форму", "price": 3000, "days": 2},
+    )
+
+    assert calls
+    assert dummy.pending_replies == {}
+
+
+def test_regeneration_worker_only_applies_pending_draft_without_sending_or_storage(monkeypatch):
+    import app.gui as gui
+
+    class Text:
+        def __init__(self):
+            self.value = ""
+
+        def delete(self, *_args):
+            self.value = ""
+
+        def insert(self, _index, value):
+            self.value = value
+
+    class Value:
+        def __init__(self):
+            self.value = ""
+
+        def set(self, value):
+            self.value = value
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    class Button:
+        def config(self, **kwargs):
+            self.kwargs = kwargs
+
+    dummy = type(
+        "DummyGui",
+        (),
+        {
+            "root": Root(),
+            "current_lead_id": 25,
+            "pending_replies": {},
+            "reply_text": Text(),
+            "lead_status_var": Value(),
+            "regenerate_reply_button": Button(),
+            "reply_regeneration_in_flight": True,
+            "write_log": lambda self, _text: None,
+            "_apply_regenerated_reply": lambda self, lead_id, reply: LeadFunnelGui._apply_regenerated_reply(
+                self, lead_id, reply
+            ),
+            "_finish_reply_regeneration": lambda self: LeadFunnelGui._finish_reply_regeneration(self),
+        },
+    )()
+    context = _reply_context_from_lead(
+        Lead(
+            id=25,
+            post_id=11,
+            score=82,
+            summary="Задача: Исправить форму",
+            draft_reply="Старый текст",
+            contact="https://kwork.ru/projects/25/view",
+            status="emailed",
+            post_url="https://kwork.ru/projects/25/view",
+        ),
+        title="Исправить форму",
+        days=2,
+        attachments=[],
+    )
+    monkeypatch.setattr(gui, "compose_customer_reply", lambda *args, **kwargs: "Новый текст без цены.")
+
+    LeadFunnelGui._regenerate_reply_thread(dummy, 25, context, "Старый текст", "sk-test", "deepseek-chat")
+
+    assert dummy.pending_replies == {25: "Новый текст без цены."}
+    assert dummy.reply_text.value == "Новый текст без цены."
+    assert dummy.reply_regeneration_in_flight is False
+    assert dummy.regenerate_reply_button.kwargs == {"state": "normal"}
 
 
 def test_build_script_command_uses_cmd_runner(tmp_path):

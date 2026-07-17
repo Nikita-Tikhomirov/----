@@ -27,7 +27,7 @@
 - Produces `_reply_context_from_lead(lead, title, days, attachments)` and
   `pending_replies: dict[int, str]` behavior.
 
-- [ ] **Step 1: Write failing helper tests**
+- [x] **Step 1: Write failing helper tests**
 
 ```python
 context = _reply_context_from_lead(lead, "Исправить форму", 2, [attachment])
@@ -36,13 +36,13 @@ assert "ТЗ.pdf" in context.attachment_context
 assert context.estimated_days == 2
 ```
 
-- [ ] **Step 2: Run test to confirm the missing helper failure**
+- [x] **Step 2: Run test to confirm the missing helper failure**
 
 Run: `python -m pytest tests/test_gui.py -q`
 
-- [ ] **Step 3: Add the minimal context helper**
+- [x] **Step 3: Add the minimal context helper**
 
-- [ ] **Step 4: Run focused helper tests**
+- [x] **Step 4: Run focused helper tests**
 
 Run: `python -m pytest tests/test_gui.py -q`
 
@@ -57,7 +57,7 @@ Run: `python -m pytest tests/test_gui.py -q`
   worker; `_apply_regenerated_reply(lead_id, reply)` only changes the pending
   in-memory editor state.
 
-- [ ] **Step 1: Write failing no-send action tests**
+- [x] **Step 1: Write failing no-send action tests**
 
 ```python
 LeadFunnelGui._apply_regenerated_reply(dummy, lead.id, "Новый текст")
@@ -65,15 +65,15 @@ assert dummy.pending_replies[lead.id] == "Новый текст"
 assert storage_writes == []
 ```
 
-- [ ] **Step 2: Run test to confirm the missing method failure**
+- [x] **Step 2: Run test to confirm the missing method failure**
 
 Run: `python -m pytest tests/test_gui.py -q`
 
-- [ ] **Step 3: Add the button, worker, error path, and pending display**
+- [x] **Step 3: Add the button, worker, error path, and pending display**
 
-- [ ] **Step 4: Clear a pending reply only after `_save_lead_payload` writes it**
+- [x] **Step 4: Clear a pending reply only after `_save_lead_payload` writes it**
 
-- [ ] **Step 5: Run focused GUI tests**
+- [x] **Step 5: Run focused GUI tests**
 
 Run: `python -m pytest tests/test_gui.py -q`
 
@@ -83,9 +83,9 @@ Run: `python -m pytest tests/test_gui.py -q`
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-07-17-gui-reply-regeneration.md`
 
-- [ ] **Step 1: Document that regeneration is preview-only until Save or Send**
+- [x] **Step 1: Document that regeneration is preview-only until Save or Send**
 
-- [ ] **Step 2: Run full verification**
+- [x] **Step 2: Run full verification**
 
 Run: `python -m pytest -q`
 
