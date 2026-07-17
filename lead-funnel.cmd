@@ -1,7 +1,9 @@
 @echo off
 setlocal
+chcp 65001 >nul
 cd /d "%~dp0"
 set "PYTHONPATH=%CD%\src"
+set "PYTHONIOENCODING=utf-8"
 
 if "%~1"=="" (
   echo.

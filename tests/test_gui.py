@@ -54,6 +54,13 @@ def test_build_script_command_uses_cmd_runner(tmp_path):
     assert command == ["cmd", "/c", str(script)]
 
 
+def test_terminal_launcher_forces_utf8_for_russian_logs():
+    launcher = (Path(__file__).resolve().parents[1] / "lead-funnel.cmd").read_text(encoding="utf-8")
+
+    assert 'set "PYTHONIOENCODING=utf-8"' in launcher
+    assert "PYTHONUTF8" not in launcher
+
+
 def test_kwork_browser_script_does_not_touch_regular_chrome_profile():
     script = (Path(__file__).resolve().parents[1] / "start-kwork-browser.cmd").read_text(encoding="utf-8")
 
