@@ -514,11 +514,59 @@ def test_direct_send_blocks_second_click_while_first_send_is_running():
     assert lead_send_block_reason(lead, in_flight_lead_ids={21}) == "Отправка этого лида уже выполняется."
 
 
+def test_gui_direct_send_submits_kwork_reply_and_marks_lead_sent():
+    lead = Lead(
+        id=22,
+        post_id=10,
+        score=82,
+        summary="Лендинг",
+        draft_reply="Здравствуйте! Сделаю лендинг.",
+        contact="https://kwork.ru/projects/22/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/22/view",
+    )
+    sender_calls = []
+    sent_marks = []
+
+    class Sender:
+        def send_reply(self, contact, text, *, price_rub, days, title, submit):
+            sender_calls.append((contact, text, price_rub, days, title, submit))
+            return "kwork-project-22"
+
+    class Storage:
+        def mark_sent(self, lead_id, contact, message_id):
+            sent_marks.append((lead_id, contact, message_id))
+
+    gui = SimpleNamespace(_sender=lambda: Sender(), _storage=lambda: Storage())
+    payload = {
+        "reply": "Здравствуйте! Возьму в работу лендинг и проверю форму.",
+        "price": 12000,
+        "days": 3,
+        "title": "Сделать лендинг",
+    }
+
+    result = LeadFunnelGui._send_lead_now(gui, lead, payload)
+
+    assert result == "kwork-project-22"
+    assert sender_calls == [
+        (
+            "https://kwork.ru/projects/22/view",
+            "Здравствуйте! Возьму в работу лендинг и проверю форму.",
+            12000,
+            3,
+            "Сделать лендинг",
+            True,
+        )
+    ]
+    assert sent_marks == [(22, "https://kwork.ru/projects/22/view", "kwork-project-22")]
+
+
 def test_gui_names_mail_check_and_direct_submission_actions_clearly():
     source = (Path(__file__).resolve().parents[1] / "src" / "app" / "gui.py").read_text(encoding="utf-8")
 
     assert 'text="Проверить почту"' in source
     assert 'text="OK и отправить отклик"' in source
+    assert "command=self.send_selected_lead" in source
 
 
 def test_primary_lead_actions_are_created_before_long_lead_details():

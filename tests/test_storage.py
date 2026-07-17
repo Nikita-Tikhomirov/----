@@ -307,6 +307,7 @@ def test_list_leads_returns_latest_first_with_post_metadata_and_sent_state(tmp_p
     assert leads[0].channel == "kwork-web"
     assert leads[0].message_id == 101
     assert leads[0].posted_at == "2026-05-04T11:00:00+03:00"
+    assert leads[1].status == "sent"
     assert leads[1].sent_at
 
 

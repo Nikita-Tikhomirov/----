@@ -2,6 +2,8 @@ import io
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from app.attachments import ArchiveSelection, build_attachment_context, build_attachment_report, parse_attachment
 from app.attachments import _cookie_header_from_cdp_cookies
 
@@ -306,6 +308,285 @@ def test_build_attachment_context_opens_zip_and_reads_inner_text(monkeypatch):
     assert "Статус: скачан, архив открыт" in context
     assert "brief.txt: прочитан" in context
     assert "Нужно сверстать лендинг" in context
+
+
+def test_build_attachment_context_opens_rar_and_reads_inner_text(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake rar bytes",
+    )
+    monkeypatch.setattr("app.attachments._rar_executable", lambda: Path("C:/WinRAR/UnRAR.exe"), raising=False)
+    monkeypatch.setattr("app.attachments._winrar_executable", lambda: None, raising=False)
+    monkeypatch.setattr("app.attachments._list_rar_entries", lambda *_args: ("brief.txt",), raising=False)
+    monkeypatch.setattr(
+        "app.attachments._read_rar_entry",
+        lambda _exe, _archive, name, _limit: "Нужно сверстать лендинг и форму".encode("utf-8") if name == "brief.txt" else b"",
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("tz.rar: https://kwork.ru/files/tz.rar",),
+        cookie="",
+    )
+
+    assert "Статус: скачан, архив открыт" in context
+    assert "brief.txt: прочитан" in context
+    assert "Нужно сверстать лендинг" in context
+
+
+def test_build_attachment_context_opens_7z_and_reads_inner_text(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake 7z bytes",
+    )
+    monkeypatch.setattr("app.attachments._seven_zip_executable", lambda: Path("C:/7-Zip/7z.exe"), raising=False)
+    monkeypatch.setattr("app.attachments._winrar_executable", lambda: None, raising=False)
+    monkeypatch.setattr("app.attachments._list_7z_entries", lambda *_args: ("brief.txt",), raising=False)
+    monkeypatch.setattr(
+        "app.attachments._read_7z_entry",
+        lambda _exe, _archive, name, _limit: "Нужно настроить форму заявки".encode("utf-8") if name == "brief.txt" else b"",
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("tz.7z: https://kwork.ru/files/tz.7z",),
+        cookie="",
+    )
+
+    assert "Статус: скачан, архив открыт" in context
+    assert "brief.txt: прочитан" in context
+    assert "Нужно настроить форму" in context
+
+
+def test_build_attachment_context_reports_missing_rar_tool(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake rar bytes",
+    )
+    monkeypatch.setattr("app.attachments._rar_executable", lambda: None, raising=False)
+    monkeypatch.setattr("app.attachments._winrar_executable", lambda: None, raising=False)
+
+    context = build_attachment_context(
+        ("tz.rar: https://kwork.ru/files/tz.rar",),
+        cookie="",
+    )
+
+    assert "Статус: скачан, архив не открыт" in context
+    assert "UnRAR/RAR не найден" in context
+
+
+def test_build_attachment_context_skips_over_limit_winrar_entry(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake rar bytes",
+    )
+    monkeypatch.setattr("app.attachments._rar_executable", lambda: Path("C:/WinRAR/UnRAR.exe"), raising=False)
+    monkeypatch.setattr("app.attachments._winrar_executable", lambda: None, raising=False)
+    monkeypatch.setattr("app.attachments._list_rar_entries", lambda *_args: ("brief.txt",), raising=False)
+    monkeypatch.setattr(
+        "app.attachments._read_rar_entry",
+        lambda *_args: b"x" * 11,
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("tz.rar: https://kwork.ru/files/tz.rar",),
+        cookie="",
+        max_bytes=10,
+    )
+
+    assert "brief.txt: пропущен, файл больше лимита 10 байт" in context
+
+
+def test_build_attachment_report_marks_password_protected_archive_not_opened(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake rar bytes",
+    )
+    monkeypatch.setattr("app.attachments._rar_executable", lambda: Path("C:/WinRAR/UnRAR.exe"), raising=False)
+    monkeypatch.setattr("app.attachments._list_rar_entries", lambda *_args: ("brief.txt",), raising=False)
+    monkeypatch.setattr(
+        "app.attachments._read_rar_entry",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("The specified password is incorrect")),
+        raising=False,
+    )
+
+    result = build_attachment_report(
+        ("tz.rar: https://kwork.ru/files/tz.rar",),
+        cookie="",
+    )
+
+    assert result.reports[0].status == "скачан, архив не открыт"
+    assert result.reports[0].opened_archive is False
+    assert "password is incorrect" in result.reports[0].summary
+
+
+def test_rar_listing_keeps_a_bounded_number_of_entry_names(monkeypatch):
+    from app import attachments
+
+    listing = "\n".join(f"file-{index}.txt" for index in range(300)).encode("utf-8")
+
+    class FakeResult:
+        returncode = 0
+        stdout = listing
+        stderr = b""
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdout = io.BytesIO(listing)
+            self.stderr = io.BytesIO()
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+    monkeypatch.setattr(attachments.subprocess, "run", lambda *args, **kwargs: FakeResult())
+    monkeypatch.setattr(attachments.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+    entries = attachments._list_rar_entries(Path("C:/WinRAR/UnRAR.exe"), Path("C:/tmp/tz.rar"))
+
+    assert len(entries) == 200
+    assert entries[0] == "file-0.txt"
+    assert entries[-1] == "file-199.txt"
+
+
+def test_rar_entry_uses_one_combined_bounded_output_pipe(monkeypatch):
+    from app import attachments
+
+    captured = {}
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdout = io.BytesIO(b"brief text")
+            self.stderr = io.BytesIO()
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+    def fake_popen(command, stdout, stderr):
+        captured["command"] = command
+        captured["stdout"] = stdout
+        captured["stderr"] = stderr
+        return FakeProcess()
+
+    monkeypatch.setattr(attachments.subprocess, "Popen", fake_popen)
+
+    content = attachments._read_rar_entry(
+        Path("C:/WinRAR/UnRAR.exe"),
+        Path("C:/tmp/tz.rar"),
+        "brief.txt",
+        100,
+    )
+
+    assert content == b"brief text"
+    assert captured["stderr"] is attachments.subprocess.STDOUT
+
+
+def test_unrar_password_exit_code_becomes_readable_error():
+    from app import attachments
+
+    message = attachments._archive_tool_error_message("UnRAR", b"", b"", 11)
+
+    assert "парол" in message.lower()
+
+
+def test_7z_listing_parses_cp866_file_names_and_skips_directories(monkeypatch):
+    from app import attachments
+
+    listing = (
+        "Path = tz.7z\n"
+        "Type = 7z\n"
+        "\n"
+        "----------\n"
+        "Path = папка\\\n"
+        "Attributes = D\n"
+        "\n"
+        "Path = ТЗ.txt\n"
+        "Attributes = A\n"
+        "\n"
+    ).encode("cp866")
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdout = io.BytesIO(listing)
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+    monkeypatch.setattr(attachments.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+    entries = attachments._list_7z_entries(Path("C:/7-Zip/7z.exe"), Path("C:/tmp/tz.7z"))
+
+    assert entries == ("ТЗ.txt",)
+
+
+def test_rar_listing_rejects_output_larger_than_the_safe_limit(monkeypatch):
+    from app import attachments
+
+    class FakeProcess:
+        def __init__(self):
+            self.stdout = io.BytesIO(b"x" * (attachments.MAX_ARCHIVE_LIST_BYTES + 1))
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+    monkeypatch.setattr(attachments.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+    with pytest.raises(ValueError, match="список файлов больше лимита"):
+        attachments._list_rar_entries(Path("C:/WinRAR/UnRAR.exe"), Path("C:/tmp/tz.rar"))
+
+
+def test_external_archive_removes_temporary_file_after_listing_error(monkeypatch, tmp_path):
+    from app import attachments
+
+    original_mkstemp = attachments.tempfile.mkstemp
+
+    def create_test_temp_file(*args, **kwargs):
+        return original_mkstemp(dir=tmp_path, *args, **kwargs)
+
+    monkeypatch.setattr(attachments.tempfile, "mkstemp", create_test_temp_file)
+    monkeypatch.setattr(attachments, "_rar_executable", lambda: Path("C:/WinRAR/UnRAR.exe"))
+    monkeypatch.setattr(attachments, "_list_rar_entries", lambda *_args: (_ for _ in ()).throw(RuntimeError("bad archive")))
+
+    status, summary = attachments.inspect_attachment(
+        attachments.AttachmentRef("tz.rar", "tz.rar"),
+        b"fake rar bytes",
+    )
+
+    assert status == "скачан, архив не открыт"
+    assert "bad archive" in summary
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_build_attachment_report_saves_file_and_exposes_processing_flags(monkeypatch, tmp_path):

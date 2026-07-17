@@ -6,14 +6,17 @@ import json
 import logging
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import tempfile
+import threading
 import urllib.request
 import zipfile
 from base64 import b64encode
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import Request
 
@@ -23,6 +26,8 @@ TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".html", ".htm", ".json", ".xml"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z"}
 DEFAULT_TESSERACT_CMD = Path(r"D:\Tesseract-OCR\tesseract.exe")
+RAR_CANDIDATE_NAMES = ("UnRAR.exe", "Rar.exe", "UnRAR", "Rar")
+SEVEN_ZIP_CANDIDATE_NAMES = ("7z.exe", "7z")
 IMPORTANT_ARCHIVE_NAME_PARTS = (
     "тз",
     "tz",
@@ -38,6 +43,9 @@ IMPORTANT_ARCHIVE_NAME_PARTS = (
     "скрин",
     "форма",
 )
+PASSWORD_ERROR_MARKERS = ("password", "парол", "encrypted", "encryption", "шифр")
+MAX_ARCHIVE_LIST_ENTRIES = 200
+MAX_ARCHIVE_LIST_BYTES = 256_000
 WORD_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё]{3,}")
 
 
@@ -68,7 +76,7 @@ class AttachmentProcessingResult:
 @dataclass(frozen=True)
 class ArchiveEntryInfo:
     name: str
-    size: int
+    size: int | None
     kind: str
 
 
@@ -77,6 +85,14 @@ class ArchiveSelection:
     names: tuple[str, ...]
     used_ai: bool
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class ArchiveReadResult:
+    lines: tuple[str, ...]
+    selection: ArchiveSelection
+    password_protected: bool
+    has_read_content: bool
 
 
 def build_attachment_context(
@@ -698,27 +714,48 @@ def _extract_archive(
     openrouter_vision_mode: str,
 ) -> tuple[str, str]:
     ext = _extension(ref.url) or _extension(ref.label)
-    if ext != ".zip":
-        return "скачан, архив не открыт", "Автоматически открываются только ZIP-архивы; RAR/7Z пока нужно смотреть вручную."
     try:
-        lines, selection = _read_zip_archive(
-            ref,
-            content,
-            max_bytes=max_bytes,
-            lead_context=lead_context,
-            deepseek_api_key=deepseek_api_key,
-            deepseek_model=deepseek_model,
-            openrouter_api_key=openrouter_api_key,
-            openrouter_base_url=openrouter_base_url,
-            openrouter_vision_model=openrouter_vision_model,
-            openrouter_vision_mode=openrouter_vision_mode,
-        )
+        if ext == ".zip":
+            read_result = _read_zip_archive(
+                ref,
+                content,
+                max_bytes=max_bytes,
+                lead_context=lead_context,
+                deepseek_api_key=deepseek_api_key,
+                deepseek_model=deepseek_model,
+                openrouter_api_key=openrouter_api_key,
+                openrouter_base_url=openrouter_base_url,
+                openrouter_vision_model=openrouter_vision_model,
+                openrouter_vision_mode=openrouter_vision_mode,
+            )
+        elif ext in {".rar", ".7z"}:
+            read_result = _read_external_archive(
+                ref,
+                content,
+                max_bytes=max_bytes,
+                lead_context=lead_context,
+                deepseek_api_key=deepseek_api_key,
+                deepseek_model=deepseek_model,
+                openrouter_api_key=openrouter_api_key,
+                openrouter_base_url=openrouter_base_url,
+                openrouter_vision_model=openrouter_vision_model,
+                openrouter_vision_mode=openrouter_vision_mode,
+            )
+        else:
+            return "скачан, архив не открыт", "Тип архива не поддержан для автоматического чтения."
     except zipfile.BadZipFile:
         return "скачан, архив не открыт", "ZIP-архив поврежден или это не ZIP-файл."
+    except FileNotFoundError as exc:
+        return "скачан, архив не открыт", str(exc)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        archive_kind = ext.removeprefix(".").upper() or "Архив"
+        return "скачан, архив не открыт", f"{archive_kind}-архив не удалось открыть: {exc}"
+    if read_result.password_protected and not read_result.has_read_content:
+        return "скачан, архив не открыт", "\n".join(read_result.lines)
     status = "скачан, архив открыт"
-    if selection.used_ai:
-        status += ", AI выбрала файлы" if selection.names else ", AI не выбрала файлы"
-    return status, "\n".join(lines) or "ZIP-архив открыт, но подходящие файлы внутри не найдены."
+    if read_result.selection.used_ai:
+        status += ", AI выбрала файлы" if read_result.selection.names else ", AI не выбрала файлы"
+    return status, "\n".join(read_result.lines) or "Архив открыт, но подходящие файлы внутри не найдены."
 
 
 def _read_zip_archive(
@@ -733,65 +770,384 @@ def _read_zip_archive(
     openrouter_vision_model: str,
     openrouter_vision_mode: str,
     max_entries: int = 8,
-) -> tuple[list[str], ArchiveSelection]:
-    lines: list[str] = []
+) -> ArchiveReadResult:
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
         infos = [info for info in archive.infolist() if not info.is_dir()]
         entries = tuple(_archive_entry_info(info) for info in infos)
-        selection = select_archive_entries_with_deepseek(
+        info_by_name = {info.filename: info for info in infos}
+        return _read_archive_entries(
             ref,
             entries,
+            lambda entry, limit: _read_zip_entry(archive, info_by_name[entry.name], limit),
+            max_bytes=max_bytes,
             lead_context=lead_context,
-            api_key=deepseek_api_key,
-            model=deepseek_model,
+            deepseek_api_key=deepseek_api_key,
+            deepseek_model=deepseek_model,
+            openrouter_api_key=openrouter_api_key,
+            openrouter_base_url=openrouter_base_url,
+            openrouter_vision_model=openrouter_vision_model,
+            openrouter_vision_mode=openrouter_vision_mode,
             max_entries=max_entries,
         )
-        selected_names = set(selection.names)
-        if entries:
-            lines.append("Состав архива: " + ", ".join(_format_archive_entry(entry) for entry in entries[:20]))
-            if len(entries) > 20:
-                lines.append(f"Еще файлов в архиве: {len(entries) - 20}, список сокращен.")
-        if selection.used_ai:
-            picked = ", ".join(selection.names) if selection.names else "ничего"
-            reason = f"; причина: {selection.reason}" if selection.reason else ""
-            lines.append(f"AI выбрала файлы: {picked}{reason}")
-        else:
-            picked = ", ".join(selection.names) if selection.names else "ничего"
-            reason = f"; причина: {selection.reason}" if selection.reason else ""
-            lines.append(f"Выбраны файлы для чтения: {picked}{reason}")
 
-        info_by_name = {info.filename: info for info in infos}
-        for name in selection.names:
-            info = info_by_name.get(name)
-            if info is None:
-                continue
-            name = info.filename
-            if info.file_size > max_bytes:
-                lines.append(f"{name}: пропущен, файл больше лимита {max_bytes} байт")
-                continue
-            with archive.open(info) as file:
-                data = file.read(max_bytes + 1)
-            if len(data) > max_bytes:
-                lines.append(f"{name}: пропущен, файл больше лимита {max_bytes} байт")
-                continue
-            nested_ref = AttachmentRef(label=name, url=name)
-            status, extracted = inspect_attachment(
-                nested_ref,
-                data,
-                max_bytes=max_bytes,
-                openrouter_api_key=openrouter_api_key,
-                openrouter_base_url=openrouter_base_url,
-                openrouter_vision_model=openrouter_vision_model,
-                openrouter_vision_mode=openrouter_vision_mode,
+
+def _read_zip_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo, max_bytes: int) -> bytes:
+    with archive.open(info) as file:
+        return file.read(max_bytes + 1)
+
+
+def _read_external_archive(
+    ref: AttachmentRef,
+    content: bytes,
+    max_bytes: int,
+    lead_context: str,
+    deepseek_api_key: str,
+    deepseek_model: str,
+    openrouter_api_key: str,
+    openrouter_base_url: str,
+    openrouter_vision_model: str,
+    openrouter_vision_mode: str,
+    max_entries: int = 8,
+) -> ArchiveReadResult:
+    ext = _extension(ref.url) or _extension(ref.label)
+    if ext == ".rar":
+        executable = _rar_executable()
+        if executable is None:
+            raise FileNotFoundError("UnRAR/RAR не найден. Установите WinRAR или укажите путь в UNRAR_EXE.")
+        list_entries = _list_rar_entries
+        read_entry = _read_rar_entry
+    elif ext == ".7z":
+        executable = _seven_zip_executable()
+        if executable is None:
+            raise FileNotFoundError("7-Zip не найден. Установите 7-Zip или укажите путь в SEVEN_ZIP_EXE.")
+        list_entries = _list_7z_entries
+        read_entry = _read_7z_entry
+    else:
+        raise ValueError("для внешнего обработчика нужен RAR или 7Z-архив")
+
+    suffix = _extension(ref.url) or _extension(ref.label) or ".archive"
+    descriptor, archive_name = tempfile.mkstemp(prefix="kwork-archive-", suffix=suffix)
+    archive_path = Path(archive_name)
+    try:
+        with os.fdopen(descriptor, "wb") as archive_file:
+            archive_file.write(content)
+        entries = tuple(
+            ArchiveEntryInfo(name=name, size=None, kind=_archive_entry_kind(name))
+            for name in list_entries(executable, archive_path)
+        )
+        return _read_archive_entries(
+            ref,
+            entries,
+            lambda entry, limit: read_entry(executable, archive_path, entry.name, limit),
+            max_bytes=max_bytes,
+            lead_context=lead_context,
+            deepseek_api_key=deepseek_api_key,
+            deepseek_model=deepseek_model,
+            openrouter_api_key=openrouter_api_key,
+            openrouter_base_url=openrouter_base_url,
+            openrouter_vision_model=openrouter_vision_model,
+            openrouter_vision_mode=openrouter_vision_mode,
+            max_entries=max_entries,
+        )
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+
+def _read_archive_entries(
+    ref: AttachmentRef,
+    entries: tuple[ArchiveEntryInfo, ...],
+    read_entry: Callable[[ArchiveEntryInfo, int], bytes],
+    *,
+    max_bytes: int,
+    lead_context: str,
+    deepseek_api_key: str,
+    deepseek_model: str,
+    openrouter_api_key: str,
+    openrouter_base_url: str,
+    openrouter_vision_model: str,
+    openrouter_vision_mode: str,
+    max_entries: int,
+) -> ArchiveReadResult:
+    lines: list[str] = []
+    password_protected = False
+    has_read_content = False
+    selection = select_archive_entries_with_deepseek(
+        ref,
+        entries,
+        lead_context=lead_context,
+        api_key=deepseek_api_key,
+        model=deepseek_model,
+        max_entries=max_entries,
+    )
+    selected_names = set(selection.names)
+    if entries:
+        lines.append("Состав архива: " + ", ".join(_format_archive_entry(entry) for entry in entries[:20]))
+        if len(entries) > 20:
+            lines.append(f"Еще файлов в архиве: {len(entries) - 20}, список сокращен.")
+    picked = ", ".join(selection.names) if selection.names else "ничего"
+    reason = f"; причина: {selection.reason}" if selection.reason else ""
+    if selection.used_ai:
+        lines.append(f"AI выбрала файлы: {picked}{reason}")
+    else:
+        lines.append(f"Выбраны файлы для чтения: {picked}{reason}")
+
+    entry_by_name = {entry.name: entry for entry in entries}
+    for name in selection.names:
+        entry = entry_by_name.get(name)
+        if entry is None:
+            continue
+        if entry.size is not None and entry.size > max_bytes:
+            lines.append(f"{entry.name}: пропущен, файл больше лимита {max_bytes} байт")
+            continue
+        try:
+            data = read_entry(entry, max_bytes)
+        except ValueError as exc:
+            password_protected = password_protected or _is_password_error(exc)
+            lines.append(f"{entry.name}: пропущен, {exc}")
+            continue
+        except Exception as exc:
+            password_protected = password_protected or _is_password_error(exc)
+            lines.append(f"{entry.name}: не прочитан, {exc}")
+            continue
+        if len(data) > max_bytes:
+            lines.append(f"{entry.name}: пропущен, файл больше лимита {max_bytes} байт")
+            continue
+        has_read_content = True
+        nested_ref = AttachmentRef(label=entry.name, url=entry.name)
+        status, extracted = inspect_attachment(
+            nested_ref,
+            data,
+            max_bytes=max_bytes,
+            openrouter_api_key=openrouter_api_key,
+            openrouter_base_url=openrouter_base_url,
+            openrouter_vision_model=openrouter_vision_model,
+            openrouter_vision_mode=openrouter_vision_mode,
+        )
+        nested_status = status.removeprefix("скачан, ")
+        lines.append(f"{entry.name}: {nested_status}\n{_shorten(extracted, 1500)}")
+    skipped = [entry.name for entry in entries if entry.name not in selected_names]
+    if skipped:
+        lines.append(f"Не читались по выбору AI/fallback: {', '.join(skipped[:12])}")
+        if len(skipped) > 12:
+            lines.append(f"Еще пропущено файлов: {len(skipped) - 12}.")
+    if password_protected and not has_read_content:
+        lines.append("Архив защищен паролем: содержимое не прочитано.")
+    return ArchiveReadResult(
+        lines=tuple(lines),
+        selection=selection,
+        password_protected=password_protected,
+        has_read_content=has_read_content,
+    )
+
+
+def _is_password_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in PASSWORD_ERROR_MARKERS)
+
+
+def _rar_executable() -> Path | None:
+    candidates: list[Path] = []
+    configured = os.getenv("UNRAR_EXE", "").strip().strip('"')
+    if configured:
+        candidates.append(Path(configured))
+    for name in RAR_CANDIDATE_NAMES:
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+    for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+        root = os.getenv(variable, "").strip()
+        if root:
+            candidates.extend(
+                [
+                    Path(root) / "WinRAR" / "UnRAR.exe",
+                    Path(root) / "WinRAR" / "Rar.exe",
+                ]
             )
-            nested_status = status.removeprefix("скачан, ")
-            lines.append(f"{name}: {nested_status}\n{_shorten(extracted, 1500)}")
-        skipped = [entry.name for entry in entries if entry.name not in selected_names]
-        if skipped:
-            lines.append(f"Не читались по выбору AI/fallback: {', '.join(skipped[:12])}")
-            if len(skipped) > 12:
-                lines.append(f"Еще пропущено файлов: {len(skipped) - 12}.")
-    return lines, selection
+    return _first_existing_executable(candidates)
+
+
+def _seven_zip_executable() -> Path | None:
+    candidates: list[Path] = []
+    configured = os.getenv("SEVEN_ZIP_EXE", "").strip().strip('"')
+    if configured:
+        candidates.append(Path(configured))
+    for name in SEVEN_ZIP_CANDIDATE_NAMES:
+        found = shutil.which(name)
+        if found:
+            candidates.append(Path(found))
+    for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+        root = os.getenv(variable, "").strip()
+        if root:
+            candidates.extend(
+                [
+                    Path(root) / "7-Zip" / "7z.exe",
+                    Path(root) / "NVIDIA Corporation" / "NVIDIA App" / "7z.exe",
+                ]
+            )
+    return _first_existing_executable(candidates)
+
+
+def _first_existing_executable(candidates: list[Path]) -> Path | None:
+    seen: set[Path] = set()
+    for candidate in candidates:
+        normalized = candidate.resolve(strict=False)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if normalized.is_file():
+            return normalized
+    return None
+
+
+def _list_rar_entries(executable: Path, archive_path: Path) -> tuple[str, ...]:
+    output = _run_bounded_archive_command(
+        [str(executable), "lb", "-y", "-p-", str(archive_path)],
+        max_bytes=MAX_ARCHIVE_LIST_BYTES,
+        tool_name="UnRAR",
+        limit_error=f"список файлов больше лимита {MAX_ARCHIVE_LIST_BYTES} байт",
+    )
+    names: list[str] = []
+    for raw_name in _decode_archive_tool_output(output).splitlines():
+        name = raw_name.strip()
+        if not name or name.endswith(("/", "\\")) or name.startswith("-"):
+            continue
+        if name not in names:
+            names.append(name)
+        if len(names) >= MAX_ARCHIVE_LIST_ENTRIES:
+            break
+    return tuple(names)
+
+
+def _read_rar_entry(executable: Path, archive_path: Path, name: str, max_bytes: int) -> bytes:
+    return _read_archive_entry_with_process(
+        [str(executable), "p", "-inul", "-y", "-p-", str(archive_path), name],
+        name=name,
+        max_bytes=max_bytes,
+        tool_name="UnRAR",
+    )
+
+
+def _list_7z_entries(executable: Path, archive_path: Path) -> tuple[str, ...]:
+    output = _run_bounded_archive_command(
+        [str(executable), "l", "-slt", "-bd", "-p-", str(archive_path)],
+        max_bytes=MAX_ARCHIVE_LIST_BYTES,
+        tool_name="7-Zip",
+        limit_error=f"список файлов больше лимита {MAX_ARCHIVE_LIST_BYTES} байт",
+    )
+    names: list[str] = []
+    properties: dict[str, str] = {}
+    inside_entries = False
+    for raw_line in _decode_archive_tool_output(output).splitlines():
+        line = raw_line.strip()
+        if line == "----------":
+            inside_entries = True
+            properties = {}
+            continue
+        if not inside_entries:
+            continue
+        if not line:
+            _append_7z_entry_name(names, properties)
+            properties = {}
+            if len(names) >= MAX_ARCHIVE_LIST_ENTRIES:
+                break
+            continue
+        key, separator, value = line.partition(" = ")
+        if separator:
+            properties[key] = value
+    if len(names) < MAX_ARCHIVE_LIST_ENTRIES:
+        _append_7z_entry_name(names, properties)
+    return tuple(names[:MAX_ARCHIVE_LIST_ENTRIES])
+
+
+def _append_7z_entry_name(names: list[str], properties: dict[str, str]) -> None:
+    name = properties.get("Path", "").strip()
+    attributes = properties.get("Attributes", "")
+    if not name or name.endswith(("/", "\\")) or attributes.startswith("D") or name.startswith("-"):
+        return
+    if name not in names:
+        names.append(name)
+
+
+def _read_7z_entry(executable: Path, archive_path: Path, name: str, max_bytes: int) -> bytes:
+    return _read_archive_entry_with_process(
+        [str(executable), "x", "-so", "-bd", "-y", "-p-", str(archive_path), "--", name],
+        name=name,
+        max_bytes=max_bytes,
+        tool_name="7-Zip",
+    )
+
+
+def _read_archive_entry_with_process(command: list[str], name: str, max_bytes: int, tool_name: str) -> bytes:
+    if name.startswith("-"):
+        raise ValueError("некорректное имя файла в архиве")
+    return _run_bounded_archive_command(
+        command,
+        max_bytes=max_bytes,
+        tool_name=tool_name,
+        limit_error=f"файл больше лимита {max_bytes} байт",
+    )
+
+
+def _run_bounded_archive_command(
+    command: list[str],
+    *,
+    max_bytes: int,
+    tool_name: str,
+    limit_error: str,
+) -> bytes:
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    timed_out = False
+
+    def terminate() -> None:
+        nonlocal timed_out
+        timed_out = True
+        if process.poll() is None:
+            process.kill()
+
+    timer = threading.Timer(45, terminate)
+    timer.daemon = True
+    timer.start()
+    try:
+        assert process.stdout is not None
+        data = process.stdout.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            terminate()
+            raise ValueError(limit_error)
+        returncode = process.wait(timeout=5)
+    finally:
+        timer.cancel()
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()
+    if timed_out:
+        raise RuntimeError(f"{tool_name} превысил лимит времени при чтении файла")
+    if returncode != 0:
+        raise RuntimeError(_archive_tool_error_message(tool_name, data, b"", returncode))
+    return data
+
+
+def _decode_archive_tool_output(content: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "cp866", "cp1251"):
+        try:
+            return content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return content.decode("utf-8", errors="replace")
+
+
+def _archive_tool_error_message(tool_name: str, stderr: bytes, stdout: bytes, returncode: int) -> str:
+    message = _decode_archive_tool_output(stderr or stdout).strip()
+    if message:
+        return _shorten(message, 500)
+    if tool_name == "UnRAR" and returncode == 11:
+        return "архив защищен паролем или указан неверный пароль"
+    return f"{tool_name} завершился с кодом {returncode}"
 
 
 def _archive_entry_info(info: zipfile.ZipInfo) -> ArchiveEntryInfo:
@@ -814,7 +1170,11 @@ def _archive_entry_kind(name: str) -> str:
 
 
 def _format_archive_entry(entry: ArchiveEntryInfo) -> str:
-    return f"{entry.name} ({entry.kind}, {entry.size} B)"
+    return f"{entry.name} ({entry.kind}, {_archive_entry_size_text(entry)})"
+
+
+def _archive_entry_size_text(entry: ArchiveEntryInfo) -> str:
+    return f"{entry.size} B" if entry.size is not None else "размер неизвестен"
 
 
 def select_archive_entries_with_deepseek(
@@ -851,9 +1211,11 @@ def _ask_deepseek_for_archive_entries(
 ) -> tuple[tuple[str, ...], str]:
     from openai import OpenAI
 
-    entry_lines = "\n".join(f"- {entry.name} | {entry.kind} | {entry.size} B" for entry in entries[:60])
+    entry_lines = "\n".join(
+        f"- {entry.name} | {entry.kind} | {_archive_entry_size_text(entry)}" for entry in entries[:60]
+    )
     prompt = (
-        "Выбери файлы из ZIP-архива Kwork-заказа, которые нужно прочитать перед оценкой заказа и откликом.\n"
+        "Выбери файлы из архива Kwork-заказа, которые нужно прочитать перед оценкой заказа и откликом.\n"
         "Выбирай только ТЗ, brief, описания, макеты, скриншоты, PDF/DOCX/TXT/HTML/CSV/JSON/XML. "
         "Не выбирай мусор, системные файлы, дубли и явно нерелевантные заметки. "
         f"Верни JSON строго вида {{\"read\": [\"filename\"], \"reason\": \"кратко\"}}. "
