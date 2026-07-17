@@ -143,7 +143,7 @@ def scan_once(
             project_title = project_info.title
             project_description = project_info.description
             project_page_text = project_info.page_text
-            if not project_info.has_response_count and post.channel != "kwork-web":
+            if not project_info.has_response_count:
                 logger.info(
                     "Rejected post %s/%s: cannot verify Kwork responses (%s)",
                     post.channel,

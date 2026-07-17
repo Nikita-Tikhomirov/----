@@ -69,28 +69,27 @@ class KworkWebSource:
         return self.enable_replies
 
     def fetch_recent_posts(self) -> list[TelegramPost]:
-        html_text = ""
-        if self.use_browser:
+        try:
+            html_text = _fetch_html(self.projects_url, self.timeout_seconds, self.cookie)
+        except Exception as exc:
+            logger.warning("Failed to fetch Kwork projects page %s: %s", self.projects_url, exc)
+            html_text = ""
+        posts = parse_kwork_project_cards(html_text, max_responses=self.max_responses, base_url=self.projects_url)
+        if not posts and self.use_browser:
             try:
-                html_text = _fetch_rendered_html(
+                rendered_html = _fetch_rendered_html(
                     self.projects_url,
                     self.cdp_url,
                     self.timeout_seconds,
                     self.browser_profile_dir,
                 )
+                posts = parse_kwork_project_cards(
+                    rendered_html,
+                    max_responses=self.max_responses,
+                    base_url=self.projects_url,
+                )
             except Exception as exc:
                 logger.warning("Failed to fetch rendered Kwork projects page via Chrome: %s", exc)
-        try:
-            if not html_text:
-                html_text = _fetch_html(self.projects_url, self.timeout_seconds, self.cookie)
-        except Exception as exc:
-            logger.warning("Failed to fetch Kwork projects page %s: %s", self.projects_url, exc)
-            return []
-        posts = parse_kwork_project_cards(
-            html_text,
-            max_responses=self.max_responses,
-            base_url=self.projects_url,
-        )
         return posts[: self.max_posts]
 
     def send_message(
@@ -129,13 +128,16 @@ def parse_kwork_project_cards(
 ) -> list[TelegramPost]:
     posts: list[TelegramPost] = []
     seen_ids: set[int] = set()
-    for block in CARD_PATTERN.findall(html_text):
+    card_blocks = CARD_PATTERN.findall(html_text)
+    for block in card_blocks:
         post = _post_from_card(block, max_responses=max_responses, base_url=base_url)
         if post is None or post.message_id in seen_ids:
             continue
         seen_ids.add(post.message_id)
         posts.append(post)
-    return posts
+    if card_blocks:
+        return posts
+    return _posts_from_embedded_wants(html_text, base_url=base_url)
 
 
 def _post_from_card(block: str, max_responses: int, base_url: str) -> TelegramPost | None:
@@ -167,6 +169,54 @@ def _post_from_card(block: str, max_responses: int, base_url: str) -> TelegramPo
             ]
         ),
         posted_at="",
+    )
+
+
+def _posts_from_embedded_wants(html_text: str, base_url: str) -> list[TelegramPost]:
+    """Read Kwork's hydrated list when the SPA has not rendered want-card nodes."""
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r'"wantsListData"\s*:\s*', html_text):
+        try:
+            payload, _ = decoder.raw_decode(html_text, match.end())
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        items = payload.get("pagination", {}).get("data", [])
+        if not isinstance(items, list):
+            continue
+        posts = [post for item in items if (post := _post_from_embedded_want(item, base_url)) is not None]
+        return sorted(posts, key=lambda post: (bool(post.posted_at), post.posted_at), reverse=True)
+    return []
+
+
+def _post_from_embedded_want(item: object, base_url: str) -> TelegramPost | None:
+    if not isinstance(item, dict):
+        return None
+    if item.get("isWantActive") is False or str(item.get("status", "active")).lower() != "active":
+        return None
+    try:
+        project_id = int(item.get("id", 0))
+    except (TypeError, ValueError):
+        return None
+    if project_id <= 0:
+        return None
+    title = _clean_text(str(item.get("name", ""))) or f"Kwork project {project_id}"
+    description = _clean_text(str(item.get("description", "")))
+    remaining = _clean_text(str(item.get("timeLeft", "")))
+    project_url = urljoin(base_url, f"/projects/{project_id}/view")
+    lines = [f"📌 {title}"]
+    if description:
+        lines.append(description)
+    if remaining:
+        lines.append(f"Осталось: {remaining}")
+    lines.append(f"Отклик: {project_url}")
+    return TelegramPost(
+        channel="kwork-web",
+        message_id=project_id,
+        url=project_url,
+        text="\n".join(lines),
+        posted_at=_clean_text(str(item.get("date_create", ""))),
     )
 
 

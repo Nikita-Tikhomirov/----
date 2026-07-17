@@ -1,4 +1,4 @@
-from app.kwork_source import parse_kwork_project_cards
+from app.kwork_source import KworkWebSource, parse_kwork_project_cards
 
 
 def test_parse_kwork_project_cards_keeps_only_low_offer_projects():
@@ -38,6 +38,96 @@ def test_parse_kwork_project_cards_skips_cards_without_offer_count():
     """
 
     assert parse_kwork_project_cards(html, max_responses=5) == []
+
+
+def test_parse_kwork_project_cards_uses_embedded_wants_without_treating_kwork_count_as_offers():
+    html = """
+    <script>
+      window.pageState = {
+        "wantsListData": {
+          "pagination": {
+            "data": [
+              {
+                "id": 3219001,
+                "name": "Старый лендинг",
+                "description": "Нужно поправить HTML и CSS",
+                "date_create": "2026-07-17 20:05:00",
+                "timeLeft": "2 д. 20 ч.",
+                "status": "active",
+                "isWantActive": true,
+                "kwork_count": 27
+              },
+              {
+                "id": 3219002,
+                "name": "Свежая форма заявки",
+                "description": "Исправить форму на WordPress",
+                "date_create": "2026-07-17 23:50:00",
+                "timeLeft": "2 д. 23 ч.",
+                "status": "active",
+                "isWantActive": true,
+                "kwork_count": 1
+              },
+              {
+                "id": 3219003,
+                "name": "Закрытый заказ",
+                "description": "Не должен попасть в ленту",
+                "date_create": "2026-07-17 23:55:00",
+                "timeLeft": "",
+                "status": "closed",
+                "isWantActive": false,
+                "kwork_count": 1
+              }
+            ]
+          }
+        }
+      };
+    </script>
+    """
+
+    posts = parse_kwork_project_cards(html, max_responses=5)
+
+    assert [post.message_id for post in posts] == [3219002, 3219001]
+    assert posts[0].posted_at == "2026-07-17 23:50:00"
+    assert "Свежая форма заявки" in posts[0].text
+    assert "Осталось: 2 д. 23 ч." in posts[0].text
+    assert "Предложений:" not in posts[0].text
+    assert "27" not in posts[1].text
+
+
+def test_kwork_web_source_uses_embedded_direct_html_without_waiting_for_browser_cards(monkeypatch):
+    import app.kwork_source as source
+
+    html = """
+    <script>
+      window.pageState = {
+        "wantsListData": {
+          "pagination": {
+            "data": [
+              {
+                "id": 3219004,
+                "name": "Правки лендинга",
+                "description": "Нужно поправить адаптив",
+                "date_create": "2026-07-17 23:58:00",
+                "timeLeft": "2 д. 23 ч.",
+                "status": "active",
+                "isWantActive": true
+              }
+            ]
+          }
+        }
+      };
+    </script>
+    """
+    monkeypatch.setattr(source, "_fetch_html", lambda *args, **kwargs: html)
+    monkeypatch.setattr(
+        source,
+        "_fetch_rendered_html",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("browser fallback must not run")),
+    )
+
+    posts = KworkWebSource(use_browser=True).fetch_recent_posts()
+
+    assert [post.message_id for post in posts] == [3219004]
 
 
 def test_fetch_rendered_html_refreshes_page_before_reading(monkeypatch):
@@ -205,6 +295,51 @@ def test_fetch_rendered_project_html_waits_for_body_text(monkeypatch):
         return ""
 
     monkeypatch.setattr(client, "_fetch_project_html", lambda *args, **kwargs: "")
+    monkeypatch.setattr("app.kwork_source._ensure_chrome_cdp", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "app.kwork_source._find_or_create_page",
+        lambda *args, **kwargs: {"webSocketDebuggerUrl": "ws://project"},
+    )
+    monkeypatch.setattr("app.kwork_source._refresh_page", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.kwork_source._evaluate", fake_evaluate)
+    monkeypatch.setattr(websocket, "create_connection", lambda url, timeout=20: FakeWebSocket())
+
+    info = client.KworkProjectClient(use_browser=True).inspect("https://kwork.ru/projects/123/view")
+
+    assert info.response_count == 3
+
+
+def test_fetch_rendered_project_html_waits_for_offer_count_after_page_header(monkeypatch):
+    import websocket
+    import app.kwork_client as client
+
+    text_reads = iter(
+        [
+            (
+                "Страница проекта уже открыта. Описание задачи и данные заказчика загружены, "
+                "но блок с откликами еще не отрисован после загрузки интерфейса Kwork."
+            ),
+            "Страница проекта\nПредложений: 3",
+        ]
+    )
+    state = {"offer_count_ready": False}
+
+    class FakeWebSocket:
+        def close(self):
+            return None
+
+    def fake_evaluate(ws, expression):
+        if expression == "document.body && document.body.innerText":
+            text = next(text_reads)
+            state["offer_count_ready"] = "Предложений" in text
+            return text
+        if "JSON.stringify" in expression:
+            text = "Страница проекта\\nПредложений: 3" if state["offer_count_ready"] else "Страница проекта"
+            return '{"html":"<html></html>","text":"' + text + '","links":[]}'
+        return ""
+
+    monkeypatch.setattr(client, "_fetch_project_html", lambda *args, **kwargs: "")
+    monkeypatch.setattr(client.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr("app.kwork_source._ensure_chrome_cdp", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         "app.kwork_source._find_or_create_page",

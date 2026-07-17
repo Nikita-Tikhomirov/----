@@ -221,7 +221,7 @@ def _wait_for_rendered_project_text(ws, timeout_seconds: float) -> str:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         text = str(_evaluate(ws, "document.body && document.body.innerText") or "")
-        if len(text.strip()) > 100 or "Предложений" in text:
+        if "Предложений" in text or unavailable_project_message(text):
             return text
         time.sleep(0.5)
     return ""
