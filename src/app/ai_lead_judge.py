@@ -20,6 +20,20 @@ SIMPLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 BUDGET_PATTERN = re.compile(r"(\d[\d\s]{2,})\s*(?:₽|руб|р\b)", re.IGNORECASE)
+COMMERCIAL_REPLY_PATTERN = re.compile(
+    r"(?:\b(?:цена|стоим|бюджет|оплат|предоплат|ставка)\w*|\d[\d\s.,]*\s*(?:₽|руб(?:\.|лей)?|р\.?|тыс\.?|к\b))",
+    re.IGNORECASE,
+)
+GENERIC_QUESTION_PATTERN = re.compile(
+    r"(?:уточните\s+детали|обсудим\s+детали|расскажите\s+подробнее|"
+    r"давайте\s+обсудим|можем\s+обсудить)",
+    re.IGNORECASE,
+)
+ACTION_PATTERN = re.compile(
+    r"(?:сдела|исправ|сверста|настро|реализ|собер|провер|подготов|подключ|доработ|"
+    r"интегрир|оптимизир|адаптир)",
+    re.IGNORECASE,
+)
 DEFAULT_ACCEPT_DECISIONS = ("accept", "maybe")
 DEFAULT_BLOCKED_KEYWORDS = ("битрикс", "bitrix")
 DEFAULT_HARD_REJECT_KEYWORDS = (
@@ -112,11 +126,13 @@ def parse_judge_response(raw: str) -> LeadJudgeResult:
     reasons = _list_of_strings(payload.get("reasons"))[:5]
     risks = _list_of_strings(payload.get("risks"))[:5]
     questions = _list_of_strings(payload.get("questions"))[:1]
-    draft_reply = _clean_text(str(payload.get("draft_reply", "")))
+    draft_reply = clean_customer_reply(
+        str(payload.get("draft_reply", "")),
+        summary=summary,
+        estimated_days=estimated_days,
+    )
 
     accepted = decision in {"accept", "maybe"} and score >= 60 and estimated_days <= 7
-    if not draft_reply:
-        draft_reply = _fallback_reply(summary, estimated_days, price_rub, questions)
     if not reasons:
         reasons = ["AI-оценка без подробных причин"]
 
@@ -189,7 +205,7 @@ def _fallback_judge(text: str) -> LeadJudgeResult:
         reasons=["похоже реально сделать за неделю с AI-агентом"],
         risks=[] if simple else ["нужно быстро сверить детали перед стартом"],
         questions=questions,
-        draft_reply=_fallback_reply(summary, estimated_days, price_rub, questions),
+        draft_reply=_fallback_reply(summary, estimated_days),
     )
 
 
@@ -278,8 +294,12 @@ def _build_prompt(text: str) -> str:
         "Если содержимое файла не удалось прочитать или это картинка без OCR, не выдумывай детали, а укажи риск. "
         "Не проси уточнить детали в целом и не пиши пустые фразы вроде «обсудим детали»; "
         "задай максимум один конкретный вопрос только если без него нельзя нормально начать. "
-        "В draft_reply дай конкретный следующий шаг, срок и цену/вилку, без канцелярита и без обещаний невозможного. "
-        "Отклик должен звучать как короткое сообщение реального исполнителя: 4-7 предложений, по делу. "
+        "Не начинай с «я правильно понимаю» и не повторяй весь текст заказа. "
+        "Цена/бюджет нужны только для внутренней оценки и поля цены на Kwork: не указывай цену, "
+        "вилку, бюджет, валюту, оплату или скидки в draft_reply. "
+        "В draft_reply коротко покажи, что понял главную боль клиента, дай конкретный следующий шаг, назови 2-3 конкретных шага "
+        "и результат проверки. Укажи реалистичный срок без канцелярита и обещаний невозможного. "
+        "Отклик должен звучать как сообщение реального специалиста: 4-6 предложений, 350-800 символов, по делу. "
         "Верни строго JSON без markdown:\n"
         "{\n"
         '  "decision": "accept|maybe|reject",\n'
@@ -361,12 +381,55 @@ def _summary_from_text(text: str) -> str:
     return first_line[:120].rstrip() or "Kwork-заказ"
 
 
-def _fallback_reply(summary: str, estimated_days: int, price_rub: int, questions: list[str]) -> str:
-    price = f"по цене ориентируюсь от {price_rub:,} руб.".replace(",", " ")
-    question = f" Единственный момент: {questions[0]}" if questions else ""
+def clean_customer_reply(reply: str, summary: str, estimated_days: int) -> str:
+    """Return a concrete customer proposal without commercial terms or filler."""
+    sentences = _reply_sentences(reply)
+    safe_sentences = [
+        sentence
+        for sentence in sentences
+        if not COMMERCIAL_REPLY_PATTERN.search(sentence)
+        and not GENERIC_QUESTION_PATTERN.search(sentence)
+    ]
+    candidate = " ".join(safe_sentences).strip()
+    if _reply_needs_fallback(candidate):
+        return _fallback_reply(summary, estimated_days)
+    return candidate
+
+
+def _reply_sentences(value: str) -> list[str]:
+    clean = _clean_text(value)
+    if not clean:
+        return []
+    return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", clean) if sentence.strip()]
+
+
+def _reply_needs_fallback(reply: str) -> bool:
     return (
-        f"Здравствуйте! Посмотрел задачу: {summary}. "
-        f"Могу взяться и сделать аккуратно за {estimated_days} дн., {price} "
-        "Начну с короткой проверки, затем сразу перейду к реализации и покажу результат по ходу работы."
-        f"{question}"
+        len(reply) < 180
+        or len(_reply_sentences(reply)) < 3
+        or not ACTION_PATTERN.search(reply)
+        or COMMERCIAL_REPLY_PATTERN.search(reply) is not None
+    )
+
+
+def _reply_safe_summary(summary: str) -> str:
+    clean = _clean_text(summary)
+    clean = re.sub(
+        r"(?:\b(?:бюджет|цена|стоимость)\b\s*[:\-]?\s*)?\d[\d\s.,]*\s*(?:₽|руб(?:\.|лей)?|р\.?)",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    )
+    clean = re.sub(r"\b(?:бюджет|цена|стоимость)\b\s*[:\-]?\s*(?=$|[.!?,])", "", clean, flags=re.IGNORECASE)
+    clean = re.sub(r"\s+([,.!?])", r"\1", clean)
+    return clean.strip(" ,.;:-")[:220] or "вашу задачу"
+
+
+def _fallback_reply(summary: str, estimated_days: int) -> str:
+    safe_summary = _reply_safe_summary(summary)
+    return (
+        f"Здравствуйте! Посмотрел задачу: {safe_summary}. "
+        "Возьму на себя основную работу: разберу текущую реализацию и подготовлю понятный план изменений. "
+        "Затем внесу правки, проверю результат на основных сценариях и покажу готовый вариант. "
+        f"По сроку ориентируюсь на {estimated_days} дн. Готов приступить сразу."
     )

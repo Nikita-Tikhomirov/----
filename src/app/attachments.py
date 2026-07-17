@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import urllib.request
 import zipfile
+from base64 import b64encode
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -88,6 +89,9 @@ def build_attachment_context(
     lead_context: str = "",
     deepseek_api_key: str = "",
     deepseek_model: str = "deepseek-chat",
+    openrouter_api_key: str = "",
+    openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_vision_model: str = "",
 ) -> str:
     """Download small readable attachments and return text for AI context."""
     return build_attachment_report(
@@ -101,6 +105,9 @@ def build_attachment_context(
         lead_context=lead_context,
         deepseek_api_key=deepseek_api_key,
         deepseek_model=deepseek_model,
+        openrouter_api_key=openrouter_api_key,
+        openrouter_base_url=openrouter_base_url,
+        openrouter_vision_model=openrouter_vision_model,
     ).context
 
 
@@ -116,6 +123,9 @@ def build_attachment_report(
     lead_context: str = "",
     deepseek_api_key: str = "",
     deepseek_model: str = "deepseek-chat",
+    openrouter_api_key: str = "",
+    openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_vision_model: str = "",
 ) -> AttachmentProcessingResult:
     """Download attachments, save readable originals, and return AI + UI metadata."""
     if not attachments:
@@ -143,6 +153,9 @@ def build_attachment_report(
                 lead_context=lead_context,
                 deepseek_api_key=deepseek_api_key,
                 deepseek_model=deepseek_model,
+                openrouter_api_key=openrouter_api_key,
+                openrouter_base_url=openrouter_base_url,
+                openrouter_vision_model=openrouter_vision_model,
             )
         except Exception as exc:
             logger.warning("Failed to read attachment %s: %s", ref.url, exc)
@@ -156,7 +169,7 @@ def build_attachment_report(
             summary=_shorten(extracted, 2500),
             kind=_attachment_kind(ref),
             opened_archive="архив открыт" in status,
-            ocr_scanned="OCR" in status,
+            ocr_scanned="OCR" in status or "vision" in status.lower(),
         )
         reports.append(report)
         blocks.append(
@@ -311,16 +324,40 @@ def inspect_attachment(
     lead_context: str = "",
     deepseek_api_key: str = "",
     deepseek_model: str = "deepseek-chat",
+    openrouter_api_key: str = "",
+    openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_vision_model: str = "",
 ) -> tuple[str, str]:
     ext = _extension(ref.url) or _extension(ref.label)
     if ext in TEXT_EXTENSIONS:
         return "скачан, прочитан", _decode_text(content)
     if ext == ".docx":
-        return "скачан, прочитан", _extract_docx(content)
+        docx_text = _extract_docx(content)
+        if _docx_text_is_missing(docx_text):
+            vision_text = describe_docx_with_openrouter(
+                content,
+                api_key=openrouter_api_key,
+                model=openrouter_vision_model,
+                base_url=openrouter_base_url,
+            )
+            if vision_text:
+                return "скачан, vision прочитан", "DOCX без обычного текста. Vision:\n" + vision_text
+        return "скачан, прочитан", docx_text
     if ext == ".pdf":
-        return _extract_pdf(content)
+        return _extract_pdf(
+            content,
+            openrouter_api_key=openrouter_api_key,
+            openrouter_base_url=openrouter_base_url,
+            openrouter_vision_model=openrouter_vision_model,
+        )
     if ext in IMAGE_EXTENSIONS:
-        return _extract_image_ocr(content, ext)
+        return _extract_image_ocr(
+            content,
+            ext,
+            openrouter_api_key=openrouter_api_key,
+            openrouter_base_url=openrouter_base_url,
+            openrouter_vision_model=openrouter_vision_model,
+        )
     if ext in ARCHIVE_EXTENSIONS:
         return _extract_archive(
             ref,
@@ -329,6 +366,9 @@ def inspect_attachment(
             lead_context=lead_context,
             deepseek_api_key=deepseek_api_key,
             deepseek_model=deepseek_model,
+            openrouter_api_key=openrouter_api_key,
+            openrouter_base_url=openrouter_base_url,
+            openrouter_vision_model=openrouter_vision_model,
         )
     return "скачан, тип не поддержан", "Файл найден, но тип не поддержан для автоматического чтения."
 
@@ -372,6 +412,10 @@ def _extract_docx(content: bytes) -> str:
     return "\n".join(parts) or "DOCX прочитан, но текст не найден."
 
 
+def _docx_text_is_missing(text: str) -> bool:
+    return not text.strip() or "текст не найден" in text.lower()
+
+
 def _validate_downloaded_content(ref: AttachmentRef, content: bytes) -> None:
     ext = _extension(ref.url) or _extension(ref.label)
     if not content:
@@ -410,7 +454,12 @@ def _cookie_header_from_cdp_cookies(cookies: list[dict], url: str) -> str:
     return "; ".join(pairs)
 
 
-def _extract_pdf(content: bytes) -> tuple[str, str]:
+def _extract_pdf(
+    content: bytes,
+    openrouter_api_key: str = "",
+    openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_vision_model: str = "",
+) -> tuple[str, str]:
     try:
         from pypdf import PdfReader
     except ImportError:
@@ -428,9 +477,25 @@ def _extract_pdf(content: bytes) -> tuple[str, str]:
     try:
         ocr_text = _extract_pdf_ocr(content)
     except Exception as exc:
+        vision_text = describe_pdf_with_openrouter(
+            content,
+            api_key=openrouter_api_key,
+            model=openrouter_vision_model,
+            base_url=openrouter_base_url,
+        )
+        if vision_text:
+            return "скачан, vision прочитан", "PDF без текстового слоя. Vision:\n" + vision_text
         return "скачан, текст не извлечен", f"PDF без текстового слоя. OCR PDF не выполнен: {exc}"
     if ocr_text.strip():
         return "скачан, OCR прочитан", "PDF без текстового слоя. OCR:\n" + ocr_text
+    vision_text = describe_pdf_with_openrouter(
+        content,
+        api_key=openrouter_api_key,
+        model=openrouter_vision_model,
+        base_url=openrouter_base_url,
+    )
+    if vision_text:
+        return "скачан, vision прочитан", "PDF без текстового слоя. Vision:\n" + vision_text
     return "скачан, OCR не выполнен", "PDF без текстового слоя. OCR выполнился, но текст не найден."
 
 
@@ -454,14 +519,38 @@ def _extract_pdf_ocr(content: bytes, max_pages: int = 3) -> str:
     return "\n".join(texts)
 
 
-def _extract_image_ocr(content: bytes, ext: str) -> tuple[str, str]:
+def _extract_image_ocr(
+    content: bytes,
+    ext: str,
+    openrouter_api_key: str = "",
+    openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_vision_model: str = "",
+) -> tuple[str, str]:
     try:
         text = _run_tesseract_ocr(content, ext)
     except Exception as exc:
+        vision_text = describe_image_with_openrouter(
+            content,
+            ext,
+            api_key=openrouter_api_key,
+            model=openrouter_vision_model,
+            base_url=openrouter_base_url,
+        )
+        if vision_text:
+            return "скачан, vision прочитан", vision_text
         return "скачан, OCR не выполнен", f"OCR не выполнен: {exc}"
     clean = _shorten(text, 2500)
     if clean:
         return "скачан, OCR прочитан", clean
+    vision_text = describe_image_with_openrouter(
+        content,
+        ext,
+        api_key=openrouter_api_key,
+        model=openrouter_vision_model,
+        base_url=openrouter_base_url,
+    )
+    if vision_text:
+        return "скачан, vision прочитан", vision_text
     return "скачан, OCR не выполнен", "OCR выполнился, но текст на изображении не найден."
 
 
@@ -472,6 +561,9 @@ def _extract_archive(
     lead_context: str,
     deepseek_api_key: str,
     deepseek_model: str,
+    openrouter_api_key: str,
+    openrouter_base_url: str,
+    openrouter_vision_model: str,
 ) -> tuple[str, str]:
     ext = _extension(ref.url) or _extension(ref.label)
     if ext != ".zip":
@@ -484,6 +576,9 @@ def _extract_archive(
             lead_context=lead_context,
             deepseek_api_key=deepseek_api_key,
             deepseek_model=deepseek_model,
+            openrouter_api_key=openrouter_api_key,
+            openrouter_base_url=openrouter_base_url,
+            openrouter_vision_model=openrouter_vision_model,
         )
     except zipfile.BadZipFile:
         return "скачан, архив не открыт", "ZIP-архив поврежден или это не ZIP-файл."
@@ -500,6 +595,9 @@ def _read_zip_archive(
     lead_context: str,
     deepseek_api_key: str,
     deepseek_model: str,
+    openrouter_api_key: str,
+    openrouter_base_url: str,
+    openrouter_vision_model: str,
     max_entries: int = 8,
 ) -> tuple[list[str], ArchiveSelection]:
     lines: list[str] = []
@@ -543,7 +641,14 @@ def _read_zip_archive(
                 lines.append(f"{name}: пропущен, файл больше лимита {max_bytes} байт")
                 continue
             nested_ref = AttachmentRef(label=name, url=name)
-            status, extracted = inspect_attachment(nested_ref, data, max_bytes=max_bytes)
+            status, extracted = inspect_attachment(
+                nested_ref,
+                data,
+                max_bytes=max_bytes,
+                openrouter_api_key=openrouter_api_key,
+                openrouter_base_url=openrouter_base_url,
+                openrouter_vision_model=openrouter_vision_model,
+            )
             nested_status = status.removeprefix("скачан, ")
             lines.append(f"{name}: {nested_status}\n{_shorten(extracted, 1500)}")
         skipped = [entry.name for entry in entries if entry.name not in selected_names]
@@ -707,6 +812,143 @@ def _run_tesseract_ocr(content: bytes, ext: str) -> str:
         error = (result.stderr or result.stdout or "неизвестная ошибка").strip()
         raise RuntimeError(error)
     return result.stdout.strip()
+
+
+def describe_image_with_openrouter(
+    content: bytes,
+    extension: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    timeout_seconds: float = 45.0,
+) -> str:
+    """Describe a technical screenshot only when optional OpenRouter vision is configured."""
+    if not api_key.strip() or not model.strip():
+        return ""
+    mime_type = _image_mime_type(extension)
+    image_data = b64encode(content).decode("ascii")
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url.strip() or "https://openrouter.ai/api/v1",
+            timeout=timeout_seconds,
+        )
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Ты читаешь изображение, приложенное к Kwork-заказу. "
+                        "Опиши только наблюдаемые элементы ТЗ, интерфейса и требования. "
+                        "Не выдумывай детали, не пиши цену и не обращайся к заказчику."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Кратко опиши, что важно реализовать или учесть на этом изображении.",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{mime_type};base64,{image_data}"},
+                        },
+                    ],
+                },
+            ],
+            temperature=0.1,
+            max_tokens=700,
+        )
+    except Exception as exc:
+        logger.warning("OpenRouter vision failed for %s: %s", extension, exc)
+        return ""
+    return _shorten((response.choices[0].message.content or "").strip(), 2500)
+
+
+def describe_pdf_with_openrouter(
+    content: bytes,
+    api_key: str,
+    model: str,
+    base_url: str,
+    timeout_seconds: float = 45.0,
+) -> str:
+    """Render the first scan pages and ask OpenRouter vision only after local OCR fails."""
+    if not api_key.strip() or not model.strip():
+        return ""
+    try:
+        import fitz
+
+        document = fitz.open(stream=content, filetype="pdf")
+        descriptions: list[str] = []
+        try:
+            for page_index in range(min(2, document.page_count)):
+                pixmap = document.load_page(page_index).get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                description = describe_image_with_openrouter(
+                    pixmap.tobytes("png"),
+                    ".png",
+                    api_key=api_key,
+                    model=model,
+                    base_url=base_url,
+                    timeout_seconds=timeout_seconds,
+                )
+                if description:
+                    descriptions.append(f"Страница {page_index + 1}: {description}")
+        finally:
+            document.close()
+        return _shorten("\n".join(descriptions), 2500)
+    except Exception as exc:
+        logger.warning("OpenRouter vision could not render PDF: %s", exc)
+        return ""
+
+
+def describe_docx_with_openrouter(
+    content: bytes,
+    api_key: str,
+    model: str,
+    base_url: str,
+    timeout_seconds: float = 45.0,
+) -> str:
+    """Describe embedded DOCX screenshots when ordinary text extraction finds nothing."""
+    if not api_key.strip() or not model.strip():
+        return ""
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            image_names = [
+                name
+                for name in archive.namelist()
+                if name.lower().startswith("word/media/") and _extension(name) in IMAGE_EXTENSIONS
+            ]
+            descriptions: list[str] = []
+            for name in image_names[:2]:
+                description = describe_image_with_openrouter(
+                    archive.read(name),
+                    _extension(name),
+                    api_key=api_key,
+                    model=model,
+                    base_url=base_url,
+                    timeout_seconds=timeout_seconds,
+                )
+                if description:
+                    descriptions.append(f"{Path(name).name}: {description}")
+        return _shorten("\n".join(descriptions), 2500)
+    except Exception as exc:
+        logger.warning("OpenRouter vision could not inspect DOCX images: %s", exc)
+        return ""
+
+
+def _image_mime_type(extension: str) -> str:
+    normalized = extension.lower().lstrip(".")
+    if normalized in {"jpg", "jpeg"}:
+        return "image/jpeg"
+    if normalized == "webp":
+        return "image/webp"
+    if normalized == "gif":
+        return "image/gif"
+    return "image/png"
 
 
 def _tesseract_command() -> Path:

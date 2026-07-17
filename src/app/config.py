@@ -66,6 +66,9 @@ class AppConfig:
     lead_required_keywords: tuple[str, ...] = ()
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_vision_model: str = ""
 
 
 def load_config(env_path: str | Path = ".env") -> AppConfig:
@@ -130,6 +133,9 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         lead_required_keywords=_csv_env("LEAD_REQUIRED_KEYWORDS", ()),
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
+        openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        openrouter_vision_model=os.getenv("OPENROUTER_VISION_MODEL", ""),
     )
 
 

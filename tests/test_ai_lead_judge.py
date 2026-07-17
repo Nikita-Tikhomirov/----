@@ -130,6 +130,35 @@ def test_judge_lead_fallback_accepts_simple_site_task_without_questions():
     assert result.estimated_days <= 2
     assert result.price_rub >= 5000
     assert len(result.questions) <= 1
+    assert "руб" not in result.draft_reply.lower()
+    assert "цена " not in result.draft_reply.lower()
+
+
+def test_parse_judge_response_removes_price_and_generic_question_from_customer_reply():
+    raw = """
+    {
+      "decision": "accept",
+      "score": 81,
+      "complexity": "simple",
+      "estimated_days": 3,
+      "price_rub": 9000,
+      "summary": "Исправить форму заявки и адаптив на лендинге",
+      "reasons": ["понятный объем"],
+      "risks": [],
+      "questions": [],
+      "draft_reply": "Здравствуйте! Исправлю форму и адаптив за 3 дня, цена 9000 руб. Уточните детали. Сначала проверю текущую отправку формы, затем внесу правки и проверю на телефоне."
+    }
+    """
+
+    result = parse_judge_response(raw)
+
+    reply = result.draft_reply.lower()
+    assert "9000" not in reply
+    assert "руб" not in reply
+    assert "цена " not in reply
+    assert "уточните детали" not in reply
+    assert "форм" in reply
+    assert "телефон" in reply or "провер" in reply
 
 
 def test_build_prompt_demands_specific_human_kwork_reply():
@@ -142,3 +171,5 @@ def test_build_prompt_demands_specific_human_kwork_reply():
     assert "Kwork facts" in prompt
     assert "ФАЙЛЫ/ТЗ" in prompt
     assert "конкретный следующий шаг" in prompt
+    assert "не указывай цену" in prompt.lower()
+    assert "не начинай с «я правильно понимаю»" in prompt.lower()

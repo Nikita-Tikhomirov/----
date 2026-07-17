@@ -103,3 +103,37 @@ def test_load_config_prefers_env_file_over_existing_process_env(tmp_path, monkey
     config = load_config(env_file)
 
     assert config.lead_min_score == 71
+
+
+def test_load_config_reads_openrouter_vision_settings(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "TELEGRAM_API_ID=0",
+                "TELEGRAM_API_HASH=fill_later",
+                "TELEGRAM_CHANNELS=@unused",
+                "SMTP_HOST=smtp.example.com",
+                "SMTP_USER=bot@example.com",
+                "SMTP_PASSWORD=mail-secret",
+                "MAIL_FROM=bot@example.com",
+                "MAIL_TO=me@example.com",
+                "IMAP_HOST=imap.example.com",
+                "IMAP_USER=bot@example.com",
+                "IMAP_PASSWORD=mail-secret",
+                "OPENROUTER_API_KEY=or-test-key",
+                "OPENROUTER_BASE_URL=https://openrouter.example/v1",
+                "OPENROUTER_VISION_MODEL=provider/vision-model",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENROUTER_VISION_MODEL", raising=False)
+
+    config = load_config(env_file)
+
+    assert config.openrouter_api_key == "or-test-key"
+    assert config.openrouter_base_url == "https://openrouter.example/v1"
+    assert config.openrouter_vision_model == "provider/vision-model"

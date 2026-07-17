@@ -156,6 +156,56 @@ def test_build_attachment_context_reads_image_with_tesseract(monkeypatch):
     assert "На скрине форма заявки" in context
 
 
+def test_build_attachment_context_uses_openrouter_vision_when_ocr_has_no_text(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake image",
+    )
+    monkeypatch.setattr(
+        "app.attachments._run_tesseract_ocr",
+        lambda content, ext: "",
+    )
+    monkeypatch.setattr(
+        "app.attachments.describe_image_with_openrouter",
+        lambda content, extension, api_key, model, base_url, timeout_seconds=45.0: "На макете видны форма заявки и блок тарифов.",
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("screen.png: https://kwork.ru/files/screen.png",),
+        openrouter_api_key="or-test-key",
+        openrouter_vision_model="provider/vision-model",
+    )
+
+    assert "Статус: скачан, vision прочитан" in context
+    assert "форма заявки и блок тарифов" in context
+
+
+def test_build_attachment_context_uses_openrouter_vision_for_docx_without_text(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: _docx_bytes(""),
+    )
+    monkeypatch.setattr(
+        "app.attachments._extract_docx",
+        lambda content: "DOCX прочитан, но текст не найден.",
+    )
+    monkeypatch.setattr(
+        "app.attachments.describe_docx_with_openrouter",
+        lambda content, api_key, model, base_url, timeout_seconds=45.0: "В документе показаны экран каталога и форма обратной связи.",
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("ТЗ.docx: https://kwork.ru/files/tz.docx",),
+        openrouter_api_key="or-test-key",
+        openrouter_vision_model="provider/vision-model",
+    )
+
+    assert "Статус: скачан, vision прочитан" in context
+    assert "экран каталога и форма обратной связи" in context
+
+
 def test_build_attachment_context_retries_image_when_direct_download_is_html(monkeypatch):
     browser_calls = []
 
@@ -305,6 +355,31 @@ def test_build_attachment_context_reports_pdf_ocr_failure(monkeypatch):
 
     assert "Статус: скачан, текст не извлечен" in context
     assert "OCR PDF не выполнен" in context
+
+
+def test_build_attachment_context_uses_openrouter_vision_when_pdf_ocr_fails(monkeypatch):
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: _blank_pdf_bytes(),
+    )
+    monkeypatch.setattr(
+        "app.attachments._extract_pdf_ocr",
+        lambda content: (_ for _ in ()).throw(RuntimeError("Tesseract не найден")),
+    )
+    monkeypatch.setattr(
+        "app.attachments.describe_pdf_with_openrouter",
+        lambda content, api_key, model, base_url, timeout_seconds=45.0: "На скане описаны правки формы и мобильной версии.",
+        raising=False,
+    )
+
+    context = build_attachment_context(
+        ("ТЗ.pdf: https://kwork.ru/files/tz.pdf",),
+        openrouter_api_key="or-test-key",
+        openrouter_vision_model="provider/vision-model",
+    )
+
+    assert "Статус: скачан, vision прочитан" in context
+    assert "правки формы и мобильной версии" in context
 
 
 def _docx_bytes(text: str) -> bytes:

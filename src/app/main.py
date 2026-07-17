@@ -61,6 +61,9 @@ def scan_once(
     email_client: LeadMailer,
     deepseek_api_key: str = "",
     deepseek_model: str = "deepseek-chat",
+    openrouter_api_key: str = "",
+    openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_vision_model: str = "",
     kwork_project_client: ProjectInspector | None = None,
     kwork_max_responses: int = 5,
     lead_judge=judge_lead,
@@ -150,6 +153,9 @@ def scan_once(
                     lead_context=attachment_lead_context,
                     deepseek_api_key=deepseek_api_key,
                     deepseek_model=deepseek_model,
+                    openrouter_api_key=openrouter_api_key,
+                    openrouter_base_url=openrouter_base_url,
+                    openrouter_vision_model=openrouter_vision_model,
                 )
                 attachment_context = attachment_result.context
                 attachment_reports = attachment_result.reports
@@ -214,7 +220,15 @@ def _build_attachment_processing_result(builder, attachments: tuple[str, ...], *
     try:
         result = builder(attachments, **kwargs)
     except TypeError as exc:
-        optional_keys = {"output_dir", "lead_context", "deepseek_api_key", "deepseek_model"}
+        optional_keys = {
+            "output_dir",
+            "lead_context",
+            "deepseek_api_key",
+            "deepseek_model",
+            "openrouter_api_key",
+            "openrouter_base_url",
+            "openrouter_vision_model",
+        }
         if not any(key in str(exc) for key in optional_keys):
             raise
         fallback_kwargs = {key: value for key, value in kwargs.items() if key not in optional_keys}
@@ -451,6 +465,9 @@ def main() -> int:
             storage, telegram_client, email_client,
             deepseek_api_key=config.deepseek_api_key,
             deepseek_model=config.deepseek_model,
+            openrouter_api_key=config.openrouter_api_key,
+            openrouter_base_url=config.openrouter_base_url,
+            openrouter_vision_model=config.openrouter_vision_model,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
             kwork_cookie=_resolve_kwork_cookie(config),
@@ -506,6 +523,9 @@ def main() -> int:
             storage, telegram_client, email_client,
             deepseek_api_key=config.deepseek_api_key,
             deepseek_model=config.deepseek_model,
+            openrouter_api_key=config.openrouter_api_key,
+            openrouter_base_url=config.openrouter_base_url,
+            openrouter_vision_model=config.openrouter_vision_model,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
             kwork_cookie=_resolve_kwork_cookie(config),
