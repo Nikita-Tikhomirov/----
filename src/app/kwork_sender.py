@@ -643,9 +643,11 @@ async (payload) => {
     setValue(daysField, payload.days);
   }
   const messageFilled = matchesText(messageField, payload.text);
-  const priceFilled = !payload.price || matchesNumber(priceField, payload.price);
+  const priceHasError = Boolean(priceField?.classList.contains('input-style--error'));
+  const priceFilled = !payload.price || (matchesNumber(priceField, payload.price) && !priceHasError);
   const titleFilled = !payload.title || matchesText(titleField, payload.title.slice(0, 70));
-  const selectedDuration = durationWidget?.querySelector('.vs__selected');
+  const selectedDuration = durationWidget?.querySelector('.duration-select__selected-option')
+    || durationWidget?.querySelector('.vs__selected');
   const daysFilled = !payload.days || (durationWidget
     ? matchesNumber(selectedDuration, payload.days)
     : matchesNumber(daysField, payload.days));
