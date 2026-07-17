@@ -13,7 +13,7 @@ from tkinter import ttk
 from app.ai_lead_judge import sanitize_customer_reply
 from app.config import load_config
 from app.kwork_sender import KworkReplySender, _extract_reply_terms
-from app.reply_composer import ReplyDraftContext, compose_customer_reply
+from app.reply_composer import ReplyDraftContext, compose_customer_reply, reply_delivery_issues
 from app.storage import Lead, LeadAttachment, Storage
 
 
@@ -596,10 +596,22 @@ class LeadFunnelGui:
             return
         try:
             payload = self._lead_payload(lead)
-            self._save_lead_payload(lead, payload)
         except ValueError as exc:
             messagebox.showerror("Ошибка", str(exc))
             return
+        attachments = self._attachments_for_lead(lead)
+        context = _reply_context_from_lead(
+            lead,
+            title=payload["title"],
+            days=payload["days"] or _extract_days(lead) or 3,
+            attachments=attachments,
+        )
+        quality_block_reason = direct_send_reply_block_reason(payload["reply"], context)
+        if quality_block_reason:
+            messagebox.showwarning("Отклик требует правки", quality_block_reason)
+            self.lead_status_var.set(f"Лид #{lead.id}: отклик требует правки перед отправкой.")
+            return
+        self._save_lead_payload(lead, payload)
         if not messagebox.askyesno("OK и отправить отклик", direct_send_confirmation(lead, payload)):
             return
         self.in_flight_lead_ids.add(lead.id)
@@ -662,16 +674,17 @@ class LeadFunnelGui:
         title = self.lead_title_var.get().strip() or _lead_title(lead)
         if not title or _is_placeholder_lead_title(title):
             raise ValueError("Название заказа обязательно")
+        days = _parse_optional_int(self.lead_days_var.get(), "Срок")
         reply = sanitize_customer_reply(
             raw_reply,
-            summary=_lead_task_summary(lead),
-            estimated_days=_extract_days(lead) or 3,
+            summary=title,
+            estimated_days=days or _extract_days(lead) or 3,
         )
         return {
             "reply": reply,
             "title": title,
             "price": _parse_optional_int(self.lead_price_var.get(), "Цена"),
-            "days": _parse_optional_int(self.lead_days_var.get(), "Срок"),
+            "days": days,
         }
 
     def _save_lead_payload(self, lead: Lead, payload: dict) -> None:
@@ -1176,11 +1189,11 @@ def _reply_context_from_lead(
         for attachment in attachments
         if attachment.label.strip() and (attachment.summary or attachment.status).strip()
     )
-    source_text = "\n\n".join(part for part in (lead.post_text.strip(), lead.summary.strip()) if part)
+    task_summary = title.strip() or _lead_title(lead) or "вашу задачу"
     return ReplyDraftContext(
         title=title,
-        task_summary=_lead_task_summary(lead),
-        source_text=source_text,
+        task_summary=task_summary,
+        source_text=lead.post_text.strip(),
         attachment_context=attachment_context,
         estimated_days=max(1, days),
     )
@@ -1272,6 +1285,32 @@ def direct_send_confirmation(lead: Lead, payload: dict) -> str:
         f"Цена: {price_text}\n"
         f"Срок: {days_text}\n\n"
         "Сообщение и параметры будут отправлены на Kwork сейчас."
+    )
+
+
+def direct_send_reply_block_reason(reply: str, context: ReplyDraftContext) -> str:
+    """Explain why a draft cannot be submitted until it is made fact-safe."""
+    issue_labels = {
+        "commercial term": "упоминает цену или оплату",
+        "AI mention": "упоминает AI",
+        "generic phrase": "слишком общий",
+        "unapproved clarification": "просит неподтвержденное уточнение",
+        "unsupported current state": "заявляет непроверенное состояние сайта",
+        "unsupported task action": "обещает действие, которого нет в заказе",
+        "uncertain commitment": "содержит неуверенное обещание",
+        "customer skill assumption": "оценивает навыки заказчика",
+        "too many questions": "задает лишние вопросы",
+        "missing concrete action": "не описывает конкретное действие",
+        "missing task reference": "не ссылается на задачу",
+        "empty reply": "пустой",
+    }
+    labels = [issue_labels.get(issue, issue) for issue in reply_delivery_issues(reply, context)]
+    if not labels:
+        return ""
+    return (
+        "Отклик не отправлен: в тексте есть не подтвержденные фактами заказа формулировки: "
+        + "; ".join(labels)
+        + ".\n\nПересобери отклик или исправь текст и повтори отправку."
     )
 
 

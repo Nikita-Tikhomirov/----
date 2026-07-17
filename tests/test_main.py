@@ -326,6 +326,8 @@ def test_scan_once_persists_composed_price_free_reply(tmp_path):
     assert lead.proposal_days == 2
     assert seen_contexts[0][1] == "Здравствуйте! Цена 5000 руб. Уточните детали."
     assert "Бюджет" not in seen_contexts[0][0].source_text
+    assert seen_contexts[0][0].task_summary != "Исправить отправку формы заявки и адаптив лендинга"
+    assert seen_contexts[0][0].task_summary == "Kwork project"
     assert seen_contexts[0][2:] == ("sk-test", "deepseek-chat")
 
 

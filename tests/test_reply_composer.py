@@ -269,6 +269,47 @@ def test_fallback_uses_title_when_task_summary_judges_customer_skill():
     assert reply_quality_issues(reply, context) == ()
 
 
+def test_fallback_does_not_treat_information_page_as_form_task():
+    context = ReplyDraftContext(
+        title="Настройка сайта и каталога на WordPress",
+        task_summary="Посадить информационную страницу и каталог по PSD на WordPress",
+        source_text=(
+            "Нужно сверстать информационную страницу и каталог по PSD, затем посадить сайт на WordPress. "
+            "Для каталога нужны карточки товаров и подключение платежного канала."
+        ),
+        attachment_context="Макеты PSD приложены к заказу.",
+        estimated_days=5,
+    )
+
+    reply = compose_customer_reply(context, "Цена 5000 руб.")
+
+    lowered = reply.lower()
+    assert "текущую отправку формы" not in lowered
+    assert "валидацию на мобильных" not in lowered
+    assert "wordpress" in lowered
+    assert reply_quality_issues(reply, context) == ()
+
+
+def test_quality_gate_rejects_form_action_without_form_facts():
+    context = ReplyDraftContext(
+        title="Настройка сайта и каталога на WordPress",
+        task_summary="Посадить информационную страницу и каталог по PSD на WordPress",
+        source_text="Нужно сверстать информационную страницу и каталог по PSD, затем посадить сайт на WordPress.",
+        attachment_context="Макеты PSD приложены к заказу.",
+        estimated_days=5,
+    )
+    reply = (
+        "Здравствуйте! Посмотрел задачу по посадке сайта и каталога на WordPress. "
+        "Сначала проверю текущую отправку формы и валидацию на мобильных, затем внесу нужные правки в разметку и стили. "
+        "После изменений протестирую сценарий на телефоне и в основных браузерах, чтобы заявки стабильно доходили. "
+        "На работу ориентируюсь на 5 дн., могу приступить сразу."
+    )
+
+    issues = reply_quality_issues(reply, context)
+
+    assert "unsupported task action" in issues
+
+
 def test_quality_gate_rejects_overly_detailed_reply():
     reply = (
         "Здравствуйте! Вижу проблему с отправкой формы заявки на мобильных. "

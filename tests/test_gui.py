@@ -114,6 +114,34 @@ def test_reply_context_for_regeneration_uses_selected_terms_and_attachment_repor
     assert "iPhone" in context.attachment_context
 
 
+def test_reply_context_for_regeneration_excludes_ai_summary_from_task_facts():
+    lead = Lead(
+        id=26,
+        post_id=12,
+        score=82,
+        summary=(
+            "Задача: Посадить каталог на WordPress\n"
+            "Риск: интеграция может быть сложной для новичка."
+        ),
+        draft_reply="Старый черновик",
+        contact="https://kwork.ru/projects/26/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/26/view",
+        post_text="Посадить информационную страницу и каталог по PSD на WordPress.",
+    )
+
+    context = _reply_context_from_lead(
+        lead,
+        title="Посадить каталог на WordPress",
+        days=4,
+        attachments=[],
+    )
+
+    assert "информационную страницу" in context.source_text
+    assert "сложной для новичка" not in context.source_text
+    assert "сложной для новичка" not in context.task_summary
+
+
 def test_apply_regenerated_reply_keeps_draft_in_memory_until_save():
     class Text:
         def __init__(self):
@@ -512,6 +540,119 @@ def test_direct_send_blocks_second_click_while_first_send_is_running():
     )
 
     assert lead_send_block_reason(lead, in_flight_lead_ids={21}) == "Отправка этого лида уже выполняется."
+
+
+def test_gui_direct_send_blocks_stale_reply_with_unsupported_task_action(monkeypatch):
+    import app.gui as gui_module
+
+    lead = Lead(
+        id=22,
+        post_id=10,
+        score=82,
+        summary="Задача: Посадить каталог на WordPress",
+        draft_reply="Старый черновик",
+        contact="https://kwork.ru/projects/22/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/22/view",
+        post_text="Посадить информационную страницу и каталог по PSD на WordPress.",
+    )
+    payload = {
+        "reply": (
+            "Здравствуйте! Посмотрел задачу по посадке сайта и каталога на WordPress. "
+            "Сначала проверю текущую отправку формы и валидацию на мобильных, затем внесу нужные правки в разметку и стили. "
+            "После изменений протестирую сценарий на телефоне и в основных браузерах, чтобы заявки стабильно доходили. "
+            "На работу ориентируюсь на 5 дн., могу приступить сразу."
+        ),
+        "price": 12000,
+        "days": 5,
+        "title": "Настройка сайта и каталога на WordPress",
+    }
+    calls = []
+    warnings = []
+
+    class Value:
+        def set(self, _value):
+            return None
+
+    dummy = SimpleNamespace(
+        _selected_lead=lambda: lead,
+        in_flight_lead_ids=set(),
+        _lead_payload=lambda _lead: payload,
+        _attachments_for_lead=lambda _lead: [],
+        _save_lead_payload=lambda *_args: calls.append("save"),
+        _run_lead_action=lambda *_args, **_kwargs: calls.append("send"),
+        lead_status_var=Value(),
+    )
+    monkeypatch.setattr(
+        gui_module.messagebox,
+        "showwarning",
+        lambda _title, message: warnings.append(message),
+    )
+    monkeypatch.setattr(
+        gui_module.messagebox,
+        "askyesno",
+        lambda *_args, **_kwargs: pytest.fail("unsafe reply must not reach the confirmation dialog"),
+    )
+
+    LeadFunnelGui.send_selected_lead(dummy)
+
+    assert calls == []
+    assert warnings
+    assert "не подтвержден" in warnings[0].lower()
+
+
+def test_gui_direct_send_starts_submission_after_safe_reply(monkeypatch):
+    import app.gui as gui_module
+
+    lead = Lead(
+        id=27,
+        post_id=13,
+        score=82,
+        summary="Задача: Посадить каталог на WordPress",
+        draft_reply="Старый черновик",
+        contact="https://kwork.ru/projects/27/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/27/view",
+        post_text="Посадить информационную страницу и каталог по PSD на WordPress.",
+    )
+    payload = {
+        "reply": (
+            "Здравствуйте! Посмотрел задачу по посадке информационной страницы и каталога на WordPress. "
+            "Сверю структуру страниц и макеты PSD, затем соберу нужные разделы на WordPress. "
+            "Проверю карточки товаров и отображение каталога на основных разрешениях, чтобы страницы работали корректно. "
+            "Могу приступить сразу и покажу готовый рабочий вариант."
+        ),
+        "price": 12000,
+        "days": 5,
+        "title": "Настройка сайта и каталога на WordPress",
+    }
+    calls = []
+
+    class Button:
+        def __init__(self):
+            self.configured = []
+
+        def config(self, **kwargs):
+            self.configured.append(kwargs)
+
+    dummy = SimpleNamespace(
+        _selected_lead=lambda: lead,
+        in_flight_lead_ids=set(),
+        _lead_payload=lambda _lead: payload,
+        _attachments_for_lead=lambda _lead: [],
+        _save_lead_payload=lambda *_args: calls.append("save"),
+        _run_lead_action=lambda label, _action, **kwargs: calls.append((label, kwargs)),
+        send_lead_button=Button(),
+    )
+    monkeypatch.setattr(gui_module.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+
+    LeadFunnelGui.send_selected_lead(dummy)
+
+    assert dummy.in_flight_lead_ids == {27}
+    assert dummy.send_lead_button.configured == [{"state": "disabled"}]
+    assert calls[0] == "save"
+    assert calls[1][0] == "Отправка лида #27"
+    assert calls[1][1]["lead_id"] == 27
 
 
 def test_gui_direct_send_submits_kwork_reply_and_marks_lead_sent():

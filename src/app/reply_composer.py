@@ -61,6 +61,44 @@ ACTION_PATTERN = re.compile(
 )
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
 WORD_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё]{4,}")
+FORM_TASK_PATTERN = re.compile(
+    r"\b(?:форм(?:а|ы|е|у|ой|ами|ах)?|forms?|заявк\w*)\b",
+    re.IGNORECASE,
+)
+WORDPRESS_TASK_PATTERN = re.compile(r"\b(?:wordpress|вордпресс)\w*\b", re.IGNORECASE)
+LAYOUT_TASK_PATTERN = re.compile(
+    r"\b(?:верстк\w*|лендинг\w*|адаптив\w*|макет\w*|figma|psd)\b",
+    re.IGNORECASE,
+)
+INTEGRATION_TASK_PATTERN = re.compile(
+    r"\b(?:api|crm|интеграц\w*|вебхук\w*|парсер\w*|импорт\w*)\b",
+    re.IGNORECASE,
+)
+PAYMENT_TASK_PATTERN = re.compile(r"\b(?:платеж\w*|оплат\w*|эквайринг\w*)\b", re.IGNORECASE)
+DOMAIN_TASK_PATTERN = re.compile(r"\b(?:домен\w*|dns|vercel|хостинг\w*)\b", re.IGNORECASE)
+TASK_ACTION_REFERENCE_PATTERNS = (
+    FORM_TASK_PATTERN,
+    WORDPRESS_TASK_PATTERN,
+    INTEGRATION_TASK_PATTERN,
+    PAYMENT_TASK_PATTERN,
+    DOMAIN_TASK_PATTERN,
+)
+DELIVERY_BLOCKING_ISSUES = frozenset(
+    {
+        "empty reply",
+        "commercial term",
+        "AI mention",
+        "generic phrase",
+        "unapproved clarification",
+        "unsupported current state",
+        "unsupported task action",
+        "uncertain commitment",
+        "customer skill assumption",
+        "too many questions",
+        "missing concrete action",
+        "missing task reference",
+    }
+)
 MAX_REPLY_LENGTH = 850
 MIN_REPLY_LENGTH = 260
 MAX_REPLY_SENTENCES = 6
@@ -139,6 +177,8 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
         issues.append("unapproved clarification")
     if _has_unsupported_current_state_claim(clean, context):
         issues.append("unsupported current state")
+    if _has_unsupported_task_action(clean, context):
+        issues.append("unsupported task action")
     if UNCERTAIN_COMMITMENT_PATTERN.search(clean):
         issues.append("uncertain commitment")
     if CUSTOMER_SKILL_ASSUMPTION_PATTERN.search(clean):
@@ -159,6 +199,13 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
     if not _mentions_task(clean, context):
         issues.append("missing task reference")
     return tuple(issues)
+
+
+def reply_delivery_issues(reply: str, context: ReplyDraftContext) -> tuple[str, ...]:
+    """Return only unsafe issues that must block direct delivery to a customer."""
+    return tuple(
+        issue for issue in reply_quality_issues(reply, context) if issue in DELIVERY_BLOCKING_ISSUES
+    )
 
 
 def _compose_with_deepseek(
@@ -417,6 +464,17 @@ def _has_unsupported_current_state_claim(reply: str, context: ReplyDraftContext)
     return False
 
 
+def _has_unsupported_task_action(reply: str, context: ReplyDraftContext) -> bool:
+    """Reject specific implementation claims that have no support in the order facts."""
+    facts = " ".join(
+        (context.title, context.task_summary, context.source_text, context.attachment_context)
+    )
+    return any(
+        pattern.search(reply) is not None and pattern.search(facts) is None
+        for pattern in TASK_ACTION_REFERENCE_PATTERNS
+    )
+
+
 def _fallback_reply(context: ReplyDraftContext) -> str:
     summary = _safe_fallback_summary(context)
     details = " ".join((context.title, context.task_summary, context.source_text, context.attachment_context)).lower()
@@ -451,27 +509,27 @@ def _has_unsafe_summary_language(value: str) -> bool:
 
 
 def _fallback_actions(details: str) -> tuple[str, str]:
-    if "форм" in details:
+    if FORM_TASK_PATTERN.search(details):
         return (
-            "Сначала проверю текущую отправку формы и валидацию на мобильных, затем внесу нужные правки в разметку и стили.",
-            "После изменений протестирую сценарий на телефоне и в основных браузерах, чтобы заявки стабильно доходили.",
+            "Сначала разберу сценарий работы формы и обработку заявок, затем внесу нужные правки в разметку и логику.",
+            "После изменений пройду основной пользовательский сценарий и проверю, что заявки доходят корректно.",
         )
-    if "wordpress" in details or "вордпресс" in details:
+    if WORDPRESS_TASK_PATTERN.search(details):
         return (
-            "Проверю текущие настройки WordPress и связанные плагины, затем внесу изменения по задаче.",
+            "Разберу структуру сайта и требования, затем внесу нужные изменения на WordPress.",
             "После этого пройду основной пользовательский сценарий и покажу работающий результат.",
         )
-    if any(word in details for word in ("верст", "лендинг", "адаптив", "макет", "figma", "psd")):
+    if LAYOUT_TASK_PATTERN.search(details):
         return (
             "Сверстаю нужные блоки по описанию, настрою адаптив и аккуратно подключу требуемую логику.",
             "Проверю отображение на основных разрешениях и покажу готовый вариант перед сдачей.",
         )
-    if any(word in details for word in ("api", "интеграц", "парсер", "импорт")):
+    if INTEGRATION_TASK_PATTERN.search(details):
         return (
             "Сначала сверю входные данные и текущую интеграцию, затем настрою обмен и обработку нужных полей.",
             "После этого проверю работу на реальном сценарии и зафиксирую результат.",
         )
-    if any(word in details for word in ("домен", "dns", "vercel", "хостинг")):
+    if DOMAIN_TASK_PATTERN.search(details):
         return (
             "Проверю текущие DNS-записи и настройки проекта, затем внесу необходимые изменения без лишних редиректов.",
             "После этого удостоверюсь, что сайт корректно открывается по нужному адресу.",

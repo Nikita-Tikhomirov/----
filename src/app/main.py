@@ -221,9 +221,10 @@ def scan_once(
             )
             continue
 
+        reply_title = project_title.strip() or _proposal_title_from_text(post.text, judge_result.summary)
         reply_context = ReplyDraftContext(
-            title=_proposal_title_from_text(post.text, judge_result.summary),
-            task_summary=judge_result.summary,
+            title=reply_title,
+            task_summary=reply_title or "вашу задачу",
             source_text=_reply_source_text(
                 post_text=post.text,
                 project_title=project_title,
