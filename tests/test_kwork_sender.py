@@ -106,6 +106,8 @@ def test_reply_form_opener_supports_kwork_span_buttons():
     assert ".vs__dropdown-option" in _FILL_AND_SUBMIT_SCRIPT
     assert "duration-select__selected-option" in _FILL_AND_SUBMIT_SCRIPT
     assert "input-style--error" in _FILL_AND_SUBMIT_SCRIPT
+    assert "priceErrorText" in _FILL_AND_SUBMIT_SCRIPT
+    assert "Стоимость может быть не более" in _FILL_AND_SUBMIT_SCRIPT
     assert ".duration-select__selected-option')" in _FILL_AND_SUBMIT_SCRIPT
     assert "|| durationWidget?.querySelector('.vs__selected')" in _FILL_AND_SUBMIT_SCRIPT
 

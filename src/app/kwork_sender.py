@@ -553,6 +553,12 @@ async (payload) => {
   const digits = value => String(value || '').replace(/\D/g, '');
   const matchesText = (el, value) => !value || fieldValue(el).includes(norm(value));
   const matchesNumber = (el, value) => !value || digits(fieldValue(el)) === digits(value);
+  const fieldErrorText = el => {
+    const root = el?.closest('.budget-input-wrap,.wrap-input-action,.modal-individual-message__column');
+    const error = Array.from(root?.querySelectorAll('.form-item__error') || [])
+      .find(item => visible(item) && norm(item.innerText));
+    return norm(error?.innerText);
+  };
   const setValue = (el, value) => {
     if (!el) return false;
     el.focus();
@@ -644,6 +650,9 @@ async (payload) => {
   }
   const messageFilled = matchesText(messageField, payload.text);
   const priceHasError = Boolean(priceField?.classList.contains('input-style--error'));
+  const priceErrorText = priceHasError
+    ? (fieldErrorText(priceField) || 'Стоимость может быть не более допустимого лимита')
+    : '';
   const priceFilled = !payload.price || (matchesNumber(priceField, payload.price) && !priceHasError);
   const titleFilled = !payload.title || matchesText(titleField, payload.title.slice(0, 70));
   const selectedDuration = durationWidget?.querySelector('.duration-select__selected-option')
@@ -654,7 +663,7 @@ async (payload) => {
   const missing = [];
   if (!messageFilled) missing.push('reply text');
   if (payload.title && !titleFilled) missing.push('order title');
-  if (payload.price && !priceFilled) missing.push('price');
+  if (payload.price && !priceFilled) missing.push(priceErrorText || 'price');
   if (payload.days && !daysFilled) missing.push('deadline');
   if (missing.length) {
     return JSON.stringify({
@@ -662,6 +671,7 @@ async (payload) => {
       submitted: false,
       messageFilled,
       priceFilled,
+      priceErrorText,
       titleFilled,
       daysFilled,
       reason: 'Kwork did not accept required fields: ' + missing.join(', ')
@@ -673,6 +683,7 @@ async (payload) => {
       submitted: false,
       messageFilled,
       priceFilled,
+      priceErrorText,
       titleFilled,
       daysFilled
     });
