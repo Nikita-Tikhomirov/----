@@ -341,6 +341,9 @@ class KworkReplySender:
 
         deadline = time.monotonic() + min(self.timeout_seconds, 10)
         while time.monotonic() < deadline:
+            current_url = str(kwork_source._evaluate(ws, "location.href") or "")
+            if _is_kwork_reply_destination(current_url):
+                return
             text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
             lowered = text.lower()
             if re.search(
@@ -429,6 +432,15 @@ def _is_offer_page_for_project(url: str, project_id: str) -> bool:
 def _is_kwork_inbox_url(url: str) -> bool:
     parsed = urlparse(url)
     return parsed.netloc.lower().endswith("kwork.ru") and parsed.path.rstrip("/").startswith("/inbox")
+
+
+def _is_kwork_reply_destination(url: str) -> bool:
+    """Recognize Kwork's post-submit redirect without mistaking the offer form for success."""
+    parsed = urlparse(url)
+    if not parsed.netloc.lower().endswith("kwork.ru"):
+        return False
+    path = parsed.path.rstrip("/")
+    return path.startswith("/inbox") or re.fullmatch(r"/projects/\d+(?:/view)?", path) is not None
 
 
 def _page_ids(pages: list[dict]) -> set[str]:

@@ -7,6 +7,7 @@ from app.kwork_sender import (
     _AUTO_LOGIN_SCRIPT,
     _extract_reply_terms,
     _form_fill_errors,
+    _is_kwork_reply_destination,
     _login_required_message,
     _offer_url,
 )
@@ -217,6 +218,12 @@ def test_kwork_reply_sender_passes_structured_terms_from_approval(monkeypatch):
 
 def test_offer_url_targets_kwork_new_offer_page():
     assert _offer_url("https://kwork.ru/projects/3190074/view") == "https://kwork.ru/new_offer?project=3190074"
+
+
+def test_kwork_reply_destination_recognizes_verified_redirect_after_submit():
+    assert _is_kwork_reply_destination("https://kwork.ru/inbox")
+    assert _is_kwork_reply_destination("https://kwork.ru/projects/3190074/view")
+    assert not _is_kwork_reply_destination("https://kwork.ru/new_offer?project=3190074")
 
 
 def test_kwork_reply_sender_uses_new_offer_page_for_reply_form(monkeypatch):
