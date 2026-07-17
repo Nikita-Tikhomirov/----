@@ -256,6 +256,10 @@ def test_scan_once_uses_ai_judge_for_summary_reply_and_score(tmp_path):
         telegram_client=FakeTelegramClient(),
         email_client=email_client,
         lead_judge=fake_judge,
+        reply_composer=lambda context, seed_reply, **kwargs: (
+            "Здравствуйте! Проверю логику калькулятора, внесу нужные правки и протестирую расчеты. "
+            "Готов показать работающий результат после проверки основных сценариев."
+        ),
         deepseek_api_key="sk-test",
     )
 
