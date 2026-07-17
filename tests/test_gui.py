@@ -557,6 +557,31 @@ def test_apply_kwork_price_limit_only_updates_the_editable_price_field():
     assert logs == ["Лид #29: в поле цены подставлен максимум Kwork 3000 руб.\n"]
 
 
+def test_gui_prevents_duplicate_one_time_action_and_reenables_its_button():
+    class Button:
+        def __init__(self):
+            self.configured = []
+
+        def config(self, **kwargs):
+            self.configured.append(kwargs)
+
+    button = Button()
+    logs = []
+    dummy = SimpleNamespace(
+        running_once_actions=set(),
+        once_action_buttons={"Сканирование": button},
+        write_log=logs.append,
+    )
+
+    assert LeadFunnelGui._begin_once_action(dummy, "Сканирование") is True
+    assert LeadFunnelGui._begin_once_action(dummy, "Сканирование") is False
+    LeadFunnelGui._finish_once_action(dummy, "Сканирование")
+
+    assert button.configured == [{"state": "disabled"}, {"state": "normal"}]
+    assert dummy.running_once_actions == set()
+    assert logs == ["Сканирование уже выполняется.\n"]
+
+
 def test_gui_payload_removes_price_from_manually_edited_reply():
     class Value:
         def __init__(self, value):

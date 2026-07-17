@@ -96,6 +96,8 @@ class LeadFunnelGui:
         self.attachment_rows: dict[str, LeadAttachment] = {}
         self.rejection_rows: dict[str, PostRejection] = {}
         self.in_flight_lead_ids: set[int] = set()
+        self.running_once_actions: set[str] = set()
+        self.once_action_buttons: dict[str, ttk.Button] = {}
         self.pending_replies: dict[int, str] = {}
         self.lead_action_errors: dict[int, str] = {}
         self.kwork_price_limits: dict[int, int] = {}
@@ -187,6 +189,13 @@ class LeadFunnelGui:
         self.stop_watch_button.pack(side="left", padx=8)
         self.approvals_button = ttk.Button(bar, text="Проверить почту", command=self.process_approvals, style="Modern.TButton")
         self.approvals_button.pack(side="left", padx=8)
+        self.once_action_buttons.update(
+            {
+                "Kwork Chrome": self.start_browser_button,
+                "Сканирование": self.scan_button,
+                "Проверка почты": self.approvals_button,
+            }
+        )
         self.clear_button = ttk.Button(bar, text="Очистить лог", command=self.clear_log, style="Modern.TButton")
         self.clear_button.pack(side="right")
 
@@ -1000,6 +1009,8 @@ class LeadFunnelGui:
         self.root.destroy()
 
     def _run_once(self, command: list[str], env: dict[str, str], label: str) -> None:
+        if not LeadFunnelGui._begin_once_action(self, label):
+            return
         self.status_var.set(f"{label}: выполняется")
         self.write_log(f"=== {label}: старт ===\n")
         threading.Thread(target=self._run_once_thread, args=(command, env, label), daemon=True).start()
@@ -1021,16 +1032,34 @@ class LeadFunnelGui:
         except Exception as exc:
             self.root.after(0, lambda: self.status_var.set(f"{label}: ошибка"))
             self.write_log(f"=== {label}: не удалось запустить: {exc} ===\n")
-            return
-
-        return_code = process.returncode
-        if return_code == 0:
-            self.root.after(0, lambda: self.status_var.set(f"{label}: завершено"))
         else:
-            self.root.after(0, lambda: self.status_var.set(f"{label}: ошибка (код {return_code})"))
-        self.write_log(f"=== {label}: завершено с кодом {return_code} ===\n")
-        if _should_refresh_after_process(label):
-            self.root.after(0, self.refresh_leads)
+            return_code = process.returncode
+            if return_code == 0:
+                self.root.after(0, lambda: self.status_var.set(f"{label}: завершено"))
+            else:
+                self.root.after(0, lambda: self.status_var.set(f"{label}: ошибка (код {return_code})"))
+            self.write_log(f"=== {label}: завершено с кодом {return_code} ===\n")
+            if _should_refresh_after_process(label):
+                self.root.after(0, self.refresh_leads)
+        finally:
+            self.root.after(0, lambda: LeadFunnelGui._finish_once_action(self, label))
+
+    def _begin_once_action(self, label: str) -> bool:
+        running_actions = getattr(self, "running_once_actions", set())
+        if label in running_actions:
+            self.write_log(f"{label} уже выполняется.\n")
+            return False
+        running_actions.add(label)
+        button = getattr(self, "once_action_buttons", {}).get(label)
+        if button is not None:
+            button.config(state=DISABLED)
+        return True
+
+    def _finish_once_action(self, label: str) -> None:
+        getattr(self, "running_once_actions", set()).discard(label)
+        button = getattr(self, "once_action_buttons", {}).get(label)
+        if button is not None:
+            button.config(state=NORMAL)
 
     def _stream_process(self, process: subprocess.Popen[str], label: str) -> None:
         assert process.stdout is not None
