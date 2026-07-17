@@ -20,6 +20,24 @@ GENERIC_PHRASE_PATTERN = re.compile(
     r"если\s+(?:нужно|понадобится).{0,80}?(?:скажите|напишите))",
     re.IGNORECASE,
 )
+CLARIFICATION_REQUEST_PATTERN = re.compile(
+    r"\b(?:уточните|напишите|скажите|сообщите|пришлите|предоставьте|"
+    r"подскажите|поясните|дайте)\b",
+    re.IGNORECASE,
+)
+IMPLICIT_QUESTION_PATTERN = re.compile(
+    r"^(?:какой|какая|какие|сколько|куда|когда|где|кто|что|есть\s+ли|нужн[аоы]\s+ли)\b",
+    re.IGNORECASE,
+)
+CURRENT_STATE_CLAIM_PATTERN = re.compile(
+    r"\bна\s+(?:десктоп\w*|desktop|компьютер\w*|мобильн\w*|телефон\w*|ios|android)"
+    r"[^.!?]{0,70}?(?:всё\s+)?(?:не\s+)?(?:работает|срабатывает|падает|ломается|исправно)\b",
+    re.IGNORECASE,
+)
+CURRENT_STATE_ENVIRONMENT_GROUPS = (
+    ("десктоп", "desktop", "компьютер"),
+    ("мобиль", "телефон", "ios", "android"),
+)
 AI_MENTION_PATTERN = re.compile(
     r"(?:\b(?:ai|gpt|chatgpt)\b|нейросет\w*|искусственн\w*\s+интеллект\w*|"
     r"(?:ai|ии)[-\s]?агент\w*)",
@@ -106,6 +124,10 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
         issues.append("AI mention")
     if GENERIC_PHRASE_PATTERN.search(clean):
         issues.append("generic phrase")
+    if _has_unapproved_clarification(clean, context):
+        issues.append("unapproved clarification")
+    if _has_unsupported_current_state_claim(clean, context):
+        issues.append("unsupported current state")
     if clean.count("?") > 1:
         issues.append("too many questions")
     if len(clean) < MIN_REPLY_LENGTH:
@@ -217,6 +239,14 @@ def _repair_with_deepseek(
 def _writer_prompt(context: ReplyDraftContext) -> str:
     facts = _redacted_facts(context)
     question = _safe_question(context.blocking_question)
+    question_policy = (
+        "Разрешён ровно один вопрос, только дословно такой: "
+        f"«{question}». Не добавляй другие вопросы, просьбы уточнить детали, прислать файлы или дать доступ."
+        if question
+        else "Не задавай вопросов и не проси уточнения, файлы, доступы или подтверждения. "
+        "Если детали неизвестны, не выдумывай их и продолжай по фактам задачи. "
+        "Не добавляй факты о текущем состоянии сайта, устройствах, доступах или технологиях, если их нет в фактах."
+    )
     return "\n\n".join(
         part
         for part in (
@@ -228,20 +258,29 @@ def _writer_prompt(context: ReplyDraftContext) -> str:
                 "Не упоминай коммерческие условия, скидки, оплату, AI, нейросети, портфолио или опыт, которого нет. "
                 "Не повторяй всё ТЗ, не используй фразы «план такой» или «если нужно, скажите». "
                 "Не делай больше пяти предложений, или шести вместе с отдельным приветствием. "
-                "Последним предложением спокойно подтверди готовность начать."
+                "Последним предложением от первого лица спокойно подтверди готовность начать работу; "
+                "не перекладывай на клиента поиск ответа или согласование деталей."
             ),
-            f"Единственный допустимый вопрос, если он действительно нужен: {question}" if question else "",
+            question_policy,
         )
         if part
     )
 
 
 def _review_prompt(candidate: str, context: ReplyDraftContext) -> str:
+    question = _safe_question(context.blocking_question)
+    question_policy = (
+        f"Разрешён ровно один вопрос, только дословно такой: «{question}»."
+        if question
+        else "Вопросов и просьб к заказчику в этом отклике быть не должно."
+    )
     return (
         "Проверь отклик на Kwork-заказ. Одобри только если он опирается на факты, "
         "решает основную задачу клиента, называет конкретные действия и результат, "
         "не содержит коммерческих условий, выдуманных утверждений, AI-слов и пустых фраз. "
-        "Вопрос допустим только один и только если он нужен для старта. "
+        "Утверждение о том, что что-то уже работает или не работает на конкретном устройстве или в среде, "
+        "допустимо только если это прямо есть в фактах. "
+        f"{question_policy} "
         "Верни строго JSON: {\"approved\": true|false, \"issues\": [\"краткая причина\"]}.\n\n"
         f"Факты:\n{_redacted_facts(context)}\n\n"
         f"Отклик:\n{_normalize_reply(candidate)}"
@@ -250,10 +289,18 @@ def _review_prompt(candidate: str, context: ReplyDraftContext) -> str:
 
 def _repair_prompt(candidate: str, issues: tuple[str, ...], context: ReplyDraftContext) -> str:
     issue_text = "; ".join(issues) or "нужна более точная формулировка"
+    question = _safe_question(context.blocking_question)
+    question_policy = (
+        f"Разрешён только вопрос «{question}» и только один раз."
+        if question
+        else "Не задавай вопросов и не проси заказчика уточнить, прислать или подтвердить что-либо."
+    )
     return (
         "Перепиши отклик по фактам ниже. Верни только готовый текст без markdown. "
         "Сохрани спокойный человеческий тон, 4-5 предложений и 350-850 символов. "
-        "Не добавляй коммерческие условия, выдуманный опыт, AI-слова или лишние вопросы.\n\n"
+        "Не добавляй коммерческие условия, выдуманный опыт или AI-слова. "
+        "Не добавляй неподтвержденные факты о текущем состоянии сайта, устройствах, доступах или технологиях. "
+        f"{question_policy}\n\n"
         f"Причины правки: {issue_text}\n\n"
         f"Факты:\n{_redacted_facts(context)}\n\n"
         f"Текущий отклик:\n{_normalize_reply(candidate)}"
@@ -311,6 +358,42 @@ def _safe_question(value: str) -> str:
     if not question or GENERIC_PHRASE_PATTERN.search(question) or question.count("?") > 1:
         return ""
     return question[:220]
+
+
+def _has_unapproved_clarification(reply: str, context: ReplyDraftContext) -> bool:
+    """Allow only the exact blocking question, when the judge supplied one."""
+    allowed_question = _question_key(_safe_question(context.blocking_question))
+    for sentence in _sentences(reply):
+        normalized_sentence = _question_key(sentence)
+        is_allowed_question = bool(allowed_question and normalized_sentence == allowed_question)
+        if "?" in sentence and not is_allowed_question:
+            return True
+        if is_allowed_question:
+            continue
+        if CLARIFICATION_REQUEST_PATTERN.search(sentence):
+            return True
+        if IMPLICIT_QUESTION_PATTERN.search(sentence):
+            return True
+    return False
+
+
+def _question_key(value: str) -> str:
+    return _normalize_reply(value).lower().rstrip(" ?!.")
+
+
+def _has_unsupported_current_state_claim(reply: str, context: ReplyDraftContext) -> bool:
+    """Reject claims that an unmentioned environment already works or fails."""
+    source = " ".join(
+        (context.title, context.task_summary, context.source_text, context.attachment_context)
+    ).lower()
+    for claim in CURRENT_STATE_CLAIM_PATTERN.findall(reply):
+        lowered_claim = claim.lower()
+        for environment_group in CURRENT_STATE_ENVIRONMENT_GROUPS:
+            if any(term in lowered_claim for term in environment_group) and not any(
+                term in source for term in environment_group
+            ):
+                return True
+    return False
 
 
 def _fallback_reply(context: ReplyDraftContext) -> str:

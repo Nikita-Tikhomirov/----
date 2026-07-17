@@ -1,7 +1,13 @@
 import re
+from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
-from app.reply_composer import ReplyDraftContext, compose_customer_reply, reply_quality_issues
+from app.reply_composer import (
+    ReplyDraftContext,
+    _writer_prompt,
+    compose_customer_reply,
+    reply_quality_issues,
+)
 
 
 def _form_context() -> ReplyDraftContext:
@@ -98,6 +104,124 @@ def test_quality_gate_marks_ai_and_multiple_questions_as_unsafe():
     assert "AI mention" in issues
     assert "too many questions" in issues
     assert "generic phrase" in issues
+
+
+def test_quality_gate_rejects_hidden_clarification_without_allowed_question():
+    issues = reply_quality_issues(
+        (
+            "Здравствуйте! Вижу проблему с отправкой формы заявки и адаптивом лендинга. "
+            "Проверю валидацию и обработку данных, затем внесу нужные правки в разметку и стили. "
+            "Уточните, куда должны приходить заявки после отправки формы. "
+            "После изменений протестирую сценарий на телефоне и в основных браузерах. "
+            "Готов приступить сразу."
+        ),
+        _form_context(),
+    )
+
+    assert "unapproved clarification" in issues
+
+
+def test_quality_gate_allows_only_explicit_blocking_question():
+    context = replace(
+        _form_context(),
+        blocking_question="К какой CRM нужно подключить форму?",
+    )
+    issues = reply_quality_issues(
+        (
+            "Здравствуйте! Вижу задачу по исправлению формы заявки и адаптива лендинга. "
+            "К какой CRM нужно подключить форму? "
+            "Проверю текущую валидацию, внесу правки в обработку данных и адаптивные стили. "
+            "После этого протестирую отправку формы на телефоне и компьютере. "
+            "Готов приступить сразу."
+        ),
+        context,
+    )
+
+    assert "unapproved clarification" not in issues
+
+
+def test_quality_gate_rejects_different_question_with_allowed_blocking_question():
+    context = replace(
+        _form_context(),
+        blocking_question="К какой CRM нужно подключить форму?",
+    )
+    issues = reply_quality_issues(
+        (
+            "Здравствуйте! Вижу задачу по исправлению формы заявки и адаптива лендинга. "
+            "Куда нужно отправлять заявки после заполнения формы? "
+            "Проверю текущую валидацию, внесу правки в обработку данных и адаптивные стили. "
+            "После этого протестирую отправку формы на телефоне и компьютере. "
+            "Готов приступить сразу."
+        ),
+        context,
+    )
+
+    assert "unapproved clarification" in issues
+
+
+def test_quality_gate_rejects_implicit_question_without_question_mark():
+    issues = reply_quality_issues(
+        (
+            "Здравствуйте! Вижу проблему с отправкой формы заявки и адаптивом лендинга. "
+            "Какая CRM используется для заявок с формы. "
+            "Проверю текущую валидацию, внесу правки в обработку данных и адаптивные стили. "
+            "После этого протестирую отправку формы на телефоне и компьютере. "
+            "Готов приступить сразу."
+        ),
+        _form_context(),
+    )
+
+    assert "unapproved clarification" in issues
+
+
+def test_quality_gate_rejects_unconfirmed_current_state_claim():
+    issues = reply_quality_issues(
+        (
+            "Здравствуйте! Вижу проблему с отправкой формы заявки на мобильных и адаптивом лендинга. "
+            "На десктопе всё работает, поэтому проверю обработку данных только для телефона. "
+            "Затем внесу правки в разметку и стили, чтобы форма корректно реагировала на действия пользователя. "
+            "После этого протестирую сценарий на телефоне и в основных браузерах. "
+            "Готов приступить сразу."
+        ),
+        _form_context(),
+    )
+
+    assert "unsupported current state" in issues
+
+
+def test_writer_prompt_forbids_questions_without_blocking_question():
+    prompt = _writer_prompt(_form_context()).lower()
+
+    assert "не задавай вопросов" in prompt
+    assert "не добавляй факты о текущем состоянии" in prompt
+
+
+def test_composer_falls_back_when_provider_keeps_prohibited_clarification():
+    unsafe_reply = (
+        "Здравствуйте! Вижу проблему с отправкой формы заявки на мобильных и адаптивом лендинга. "
+        "Проверю текущую валидацию и обработку данных, затем внесу правки в разметку и стили. "
+        "Напишите, куда должны приходить заявки после заполнения формы. "
+        "После этого протестирую сценарий на телефоне и в основных браузерах. "
+        "Готов приступить сразу."
+    )
+    mock_client = MagicMock()
+    writer_choice = MagicMock()
+    writer_choice.message.content = unsafe_reply
+    reviewer_choice = MagicMock()
+    reviewer_choice.message.content = '{"approved": true, "issues": []}'
+    repair_choice = MagicMock()
+    repair_choice.message.content = unsafe_reply
+    mock_client.chat.completions.create.side_effect = [
+        MagicMock(choices=[writer_choice]),
+        MagicMock(choices=[reviewer_choice]),
+        MagicMock(choices=[repair_choice]),
+    ]
+
+    with patch("openai.OpenAI", return_value=mock_client):
+        reply = compose_customer_reply(_form_context(), "", api_key="sk-test")
+
+    assert "напишите, куда" not in reply.lower()
+    assert "unapproved clarification" not in reply_quality_issues(reply, _form_context())
 
 
 def test_quality_gate_rejects_overly_detailed_reply():
