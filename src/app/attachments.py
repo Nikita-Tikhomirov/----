@@ -153,8 +153,16 @@ def build_attachment_report(
 
     blocks: list[str] = ["ФАЙЛЫ/ТЗ:"]
     reports: list[AttachmentReport] = []
-    for raw in attachments[:max_files]:
+    seen_urls: set[str] = set()
+    for raw in attachments:
+        if len(reports) >= max_files:
+            break
         ref = parse_attachment(raw)
+        attachment_key = _attachment_identity(ref)
+        if attachment_key in seen_urls:
+            logger.info("Skipping duplicate attachment URL: %s", ref.url)
+            continue
+        seen_urls.add(attachment_key)
         local_path = ""
         try:
             content = _download_with_fallback(
@@ -212,6 +220,18 @@ def parse_attachment(raw: str) -> AttachmentRef:
         url = raw.strip()
         label = url.rsplit("/", 1)[-1] or "attachment"
     return AttachmentRef(label=_clean_label(label), url=url.strip())
+
+
+def _attachment_identity(ref: AttachmentRef) -> str:
+    """Normalize a URL enough to avoid processing the same Kwork file twice."""
+    parsed = urlparse(ref.url)
+    if parsed.scheme and parsed.netloc:
+        return parsed._replace(
+            scheme=parsed.scheme.lower(),
+            netloc=parsed.netloc.lower(),
+            fragment="",
+        ).geturl()
+    return ref.url.strip()
 
 
 def _clean_label(value: str) -> str:

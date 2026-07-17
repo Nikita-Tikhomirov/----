@@ -54,6 +54,28 @@ def test_build_attachment_context_reads_text_attachment(monkeypatch):
     assert "brief text from customer" in context
 
 
+def test_attachment_report_downloads_each_url_once_when_collector_repeats_a_file(monkeypatch):
+    downloaded_urls = []
+
+    def fake_download(url, cookie="", max_bytes=2_000_000):
+        downloaded_urls.append(url)
+        return b"brief text from customer"
+
+    monkeypatch.setattr("app.attachments.download_attachment", fake_download)
+
+    result = build_attachment_report(
+        (
+            "ТЗ.txt: https://kwork.ru/files/tz.txt",
+            "ТЗ - повтор: https://kwork.ru/files/tz.txt",
+        ),
+        cookie="",
+    )
+
+    assert downloaded_urls == ["https://kwork.ru/files/tz.txt"]
+    assert len(result.reports) == 1
+    assert result.reports[0].label == "ТЗ.txt"
+
+
 def test_build_attachment_context_can_download_with_browser_session(monkeypatch):
     direct_calls = []
     browser_calls = []
