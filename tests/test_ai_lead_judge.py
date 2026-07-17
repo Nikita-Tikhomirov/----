@@ -200,6 +200,41 @@ def test_sanitize_customer_reply_does_not_restore_budget_from_legacy_summary():
     assert "парсер" in reply.lower()
 
 
+def test_sanitize_customer_reply_keeps_technical_payment_feature():
+    original = (
+        "Здравствуйте! Посмотрел задачу по WordPress-сайту с каталогом товаров. "
+        "Сверю структуру страниц, затем соберу нужные разделы и карточки каталога. "
+        "Проверю сценарий оформления и оплаты, чтобы пользователь мог пройти путь до заказа. "
+        "После этого покажу рабочий результат и смогу приступить сразу."
+    )
+
+    reply = sanitize_customer_reply(
+        original,
+        summary="Посадить сайт на WordPress с каталогом и подключением оплаты",
+        estimated_days=5,
+    )
+
+    assert reply == original
+
+
+def test_sanitize_customer_reply_removes_payment_terms():
+    original = (
+        "Здравствуйте! Посмотрел задачу по WordPress-сайту с каталогом товаров. "
+        "Сверю структуру страниц, затем соберу нужные разделы и карточки каталога. "
+        "Проверю сценарий оформления и оплаты, чтобы пользователь мог пройти путь до заказа. "
+        "Оплата после сдачи, после этого покажу рабочий результат."
+    )
+
+    reply = sanitize_customer_reply(
+        original,
+        summary="Посадить сайт на WordPress с каталогом и подключением оплаты",
+        estimated_days=5,
+    )
+
+    assert "оплата после сдачи" not in reply.lower()
+    assert "сценарий оформления и оплаты" in reply.lower()
+
+
 def test_build_prompt_demands_specific_human_kwork_reply():
     prompt = _build_prompt(
         "Kwork facts:\nБюджет: до 15000 руб.\nОсталось: 2 д.\n"
@@ -212,3 +247,10 @@ def test_build_prompt_demands_specific_human_kwork_reply():
     assert "конкретный следующий шаг" in prompt
     assert "не указывай цену" in prompt.lower()
     assert "не начинай с «я правильно понимаю»" in prompt.lower()
+
+
+def test_build_prompt_allows_explicit_technical_payment_scope():
+    prompt = _build_prompt("Нужны каталог товаров и подключение оплаты через сайт.").lower()
+
+    assert "условия оплаты" in prompt
+    assert "техническую задачу" in prompt

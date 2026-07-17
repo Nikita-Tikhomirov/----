@@ -7,13 +7,10 @@ import logging
 import re
 from dataclasses import dataclass
 
+from app.reply_policy import COMMERCIAL_REPLY_PATTERN
+
 logger = logging.getLogger(__name__)
 
-COMMERCIAL_PATTERN = re.compile(
-    r"(?:\b(?:цена|стоим|бюджет|оплат|предоплат|скидк|ставка)\w*|"
-    r"\d[\d\s.,]*\s*(?:₽|руб(?:\.|лей)?|р\.?|тыс\.?|к\b))",
-    re.IGNORECASE,
-)
 GENERIC_PHRASE_PATTERN = re.compile(
     r"(?:уточните\s+детали|обсудим\s+(?:детали|всё|все)|давайте\s+обсудим|"
     r"я\s+правильно\s+понимаю|готов\s+помочь|буду\s+рад\s+помочь|"
@@ -75,6 +72,7 @@ INTEGRATION_TASK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 PAYMENT_TASK_PATTERN = re.compile(r"\b(?:платеж\w*|оплат\w*|эквайринг\w*)\b", re.IGNORECASE)
+CATALOG_TASK_PATTERN = re.compile(r"\b(?:каталог\w*|товар\w*|карточк\w*)\b", re.IGNORECASE)
 DOMAIN_TASK_PATTERN = re.compile(r"\b(?:домен\w*|dns|vercel|хостинг\w*)\b", re.IGNORECASE)
 TASK_ACTION_REFERENCE_PATTERNS = (
     FORM_TASK_PATTERN,
@@ -181,7 +179,7 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
 
     issues: list[str] = []
     lowered = clean.lower()
-    if COMMERCIAL_PATTERN.search(clean):
+    if COMMERCIAL_REPLY_PATTERN.search(clean):
         issues.append("commercial term")
     if AI_MENTION_PATTERN.search(clean):
         issues.append("AI mention")
@@ -348,7 +346,8 @@ def _writer_prompt(context: ReplyDraftContext) -> str:
                 "Напиши готовое сообщение заказчику: 4-5 коротких предложений, 350-850 символов. "
                 "Сначала покажи, что понял конечный результат, затем назови конкретные действия и проверку. "
                 f"Реалистичный срок: до {max(1, context.estimated_days)} дн. "
-                "Не упоминай коммерческие условия, скидки, оплату, AI, нейросети, портфолио или опыт, которого нет. "
+                "Не упоминай цену, вилку, валюту, скидки или условия оплаты, а также AI, нейросети, портфолио или опыт, которого нет. "
+                "Техническую оплату на сайте упоминай только если она прямо есть в фактах заказа. "
                 "Не повторяй всё ТЗ, не используй фразы «план такой» или «если нужно, скажите». "
                 "Не делай больше пяти предложений, или шести вместе с отдельным приветствием. "
                 "Последним предложением от первого лица спокойно подтверди готовность начать работу; "
@@ -418,13 +417,13 @@ def _redacted_facts(context: ReplyDraftContext) -> str:
 
 def _redact_commercial_context(value: str) -> str:
     parts = re.split(r"(?<=[.!?])\s+|\n+", value)
-    safe_parts = [part.strip() for part in parts if part.strip() and not COMMERCIAL_PATTERN.search(part)]
+    safe_parts = [part.strip() for part in parts if part.strip() and not COMMERCIAL_REPLY_PATTERN.search(part)]
     return " ".join(safe_parts)
 
 
 def _remove_commercial_sentences(reply: str) -> str:
     sentences = _sentences(reply)
-    return " ".join(sentence for sentence in sentences if not COMMERCIAL_PATTERN.search(sentence))
+    return " ".join(sentence for sentence in sentences if not COMMERCIAL_REPLY_PATTERN.search(sentence))
 
 
 def _normalize_reply(value: str) -> str:
@@ -544,6 +543,21 @@ def _fallback_actions(details: str) -> tuple[str, str]:
             "После изменений пройду основной пользовательский сценарий и проверю, что заявки доходят корректно.",
         )
     if WORDPRESS_TASK_PATTERN.search(details):
+        if CATALOG_TASK_PATTERN.search(details) and PAYMENT_TASK_PATTERN.search(details):
+            return (
+                "Сверю структуру страниц и каталог товаров, затем соберу нужные разделы на WordPress.",
+                "Проверю сценарий оформления и оплаты, чтобы пользователь мог пройти путь от каталога до заказа.",
+            )
+        if CATALOG_TASK_PATTERN.search(details):
+            return (
+                "Сверю структуру страниц и каталог товаров, затем соберу нужные разделы на WordPress.",
+                "После этого проверю карточки товаров и основной пользовательский сценарий на сайте.",
+            )
+        if PAYMENT_TASK_PATTERN.search(details):
+            return (
+                "Разберу структуру сайта и требования, затем внесу нужные изменения на WordPress.",
+                "После этого проверю сценарий оформления и оплаты, чтобы пользователь мог завершить заказ на сайте.",
+            )
         return (
             "Разберу структуру сайта и требования, затем внесу нужные изменения на WordPress.",
             "После этого пройду основной пользовательский сценарий и покажу работающий результат.",

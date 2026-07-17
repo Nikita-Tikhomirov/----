@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from app.reply_composer import (
     ReplyDraftContext,
+    _redacted_facts,
     _writer_prompt,
     compose_customer_reply,
     reply_quality_issues,
@@ -288,6 +289,98 @@ def test_fallback_does_not_treat_information_page_as_form_task():
     assert "валидацию на мобильных" not in lowered
     assert "wordpress" in lowered
     assert reply_quality_issues(reply, context) == ()
+
+
+def test_wordpress_catalog_payment_fallback_uses_explicit_order_scope():
+    context = ReplyDraftContext(
+        title="Посадка сайта на WordPress",
+        task_summary="Посадить сайт на WordPress с каталогом товаров и оплатой",
+        source_text=(
+            "Нужна посадка сайта на WordPress. Каталог товаров и подключение оплаты через сайт. "
+            "Возможны варианты реализации."
+        ),
+        attachment_context="",
+        estimated_days=5,
+    )
+
+    reply = compose_customer_reply(context, "Цена 500 руб.")
+
+    lowered = reply.lower()
+    assert "каталог" in lowered
+    assert "оплат" in lowered
+    assert "импорт" not in lowered
+    assert "фильтр" not in lowered
+    assert reply_quality_issues(reply, context) == ()
+
+
+def test_writer_prompt_distinguishes_payment_feature_from_payment_terms():
+    prompt = _writer_prompt(
+        ReplyDraftContext(
+            title="Посадка сайта на WordPress",
+            task_summary="Посадить сайт на WordPress с каталогом товаров и оплатой",
+            source_text="Нужны каталог товаров и подключение оплаты через сайт.",
+            attachment_context="",
+            estimated_days=5,
+        )
+    ).lower()
+
+    assert "условия оплаты" in prompt
+    assert "техническую оплату" in prompt
+
+
+def test_payment_feature_is_not_treated_as_a_commercial_term():
+    context = ReplyDraftContext(
+        title="Посадка сайта на WordPress",
+        task_summary="Посадить сайт на WordPress с каталогом товаров и оплатой",
+        source_text="Нужны каталог товаров и подключение оплаты через сайт.",
+        attachment_context="",
+        estimated_days=5,
+    )
+    reply = (
+        "Здравствуйте! Посмотрел задачу по WordPress-сайту с каталогом товаров. "
+        "Сверю структуру страниц, затем соберу нужные разделы и карточки каталога. "
+        "Проверю сценарий оформления и оплаты, чтобы пользователь мог пройти путь до заказа. "
+        "После этого покажу рабочий результат и смогу приступить сразу."
+    )
+
+    assert "commercial term" not in reply_quality_issues(reply, context)
+
+
+def test_payment_terms_are_still_treated_as_commercial():
+    context = ReplyDraftContext(
+        title="Посадка сайта на WordPress",
+        task_summary="Посадить сайт на WordPress с каталогом товаров и оплатой",
+        source_text="Нужны каталог товаров и подключение оплаты через сайт.",
+        attachment_context="",
+        estimated_days=5,
+    )
+    reply = (
+        "Здравствуйте! Посмотрел задачу по WordPress-сайту с каталогом товаров. "
+        "Сверю структуру страниц, затем соберу нужные разделы и карточки каталога. "
+        "Проверю сценарий оформления и оплаты, чтобы пользователь мог пройти путь до заказа. "
+        "Оплата после сдачи, после этого покажу рабочий результат."
+    )
+
+    assert "commercial term" in reply_quality_issues(reply, context)
+
+
+def test_redacted_facts_keep_technical_payment_scope_and_remove_budget():
+    context = ReplyDraftContext(
+        title="Посадка сайта на WordPress",
+        task_summary="Посадить сайт на WordPress с каталогом товаров и оплатой",
+        source_text=(
+            "Нужны каталог товаров и подключение оплаты через сайт. "
+            "Бюджет до 5000 руб."
+        ),
+        attachment_context="",
+        estimated_days=5,
+    )
+
+    facts = _redacted_facts(context).lower()
+
+    assert "подключение оплаты" in facts
+    assert "5000" not in facts
+    assert "бюджет" not in facts
 
 
 def test_quality_gate_rejects_form_action_without_form_facts():
