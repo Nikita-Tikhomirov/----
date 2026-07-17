@@ -180,6 +180,30 @@ def test_scan_once_skips_kwork_projects_with_too_many_responses(tmp_path):
     assert email_client.sent_leads == []
 
 
+def test_scan_once_does_not_reinspect_durably_rejected_kwork_project(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+    project_client = FakeKworkProjectClient(response_count=7)
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=project_client,
+        kwork_max_responses=5,
+    )
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        kwork_project_client=project_client,
+        kwork_max_responses=5,
+    )
+
+    assert len(project_client.inspected) == 1
+
+
 def test_scan_once_skips_kwork_projects_without_response_count(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
@@ -196,6 +220,27 @@ def test_scan_once_skips_kwork_projects_without_response_count(tmp_path):
     assert created == 0
     assert storage.list_leads() == []
     assert email_client.sent_leads == []
+
+
+def test_scan_once_retries_kwork_project_when_response_count_is_temporarily_unavailable(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    project_client = FakeKworkProjectClient(response_count=None, reason="счетчик еще загружается")
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=project_client,
+    )
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=project_client,
+    )
+
+    assert len(project_client.inspected) == 2
 
 
 def test_scan_once_skips_kwork_web_projects_without_response_count(tmp_path):

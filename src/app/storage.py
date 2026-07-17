@@ -96,6 +96,12 @@ class Storage:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS post_rejections (
+                    post_id INTEGER PRIMARY KEY REFERENCES posts(id),
+                    reason TEXT NOT NULL,
+                    rejected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS approvals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     lead_id INTEGER NOT NULL REFERENCES leads(id),
@@ -179,6 +185,29 @@ class Storage:
                 (channel, message_id),
             ).fetchone()
         return int(row["id"])
+
+    def record_post_rejection(self, post_id: int, reason: str) -> None:
+        """Persist a stable rejection so watch mode does not re-analyze the same post."""
+        clean_reason = reason.strip()[:2000] or "заказ отклонен"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO post_rejections (post_id, reason)
+                VALUES (?, ?)
+                ON CONFLICT(post_id) DO UPDATE SET
+                    reason = excluded.reason,
+                    rejected_at = CURRENT_TIMESTAMP
+                """,
+                (post_id, clean_reason),
+            )
+
+    def get_post_rejection(self, post_id: int) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT reason FROM post_rejections WHERE post_id = ?",
+                (post_id,),
+            ).fetchone()
+        return str(row["reason"]) if row is not None else ""
 
     def create_lead(
         self,

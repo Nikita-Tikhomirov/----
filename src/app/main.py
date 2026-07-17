@@ -112,6 +112,15 @@ def scan_once(
             else:
                 logger.info("Skipping existing lead for post %s/%s", post.channel, post.message_id)
             continue
+        rejection_reason = storage.get_post_rejection(post_id)
+        if rejection_reason:
+            logger.info(
+                "Skipping durably rejected post %s/%s: %s",
+                post.channel,
+                post.message_id,
+                rejection_reason,
+            )
+            continue
         evaluation = evaluate_post(
             post.text,
             blocked_keywords=lead_blocked_keywords,
@@ -119,6 +128,7 @@ def scan_once(
         )
         if not evaluation.accepted:
             logger.info("Rejected post %s/%s: %s", post.channel, post.message_id, evaluation.reasons)
+            storage.record_post_rejection(post_id, "; ".join(evaluation.reasons))
             continue
 
         project_text = post.text
@@ -138,6 +148,7 @@ def scan_once(
                     post.message_id,
                     project_info.reason,
                 )
+                storage.record_post_rejection(post_id, project_info.reason or "Kwork заказ недоступен")
                 continue
             kwork_facts = tuple(getattr(project_info, "facts", ()))
             project_title = project_info.title
@@ -158,6 +169,10 @@ def scan_once(
                     post.message_id,
                     project_info.response_count,
                     kwork_max_responses,
+                )
+                storage.record_post_rejection(
+                    post_id,
+                    f"Kwork откликов {project_info.response_count} больше лимита {kwork_max_responses}",
                 )
                 continue
             if project_info.has_response_count:
@@ -223,6 +238,7 @@ def scan_once(
                 post.message_id,
                 "; ".join(judge_result.reasons),
             )
+            storage.record_post_rejection(post_id, "; ".join(judge_result.reasons))
             continue
 
         reply_title = project_title.strip() or _proposal_title_from_text(post.text, judge_result.summary)

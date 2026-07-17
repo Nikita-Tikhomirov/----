@@ -26,6 +26,22 @@ def test_deduplicates_posts_by_channel_and_message_id(tmp_path):
     assert storage.count_posts() == 1
 
 
+def test_records_and_reads_durable_post_rejection(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=99,
+        post_url="https://kwork.ru/projects/99/view",
+        text="Сложный заказ",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+
+    storage.record_post_rejection(post_id, "AI: задача сложнее недельного лимита")
+
+    assert storage.get_post_rejection(post_id) == "AI: задача сложнее недельного лимита"
+
+
 def test_get_lead_for_post_returns_existing_lead(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
