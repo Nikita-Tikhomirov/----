@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 GENERIC_PHRASE_PATTERN = re.compile(
     r"(?:уточните\s+детали|обсудим\s+(?:детали|всё|все)|давайте\s+обсудим|"
+    r"(?:готов|можем|предлагаю)\s+обсудить\s+(?:детали|задачу|проект|всё|все)|"
+    r"если\s+(?:вас|вам)\s+(?:устраива\w*|подход\w*).{0,80}?\bобсудить\b|"
     r"я\s+правильно\s+понимаю|готов\s+помочь|буду\s+рад\s+помочь|"
     r"если\s+(?:нужно|понадобится).{0,80}?(?:скажите|напишите))",
     re.IGNORECASE,
@@ -82,6 +84,22 @@ INTEGRATION_TASK_PATTERN = re.compile(
 )
 PAYMENT_TASK_PATTERN = re.compile(r"\b(?:платеж\w*|оплат\w*|эквайринг\w*)\b", re.IGNORECASE)
 CATALOG_TASK_PATTERN = re.compile(r"\b(?:каталог\w*|товар\w*|карточк\w*)\b", re.IGNORECASE)
+CATALOG_FILL_ACTION_PATTERN = re.compile(
+    r"\b(?:добав\w*|наполн\w*|загруж\w*)\s+(?:товар\w*|каталог\w*)\b",
+    re.IGNORECASE,
+)
+CATALOG_FILTER_ACTION_PATTERN = re.compile(r"\bфильтр\w*\b", re.IGNORECASE)
+WORDPRESS_THEME_ACTION_PATTERN = re.compile(
+    r"\b(?:установ\w*|настро\w*|подключ\w*)\s+(?:wordpress\s+)?тем\w*\b",
+    re.IGNORECASE,
+)
+WORDPRESS_PLUGIN_ACTION_PATTERN = re.compile(
+    r"\b(?:установ\w*|настро\w*|добав\w*|подключ\w*)\s+(?:базов\w*\s+)?плагин\w*\b",
+    re.IGNORECASE,
+)
+CATALOG_CATEGORY_ACTION_PATTERN = re.compile(r"\bкатегор\w*\b", re.IGNORECASE)
+ALL_DEVICES_ACTION_PATTERN = re.compile(r"\b(?:на|для)\s+всех\s+устройств\w*\b", re.IGNORECASE)
+RESPONSIVE_FACT_PATTERN = re.compile(r"\b(?:адаптив\w*|мобиль\w*|устройств\w*|разрешени\w*|responsive)\b", re.IGNORECASE)
 DOMAIN_TASK_PATTERN = re.compile(r"\b(?:домен\w*|dns|vercel|хостинг\w*)\b", re.IGNORECASE)
 TASK_ACTION_REFERENCE_PATTERNS = (
     FORM_TASK_PATTERN,
@@ -521,10 +539,23 @@ def _has_unsupported_task_action(reply: str, context: ReplyDraftContext) -> bool
     facts = " ".join(
         (context.title, context.task_summary, context.source_text, context.attachment_context)
     )
-    return any(
+    if any(
         pattern.search(reply) is not None and pattern.search(facts) is None
         for pattern in TASK_ACTION_REFERENCE_PATTERNS
-    )
+    ):
+        return True
+    if any(
+        pattern.search(reply) is not None and pattern.search(facts) is None
+        for pattern in (
+            CATALOG_FILL_ACTION_PATTERN,
+            CATALOG_FILTER_ACTION_PATTERN,
+            WORDPRESS_THEME_ACTION_PATTERN,
+            WORDPRESS_PLUGIN_ACTION_PATTERN,
+            CATALOG_CATEGORY_ACTION_PATTERN,
+        )
+    ):
+        return True
+    return ALL_DEVICES_ACTION_PATTERN.search(reply) is not None and RESPONSIVE_FACT_PATTERN.search(facts) is None
 
 
 def _fallback_reply(context: ReplyDraftContext) -> str:

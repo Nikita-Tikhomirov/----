@@ -403,6 +403,53 @@ def test_quality_gate_rejects_form_action_without_form_facts():
     assert "unsupported task action" in issues
 
 
+def test_quality_gate_rejects_generic_discussion_closing():
+    reply = (
+        "Здравствуйте! Посмотрел задачу по исправлению отправки формы заявки и адаптиву лендинга. "
+        "Проверю обработку данных и валидацию, затем внесу нужные правки в разметку и логику. "
+        "После этого протестирую отправку заявки на мобильных и в основных браузерах. "
+        "Если вас устраивает такой подход, готов обсудить детали."
+    )
+
+    assert "generic phrase" in reply_quality_issues(reply, _form_context())
+
+
+def test_quality_gate_rejects_catalog_filters_and_product_filling_without_facts():
+    context = ReplyDraftContext(
+        title="Посадка сайта на WordPress",
+        task_summary="Посадить информационную страницу и каталог по PSD на WordPress",
+        source_text="Нужно сверстать информационную страницу и каталог по PSD, затем посадить сайт на WordPress.",
+        attachment_context="Макеты PSD приложены к заказу.",
+        estimated_days=5,
+    )
+    reply = (
+        "Здравствуйте! Посмотрел задачу по посадке сайта и каталога на WordPress. "
+        "Сверю структуру страниц, затем соберу разделы каталога, добавлю товары и настрою фильтры. "
+        "После этого проверю карточки и основной пользовательский сценарий на сайте. "
+        "На работу ориентируюсь на 5 дней, могу приступить сразу."
+    )
+
+    assert "unsupported task action" in reply_quality_issues(reply, context)
+
+
+def test_quality_gate_rejects_unmentioned_wordpress_theme_plugins_and_categories():
+    context = ReplyDraftContext(
+        title="Посадка сайта на WordPress",
+        task_summary="Посадить информационную страницу и каталог по PSD на WordPress",
+        source_text="Нужно сверстать информационную страницу и каталог по PSD, затем посадить сайт на WordPress.",
+        attachment_context="Макеты PSD приложены к заказу.",
+        estimated_days=5,
+    )
+    reply = (
+        "Здравствуйте! Я сделаю для вас сайт на WordPress с каталогом товаров. "
+        "В работе установлю и настрою тему, создам структуру каталога с категориями и карточками товаров, добавлю базовые плагины. "
+        "После завершения проверю корректность отображения на всех устройствах и работоспособность всех ссылок. "
+        "Результат — готовый к наполнению сайт, который вы сможете сразу использовать."
+    )
+
+    assert "unsupported task action" in reply_quality_issues(reply, context)
+
+
 def test_quality_gate_rejects_overly_detailed_reply():
     reply = (
         "Здравствуйте! Вижу проблему с отправкой формы заявки на мобильных. "
