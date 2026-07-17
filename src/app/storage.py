@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Iterable
 
 
+MISSING_ERROR_MESSAGE = "Причина ошибки не получена."
+
+
 @dataclass(frozen=True)
 class Lead:
     id: int
@@ -172,6 +175,7 @@ class Storage:
             _ensure_column(conn, "leads", "proposal_title", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "proposal_price_rub", "INTEGER")
             _ensure_column(conn, "leads", "proposal_days", "INTEGER")
+            _backfill_missing_failed_errors(conn)
             _deduplicate_lead_attachment_urls(conn)
             conn.execute(
                 """
@@ -432,10 +436,11 @@ class Storage:
         self.create_order_from_lead(lead_id)
 
     def mark_failed(self, lead_id: int, error: str = "") -> None:
+        clean_error = error.strip()[:2000] or MISSING_ERROR_MESSAGE
         with self._connect() as conn:
             conn.execute(
                 "UPDATE leads SET status = 'failed', last_error = ? WHERE id = ?",
-                (error.strip()[:2000], lead_id),
+                (clean_error, lead_id),
             )
 
     def replace_lead_attachments(self, lead_id: int, attachments: Iterable) -> None:
@@ -717,6 +722,17 @@ def _deduplicate_lead_attachment_urls(conn: sqlite3.Connection) -> None:
               GROUP BY lead_id, url
           )
         """
+    )
+
+
+def _backfill_missing_failed_errors(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        UPDATE leads
+        SET last_error = ?
+        WHERE status = 'failed' AND TRIM(last_error) = ''
+        """,
+        (MISSING_ERROR_MESSAGE,),
     )
 
 

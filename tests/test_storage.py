@@ -106,6 +106,54 @@ def test_lead_reply_and_last_error_can_be_updated(tmp_path):
     assert storage.get_lead(lead_id).last_error == ""
 
 
+def test_mark_failed_keeps_a_diagnostic_message_when_exception_text_is_empty(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=46,
+        post_url="https://kwork.ru/projects/46/view",
+        text="Нужны правки на сайте",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=80,
+        summary="Правки",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/46/view",
+    )
+
+    storage.mark_failed(lead_id)
+
+    assert storage.get_lead(lead_id).last_error == "Причина ошибки не получена."
+
+
+def test_initialize_backfills_missing_error_for_legacy_failed_lead(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=47,
+        post_url="https://kwork.ru/projects/47/view",
+        text="Нужны правки на сайте",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=80,
+        summary="Правки",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/47/view",
+    )
+    with sqlite3.connect(storage.database_path) as conn:
+        conn.execute("UPDATE leads SET status = 'failed', last_error = '' WHERE id = ?", (lead_id,))
+
+    storage.initialize()
+
+    assert storage.get_lead(lead_id).last_error == "Причина ошибки не получена."
+
+
 def test_lead_proposal_fields_are_persisted_independently_from_ai_summary(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
