@@ -215,7 +215,7 @@ def test_order_reviews_are_ignored_outside_approval_state(tmp_path):
 def test_order_created_from_lead_keeps_original_order_text(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
-    post_text = "Нужно сверстать лендинг HTML/CSS/JS, поправить форму. Контакт @client_dev"
+    post_text = "📌 Лендинг с формой заявки\nНужно сверстать лендинг HTML/CSS/JS, поправить форму. Контакт @client_dev"
     post_id = storage.save_post(
         channel="jobs",
         message_id=43,
@@ -235,6 +235,36 @@ def test_order_created_from_lead_keeps_original_order_text(tmp_path):
 
     assert storage.get_lead(lead_id).post_text == post_text
     assert storage.get_order(order_id).brief == post_text
+    assert storage.get_order(order_id).title == "Лендинг с формой заявки"
+
+
+def test_initialize_backfills_generated_order_title_from_linked_lead(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=44,
+        post_url="https://kwork.ru/projects/44/view",
+        text="📌 Исправить форму заявки\nПредложений: 1",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=85,
+        summary="AI: accept\nЗадача: Исправить форму заявки",
+        draft_reply="Здравствуйте! Готов помочь.",
+        contact="https://kwork.ru/projects/44/view",
+    )
+    order_id = storage.create_order(
+        lead_id=lead_id,
+        contact="https://kwork.ru/projects/44/view",
+        title="AI: accept\nСрок: 3 дн.\nЗадача: Исправить форму заявки",
+        brief="Текст заказа",
+    )
+
+    storage.initialize()
+
+    assert storage.get_order(order_id).title == "Исправить форму заявки"
 
 
 def test_list_leads_returns_latest_first_with_post_metadata_and_sent_state(tmp_path):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -153,6 +154,7 @@ class Storage:
             _ensure_column(conn, "leads", "proposal_title", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "proposal_price_rub", "INTEGER")
             _ensure_column(conn, "leads", "proposal_days", "INTEGER")
+            _backfill_generated_order_titles(conn)
 
     def save_post(
         self,
@@ -437,7 +439,7 @@ class Storage:
         return self.create_order(
             lead_id=lead.id,
             contact=lead.contact,
-            title=lead.summary,
+            title=_order_title_from_lead(lead),
             brief=lead.post_text or lead.draft_reply,
         )
 
@@ -669,6 +671,96 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _backfill_generated_order_titles(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT orders.id AS order_id,
+               leads.id AS lead_id,
+               leads.proposal_title,
+               leads.summary,
+               posts.raw_text
+        FROM orders
+        JOIN leads ON leads.id = orders.lead_id
+        JOIN posts ON posts.id = leads.post_id
+        WHERE orders.lead_id IS NOT NULL
+          AND orders.title LIKE 'AI:%'
+        """
+    ).fetchall()
+    for row in rows:
+        title = _order_title_from_values(
+            post_text=str(row["raw_text"] or ""),
+            proposal_title=str(row["proposal_title"] or ""),
+            summary=str(row["summary"] or ""),
+            fallback=f"Kwork project {row['lead_id']}",
+        )
+        conn.execute(
+            """
+            UPDATE orders
+            SET title = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (title, int(row["order_id"])),
+        )
+
+
+def _order_title_from_lead(lead: Lead) -> str:
+    return _order_title_from_values(
+        post_text=lead.post_text,
+        proposal_title=lead.proposal_title,
+        summary=lead.summary,
+        fallback=f"Kwork project {lead.id}",
+    )
+
+
+def _order_title_from_values(
+    post_text: str,
+    proposal_title: str,
+    summary: str,
+    fallback: str,
+) -> str:
+    title = _title_from_post_text(post_text)
+    if title:
+        return title
+    if proposal_title.strip():
+        return _strip_kwork_inline_metadata(proposal_title.strip())[:70]
+    title = _title_from_summary(summary)
+    if title:
+        return title
+    return fallback
+
+
+def _title_from_post_text(post_text: str) -> str:
+    meta_prefixes = ("осталось:", "предложений:", "бюджет:", "контакт:", "kwork facts:")
+    for line in post_text.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        if clean.startswith("📌"):
+            return _strip_kwork_inline_metadata(clean.lstrip("📌").strip())[:70]
+        if clean.lower().startswith(meta_prefixes):
+            continue
+        return _strip_kwork_inline_metadata(clean)[:70]
+    return ""
+
+
+def _title_from_summary(summary: str) -> str:
+    for line in summary.splitlines():
+        clean = line.strip()
+        if clean.startswith("Задача:"):
+            return _strip_kwork_inline_metadata(clean.removeprefix("Задача:").strip())[:70]
+    return ""
+
+
+def _strip_kwork_inline_metadata(value: str) -> str:
+    clean = re.split(
+        r"(?:[.,;]?\s+)(?:предложений|отклик|осталось|бюджет|контакт)\s*:",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    return clean.rstrip(" .,:;-")
 
 
 def _optional_positive_int(value: int | None, field_name: str) -> int | None:
