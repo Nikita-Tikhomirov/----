@@ -819,17 +819,24 @@ def test_gui_marks_lead_failed_only_for_actual_submission_errors(mark_failed, ex
             failures.append((lead_id, error))
 
     class Value:
-        def set(self, _value):
-            return None
+        def __init__(self):
+            self.values = []
+
+        def set(self, value):
+            self.values.append(value)
 
     def fail_action():
-        raise RuntimeError("Kwork reply field was not found")
+        raise RuntimeError("Стоимость может быть не более 3 000 руб.")
+
+    lead_status = Value()
 
     gui = SimpleNamespace(
         root=Root(),
         _storage=lambda: Storage(),
         write_log=lambda _text: None,
         status_var=Value(),
+        lead_status_var=lead_status,
+        current_lead_id=42,
         refresh_leads=lambda: None,
     )
 
@@ -841,7 +848,27 @@ def test_gui_marks_lead_failed_only_for_actual_submission_errors(mark_failed, ex
         mark_failed=mark_failed,
     )
 
-    assert failures == expected_failures
+    assert failures == [
+        (lead_id, error.replace("Kwork reply field was not found", "Стоимость может быть не более 3 000 руб."))
+        for lead_id, error in expected_failures
+    ]
+    assert "Стоимость может быть не более 3 000 руб." in lead_status.values[-1]
+
+
+def test_gui_keeps_current_lead_status_when_old_background_action_fails():
+    class Value:
+        def __init__(self):
+            self.values = []
+
+        def set(self, value):
+            self.values.append(value)
+
+    lead_status = Value()
+    gui = SimpleNamespace(current_lead_id=43, lead_status_var=lead_status)
+
+    LeadFunnelGui._show_lead_action_error(gui, 42, "Стоимость может быть не более 3 000 руб.")
+
+    assert lead_status.values == []
 
 
 def test_gui_names_mail_check_and_direct_submission_actions_clearly():

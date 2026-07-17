@@ -692,6 +692,8 @@ class LeadFunnelGui:
                     pass
             self.write_log(f"=== {label}: ошибка: {exc} ===\n")
             self.root.after(0, lambda: self.status_var.set(f"{label}: ошибка"))
+            if lead_id is not None:
+                self.root.after(0, lambda: LeadFunnelGui._show_lead_action_error(self, lead_id, str(exc)))
         else:
             self.write_log(f"=== {label}: готово ({result}) ===\n")
             self.root.after(0, lambda: self.status_var.set(f"{label}: готово"))
@@ -699,6 +701,13 @@ class LeadFunnelGui:
             if on_finished is not None:
                 self.root.after(0, on_finished)
             self.root.after(0, self.refresh_leads)
+
+    def _show_lead_action_error(self, lead_id: int, error: str) -> None:
+        if getattr(self, "current_lead_id", None) != lead_id:
+            return
+        lead_status = getattr(self, "lead_status_var", None)
+        if lead_status is not None:
+            lead_status.set(f"Лид #{lead_id}: ошибка: {error}")
 
     def _lead_payload(self, lead: Lead) -> dict:
         raw_reply = self.reply_text.get("1.0", END).strip()
