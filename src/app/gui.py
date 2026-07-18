@@ -33,7 +33,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_PATH = ROOT_DIR / ".env"
 MOSCOW_TZ = timezone(timedelta(hours=3), "МСК")
 WATCH_REFRESH_MS = 5000
-REFRESH_AFTER_LABELS = {"Сканирование", "Проверка почты"}
+REFRESH_AFTER_LABELS = {"Сканирование"}
 BATCH_LIVE_CHECK_LIMIT = 30
 AI_DECISION_PATTERN = re.compile(r"^\s*AI:\s*(accept|maybe|reject)\b", re.IGNORECASE | re.MULTILINE)
 PRESERVED_ASSESSMENT_CONTEXT_MARKERS = ("KWORK-ДАННЫЕ:", "ФАЙЛЫ/ТЗ:")
@@ -43,7 +43,6 @@ QUEUE_VIEW_ARCHIVE = "Архив"
 QUEUE_VIEW_OPTIONS = (QUEUE_VIEW_ACTIONABLE, QUEUE_VIEW_STOPPED, QUEUE_VIEW_ARCHIVE)
 LEAD_STATUS_LABELS = {
     "new": "Новый",
-    "emailed": "На почте",
     "approved": "Готов к отправке",
     "sending": "Проверить отправку",
     "sent": "Отклик отправлен",
@@ -363,13 +362,10 @@ class LeadFunnelGui:
         self.start_watch_button.pack(side="left", padx=8)
         self.stop_watch_button = ttk.Button(bar, text="Стоп", command=self.stop_watch, state=DISABLED, style="Danger.TButton")
         self.stop_watch_button.pack(side="left", padx=8)
-        self.approvals_button = ttk.Button(bar, text="Проверить почту", command=self.process_approvals, style="Modern.TButton")
-        self.approvals_button.pack(side="left", padx=8)
         self.once_action_buttons.update(
             {
                 "Kwork Chrome": self.start_browser_button,
                 "Сканирование": self.scan_button,
-                "Проверка почты": self.approvals_button,
             }
         )
         self.clear_button = ttk.Button(bar, text="Очистить лог", command=self.clear_log, style="Modern.TButton")
@@ -478,7 +474,6 @@ class LeadFunnelGui:
         scrollbar.pack(side="right", fill="y")
         self.leads_table.bind("<<TreeviewSelect>>", self.on_lead_select)
         self.leads_table.tag_configure("new", background="#fffbeb")
-        self.leads_table.tag_configure("emailed", background="#f8fafc")
         self.leads_table.tag_configure("approved", background="#ecfdf3")
         self.leads_table.tag_configure("failed", background="#fff1f0")
         self.leads_table.tag_configure("sent", background="#ecfdf3")
@@ -648,10 +643,6 @@ class LeadFunnelGui:
     def scan_once(self) -> None:
         command, env = build_app_command("scan")
         self._run_once(command, env, "Сканирование")
-
-    def process_approvals(self) -> None:
-        command, env = build_app_command("approvals")
-        self._run_once(command, env, "Проверка почты")
 
     def refresh_leads(self) -> None:
         try:

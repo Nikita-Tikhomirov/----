@@ -35,6 +35,8 @@ class Lead:
     live_response_count: int | None = None
     live_checked_at: str = ""
     live_reason: str = ""
+    hub_lead_id: int | None = None
+    hub_synced_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,9 @@ class Storage:
                     status TEXT NOT NULL DEFAULT 'new',
                     email_message_id TEXT,
                     email_claimed_at TEXT NOT NULL DEFAULT '',
+                    hub_lead_id INTEGER,
+                    hub_synced_at TEXT NOT NULL DEFAULT '',
+                    hub_claimed_at TEXT NOT NULL DEFAULT '',
                     last_error TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -186,6 +191,9 @@ class Storage:
             _ensure_column(conn, "leads", "live_checked_at", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "live_reason", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "email_claimed_at", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "leads", "hub_lead_id", "INTEGER")
+            _ensure_column(conn, "leads", "hub_synced_at", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "leads", "hub_claimed_at", "TEXT NOT NULL DEFAULT ''")
             _backfill_missing_failed_errors(conn)
             _deduplicate_lead_attachment_urls(conn)
             conn.execute(
@@ -367,6 +375,41 @@ class Storage:
                 SET email_claimed_at = ''
                 WHERE id = ? AND status = 'new'
                 """,
+                (lead_id,),
+            )
+
+    def claim_lead_hub_delivery(self, lead_id: int) -> bool:
+        """Reserve an unsynced lead so scanner instances cannot create duplicate hub records."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE leads
+                SET hub_claimed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND hub_synced_at = ''
+                  AND (hub_claimed_at = '' OR hub_claimed_at < datetime('now', '-15 minutes'))
+                """,
+                (lead_id,),
+            )
+        return cursor.rowcount > 0
+
+    def mark_lead_hub_synced(self, lead_id: int, hub_lead_id: int) -> None:
+        if hub_lead_id <= 0:
+            raise ValueError("Hub lead id must be positive")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE leads
+                SET hub_lead_id = ?, hub_synced_at = CURRENT_TIMESTAMP, hub_claimed_at = ''
+                WHERE id = ?
+                """,
+                (hub_lead_id, lead_id),
+            )
+
+    def release_lead_hub_delivery(self, lead_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE leads SET hub_claimed_at = '' WHERE id = ? AND hub_synced_at = ''",
                 (lead_id,),
             )
 
@@ -604,6 +647,25 @@ class Storage:
         if row is None:
             raise KeyError(f"Lead not found: {lead_id}")
         return _lead_from_row(row)
+
+    def get_lead_for_hub_id(self, hub_lead_id: int) -> Lead | None:
+        """Return the local Kwork lead paired with a mobile inbox card."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT leads.*, posts.post_url, posts.raw_text,
+                       posts.channel AS post_channel,
+                       posts.message_id AS post_message_id,
+                       posts.posted_at AS post_posted_at,
+                       sent_messages.sent_at AS sent_at
+                FROM leads
+                JOIN posts ON posts.id = leads.post_id
+                LEFT JOIN sent_messages ON sent_messages.lead_id = leads.id
+                WHERE leads.hub_lead_id = ?
+                """,
+                (hub_lead_id,),
+            ).fetchone()
+        return _lead_from_row(row) if row is not None else None
 
     def list_leads(self, status: str | None = None) -> list[Lead]:
         sql = """
@@ -890,6 +952,12 @@ def _lead_from_row(row: sqlite3.Row) -> Lead:
         ),
         live_checked_at=str(row["live_checked_at"] or "") if "live_checked_at" in keys else "",
         live_reason=str(row["live_reason"] or "") if "live_reason" in keys else "",
+        hub_lead_id=(
+            int(row["hub_lead_id"])
+            if "hub_lead_id" in keys and row["hub_lead_id"] is not None
+            else None
+        ),
+        hub_synced_at=str(row["hub_synced_at"] or "") if "hub_synced_at" in keys else "",
     )
 
 

@@ -17,20 +17,13 @@ class AppConfig:
     telegram_session_name: str
     telegram_channels: tuple[str, ...]
     telegram_proxy: str
-    smtp_host: str
-    smtp_port: int
-    smtp_user: str
-    smtp_password: str
-    mail_from: str
-    mail_to: str
-    imap_host: str
-    imap_port: int
-    imap_user: str
-    imap_password: str
     database_path: Path
+    lead_hub_url: str = "http://31.129.97.211"
+    lead_hub_api_key: str = "dev-local-key"
+    lead_hub_owner_phone: str = "79679812438"
+    lead_hub_executor_id: str = "kwork-desktop"
     scan_interval_seconds: int = 300
     max_posts_per_channel: int = 20
-    max_sends_per_run: int = 5
     kwork_max_responses: int = 5
     kwork_max_age_hours: int = 24
     kwork_cookie: str = ""
@@ -66,20 +59,14 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         telegram_session_name=os.getenv("TELEGRAM_SESSION_NAME", "lead_funnel"),
         telegram_channels=_channels(os.getenv("TELEGRAM_CHANNELS", "")),
         telegram_proxy=os.getenv("TELEGRAM_PROXY", ""),
-        smtp_host=_required("SMTP_HOST"),
-        smtp_port=_int_env("SMTP_PORT", 587),
-        smtp_user=_required("SMTP_USER"),
-        smtp_password=_required("SMTP_PASSWORD"),
-        mail_from=_required("MAIL_FROM"),
-        mail_to=_required("MAIL_TO"),
-        imap_host=_required("IMAP_HOST"),
-        imap_port=_int_env("IMAP_PORT", 993),
-        imap_user=_required("IMAP_USER"),
-        imap_password=_required("IMAP_PASSWORD"),
+        lead_hub_url=os.getenv("LEAD_HUB_URL", "http://31.129.97.211").rstrip("/"),
+        # Matches the mobile app development fallback; production may override it in .env.
+        lead_hub_api_key=os.getenv("LEAD_HUB_API_KEY", "dev-local-key"),
+        lead_hub_owner_phone=os.getenv("LEAD_HUB_OWNER_PHONE", "79679812438"),
+        lead_hub_executor_id=os.getenv("LEAD_HUB_EXECUTOR_ID", "kwork-desktop").strip() or "kwork-desktop",
         database_path=Path(os.getenv("DATABASE_PATH", "data/leads.sqlite3")),
         scan_interval_seconds=_int_env("SCAN_INTERVAL_SECONDS", 300),
         max_posts_per_channel=_int_env("MAX_POSTS_PER_CHANNEL", 20),
-        max_sends_per_run=_int_env("MAX_SENDS_PER_RUN", 5),
         kwork_max_responses=_int_env("KWORK_MAX_RESPONSES", 5),
         kwork_max_age_hours=_int_env("KWORK_MAX_AGE_HOURS", 24),
         kwork_cookie=os.getenv("KWORK_COOKIE", ""),

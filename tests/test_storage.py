@@ -76,6 +76,34 @@ def test_get_lead_for_post_returns_existing_lead(tmp_path):
     assert lead.status == "new"
 
 
+def test_mobile_hub_delivery_is_claimed_once_and_keeps_lead_actionable(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=49,
+        post_url="https://kwork.ru/projects/49/view",
+        text="Нужно сверстать страницу",
+        posted_at="2026-07-18T12:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=81,
+        summary="Верстка",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/49/view",
+    )
+
+    assert storage.claim_lead_hub_delivery(lead_id) is True
+    assert storage.claim_lead_hub_delivery(lead_id) is False
+    storage.mark_lead_hub_synced(lead_id, 9001)
+
+    lead = storage.get_lead(lead_id)
+    assert lead.status == "new"
+    assert lead.hub_lead_id == 9001
+    assert storage.claim_lead_hub_delivery(lead_id) is False
+
+
 def test_only_one_storage_instance_can_claim_new_lead_email_delivery(tmp_path):
     database_path = tmp_path / "leads.sqlite3"
     first_storage = Storage(database_path)

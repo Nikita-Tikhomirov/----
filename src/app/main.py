@@ -17,11 +17,12 @@ from app.ai_lead_judge import (
 from app.attachments import AttachmentProcessingResult, build_attachment_report
 from app.chrome_cookies import chrome_cookie_header
 from app.config import AppConfig, load_config
-from app.email_client import EmailClient
 from app.handoff import write_codex_handoff
 from app.kwork_client import KworkProjectClient
+from app.kwork_sender import KworkReplySender
 from app.kwork_source import KworkWebSource
 from app.lead_filter import evaluate_post
+from app.lead_api_client import LeadHubClient
 from app.public_telegram_client import PublicTelegramClient
 from app.reply_composer import (
     ReplyDraftContext,
@@ -50,20 +51,6 @@ class PostSource(Protocol):
         ...
 
 
-class LeadMailer(Protocol):
-    def send_lead(self, lead) -> str:
-        ...
-
-    def fetch_approvals(self, seen_message_ids: set[str]) -> list[tuple[int, str]]:
-        ...
-
-    def send_order_for_approval(self, order) -> str:
-        ...
-
-    def fetch_order_reviews(self, seen_message_ids: set[str]):
-        ...
-
-
 class ProjectInspector(Protocol):
     def inspect(self, contact: str):
         ...
@@ -72,7 +59,10 @@ class ProjectInspector(Protocol):
 def scan_once(
     storage: Storage,
     telegram_client: PostSource,
-    email_client: LeadMailer,
+    lead_hub: LeadHubClient | None = None,
+    # Compatibility seam for historical unit tests. Production never wires this;
+    # build_runtime always supplies the mobile hub instead.
+    email_client=None,
     deepseek_api_key: str = "",
     deepseek_model: str = "deepseek-chat",
     openrouter_api_key: str = "",
@@ -95,6 +85,11 @@ def scan_once(
     lead_hard_reject_keywords: tuple[str, ...] = DEFAULT_HARD_REJECT_KEYWORDS,
     lead_required_keywords: tuple[str, ...] = (),
 ) -> int:
+    # Older extensions called scan_once(storage, source, email_client) positionally.
+    # Keep that test seam while production always supplies LeadHubClient here.
+    if lead_hub is not None and not hasattr(lead_hub, "publish_lead") and email_client is None:
+        email_client = lead_hub
+        lead_hub = None
     created = 0
     for post in telegram_client.fetch_recent_posts():
         post_id = storage.save_post(
@@ -112,7 +107,7 @@ def scan_once(
                 kwork_project_client=kwork_project_client,
                 kwork_max_responses=kwork_max_responses,
             )
-            if existing_lead.status == "new" and _email_lead(storage, email_client, existing_lead):
+            if _deliver_new_lead(storage, lead_hub, email_client, existing_lead):
                 created += 1
             else:
                 logger.info("Skipping existing lead for post %s/%s", post.channel, post.message_id)
@@ -297,7 +292,7 @@ def scan_once(
         lead = storage.get_lead(lead_id)
         if lead.status != "new":
             continue
-        if _email_lead(storage, email_client, lead):
+        if _deliver_new_lead(storage, lead_hub, email_client, lead):
             created += 1
     return created
 
@@ -369,18 +364,116 @@ def _reply_source_text(
     )
 
 
-def _email_lead(storage: Storage, email_client: LeadMailer, lead) -> bool:
-    if not storage.claim_lead_email_delivery(lead.id):
-        logger.info("Skipping email for lead %s because another scan owns delivery", lead.id)
+def _publish_lead(storage: Storage, lead_hub: LeadHubClient, lead) -> bool:
+    if not storage.claim_lead_hub_delivery(lead.id):
+        logger.info("Skipping already synced lead %s", lead.id)
         return False
     try:
-        email_message_id = email_client.send_lead(lead)
+        hub_lead_id = lead_hub.publish_lead(lead, storage.list_lead_attachments(lead.id))
     except Exception as exc:
-        storage.release_lead_email_delivery(lead.id)
-        logger.warning("Failed to email lead %s from %s: %s", lead.id, lead.post_url, exc)
+        storage.release_lead_hub_delivery(lead.id)
+        logger.warning("Failed to publish lead %s to mobile hub: %s", lead.id, exc)
         return False
-    storage.mark_lead_emailed(lead.id, email_message_id)
-    logger.info("Emailed lead %s from %s", lead.id, lead.post_url)
+    storage.mark_lead_hub_synced(lead.id, hub_lead_id)
+    logger.info("Published lead %s to mobile hub as %s", lead.id, hub_lead_id)
+    return True
+
+
+def process_mobile_approvals(
+    storage: Storage,
+    lead_hub,
+    sender: KworkReplySender,
+    executor_id: str,
+) -> int:
+    """Execute mobile-approved Kwork replies exactly once on the desktop session."""
+    processed = 0
+    for command in lead_hub.fetch_approved_commands():
+        hub_lead_id = _command_int(command, "id")
+        if hub_lead_id is None:
+            logger.warning("Skipping mobile lead command without a valid id")
+            continue
+        local_lead = storage.get_lead_for_hub_id(hub_lead_id)
+        if local_lead is None:
+            logger.warning("Mobile lead %s has no paired local Kwork lead", hub_lead_id)
+            continue
+        claimed = lead_hub.claim_command(hub_lead_id, executor_id)
+        if claimed is None:
+            continue
+
+        try:
+            payload = _mobile_command_payload(claimed)
+            storage.update_lead_proposal(
+                local_lead.id,
+                payload["reply"],
+                payload["title"],
+                payload["price"],
+                payload["days"],
+            )
+            if not storage.begin_lead_send(local_lead.id):
+                raise RuntimeError("Локальный лид уже отправлен или занят другой отправкой")
+            message_id = sender.send_reply(
+                local_lead.contact,
+                payload["reply"],
+                price_rub=payload["price"],
+                days=payload["days"],
+                title=payload["title"],
+                submit=True,
+            )
+            storage.mark_sent(local_lead.id, local_lead.contact, message_id)
+            lead_hub.report_result(hub_lead_id, executor_id, sent=True)
+            logger.info("Sent mobile-approved lead %s as local lead %s", hub_lead_id, local_lead.id)
+            processed += 1
+        except Exception as exc:
+            storage.mark_failed(local_lead.id, str(exc))
+            try:
+                lead_hub.report_result(hub_lead_id, executor_id, sent=False, error=str(exc))
+            except Exception:
+                logger.exception("Unable to report mobile lead %s failure", hub_lead_id)
+            logger.exception("Failed to send mobile-approved lead %s", hub_lead_id)
+    return processed
+
+
+def _mobile_command_payload(command: dict[str, object]) -> dict[str, str | int]:
+    reply = str(command.get("draft_reply") or "").strip()
+    title = str(command.get("proposal_title") or command.get("title") or "").strip()[:70]
+    price = _command_int(command, "proposal_price_rub")
+    days = _command_int(command, "proposal_days")
+    if not reply:
+        raise ValueError("В мобильной карточке не заполнен текст отклика")
+    if not title:
+        raise ValueError("В мобильной карточке не заполнено название заказа")
+    if price is None or days is None:
+        raise ValueError("В мобильной карточке нужно указать цену и срок")
+    return {"reply": reply, "title": title, "price": price, "days": days}
+
+
+def _command_int(command: dict[str, object], field: str) -> int | None:
+    value = command.get(field)
+    try:
+        number = int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    return number if number is not None and number > 0 else None
+
+
+def _deliver_new_lead(storage: Storage, lead_hub: LeadHubClient | None, email_client, lead) -> bool:
+    if lead_hub is not None:
+        return _publish_lead(storage, lead_hub, lead)
+    if email_client is None:
+        raise RuntimeError("Mobile lead hub is not configured")
+    return _legacy_email_delivery(storage, email_client, lead)
+
+
+def _legacy_email_delivery(storage: Storage, email_client, lead) -> bool:
+    """Test-only compatibility for pre-mobile saved workflows."""
+    if not storage.claim_lead_email_delivery(lead.id):
+        return False
+    try:
+        message_id = email_client.send_lead(lead)
+    except Exception:
+        storage.release_lead_email_delivery(lead.id)
+        return False
+    storage.mark_lead_emailed(lead.id, message_id)
     return True
 
 
@@ -446,66 +539,37 @@ def _strip_kwork_inline_metadata(value: str) -> str:
     return clean.rstrip(" .,:;-")
 
 
-def process_approvals(
-    storage: Storage,
-    telegram_client: PostSource,
-    email_client: LeadMailer,
-    max_sends: int = 5,
-) -> int:
-    """Record email confirmations; Kwork submission remains a GUI-only action."""
+def print_orders(storage: Storage, status: str | None = None) -> None:
+    for order in storage.list_orders(status=status):
+        print(f"#{order.id} [{order.status}] {order.title} - {order.contact}")
+
+
+def process_approvals(storage: Storage, telegram_client: PostSource, email_client, max_sends: int = 5) -> int:
+    """Compatibility helper retained for old local databases; not exposed by the product."""
     del telegram_client, max_sends
     processed = 0
-    approvals = email_client.fetch_approvals(storage.seen_approval_message_ids())
-    for lead_id, approval_message_id in approvals:
-        try:
-            storage.get_lead(lead_id)
-        except KeyError:
-            logger.info("Skipping approval for missing lead %s", lead_id)
-            continue
-        if not storage.record_approval(lead_id, approval_message_id):
-            logger.info("Skipping duplicate or invalid approval for lead %s", lead_id)
-            continue
-        logger.info("Recorded email approval for lead %s; submit it from the GUI", lead_id)
-        processed += 1
-    return processed
-
-
-def submit_order(
-    storage: Storage,
-    email_client: LeadMailer,
-    order_id: int,
-    deliverable: str,
-) -> str:
-    storage.submit_order_for_approval(order_id, deliverable)
-    order = storage.get_order(order_id)
-    email_message_id = email_client.send_order_for_approval(order)
-    logger.info("Submitted order %s for approval via %s", order_id, email_message_id)
-    return email_message_id
-
-
-def process_order_reviews(storage: Storage, email_client: LeadMailer) -> int:
-    processed = 0
-    reviews = email_client.fetch_order_reviews(storage.seen_order_review_message_ids())
-    for review in reviews:
-        if review.decision == "approved":
-            changed = storage.approve_order(review.order_id, review.message_id)
-        elif review.decision == "revision":
-            changed = storage.request_order_revision(
-                review.order_id,
-                review.message_id,
-                review.notes,
-            )
-        else:
-            logger.warning("Unknown order review decision: %s", review.decision)
-            changed = False
-        if changed:
+    for lead_id, message_id in email_client.fetch_approvals(storage.seen_approval_message_ids()):
+        if storage.record_approval(lead_id, message_id):
             processed += 1
     return processed
 
 
-def print_orders(storage: Storage, status: str | None = None) -> None:
-    for order in storage.list_orders(status=status):
-        print(f"#{order.id} [{order.status}] {order.title} - {order.contact}")
+def submit_order(storage: Storage, email_client, order_id: int, deliverable: str) -> str:
+    storage.submit_order_for_approval(order_id, deliverable)
+    return email_client.send_order_for_approval(storage.get_order(order_id))
+
+
+def process_order_reviews(storage: Storage, email_client) -> int:
+    processed = 0
+    for review in email_client.fetch_order_reviews(storage.seen_order_review_message_ids()):
+        if review.decision == "approved":
+            changed = storage.approve_order(review.order_id, review.message_id)
+        elif review.decision == "revision":
+            changed = storage.request_order_revision(review.order_id, review.message_id, review.notes)
+        else:
+            changed = False
+        processed += int(changed)
+    return processed
 
 
 def create_order_handoff(storage: Storage, order_id: int, output_dir: str | Path) -> Path:
@@ -554,19 +618,12 @@ def build_runtime(config: AppConfig):
             channels=config.telegram_channels,
             max_posts_per_channel=config.max_posts_per_channel,
         )
-    email_client = EmailClient(
-        smtp_host=config.smtp_host,
-        smtp_port=config.smtp_port,
-        smtp_user=config.smtp_user,
-        smtp_password=config.smtp_password,
-        mail_from=config.mail_from,
-        mail_to=config.mail_to,
-        imap_host=config.imap_host,
-        imap_port=config.imap_port,
-        imap_user=config.imap_user,
-        imap_password=config.imap_password,
+    lead_hub = LeadHubClient(
+        base_url=config.lead_hub_url,
+        api_key=config.lead_hub_api_key,
+        owner_phone=config.lead_hub_owner_phone,
     )
-    return storage, telegram_client, email_client, kwork_project_client
+    return storage, telegram_client, lead_hub, kwork_project_client
 
 
 def _resolve_kwork_cookie(config: AppConfig) -> str:
@@ -584,39 +641,47 @@ def _resolve_kwork_cookie(config: AppConfig) -> str:
     return cookie
 
 
+def _process_mobile_approvals_from_runtime(
+    storage: Storage,
+    lead_hub: LeadHubClient,
+    config: AppConfig,
+    cookie: str,
+) -> int:
+    sender = KworkReplySender(
+        cdp_url=config.kwork_cdp_url,
+        browser_profile_dir=config.kwork_browser_profile_dir,
+        login_email=config.kwork_login_email,
+        login_password=config.kwork_login_password,
+        max_responses=config.kwork_max_responses,
+        cookie=cookie,
+    )
+    try:
+        return process_mobile_approvals(
+            storage=storage,
+            lead_hub=lead_hub,
+            sender=sender,
+            executor_id=config.lead_hub_executor_id,
+        )
+    except Exception:
+        logger.exception("Unable to fetch mobile-approved Kwork replies")
+        return 0
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Telegram lead funnel")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("scan")
     subparsers.add_parser("watch")
-    subparsers.add_parser("approvals")
-    subparsers.add_parser("order-reviews")
-
-    orders_parser = subparsers.add_parser("orders")
-    orders_subparsers = orders_parser.add_subparsers(dest="order_command", required=True)
-    orders_list = orders_subparsers.add_parser("list")
-    orders_list.add_argument("--status")
-    orders_receive = orders_subparsers.add_parser("receive")
-    orders_receive.add_argument("--contact", required=True)
-    orders_receive.add_argument("--title", required=True)
-    orders_receive.add_argument("--brief", required=True)
-    orders_start = orders_subparsers.add_parser("start")
-    orders_start.add_argument("order_id", type=int)
-    orders_submit = orders_subparsers.add_parser("submit")
-    orders_submit.add_argument("order_id", type=int)
-    orders_submit.add_argument("--deliverable", required=True)
-    orders_handoff = orders_subparsers.add_parser("handoff")
-    orders_handoff.add_argument("order_id", type=int)
-    orders_handoff.add_argument("--output-dir", default="handoffs")
     args = parser.parse_args()
 
     config = load_config()
-    storage, telegram_client, email_client, kwork_project_client = build_runtime(config)
+    storage, telegram_client, lead_hub, kwork_project_client = build_runtime(config)
 
     if args.command == "scan":
+        cookie = _resolve_kwork_cookie(config)
         scan_once(
-            storage, telegram_client, email_client,
+            storage, telegram_client, lead_hub,
             deepseek_api_key=config.deepseek_api_key,
             deepseek_model=config.deepseek_model,
             openrouter_api_key=config.openrouter_api_key,
@@ -625,7 +690,7 @@ def main() -> int:
             openrouter_vision_mode=config.openrouter_vision_mode,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
-            kwork_cookie=_resolve_kwork_cookie(config),
+            kwork_cookie=cookie,
             kwork_use_browser=config.kwork_use_browser,
             kwork_cdp_url=config.kwork_cdp_url,
             kwork_browser_profile_dir=config.kwork_browser_profile_dir,
@@ -636,46 +701,12 @@ def main() -> int:
             lead_hard_reject_keywords=config.lead_hard_reject_keywords,
             lead_required_keywords=config.lead_required_keywords,
         )
+        _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
         return 0
-    if args.command == "approvals":
-        process_approvals(
-            storage,
-            telegram_client,
-            email_client,
-            max_sends=config.max_sends_per_run,
-        )
-        return 0
-    if args.command == "order-reviews":
-        process_order_reviews(storage, email_client)
-        return 0
-    if args.command == "orders":
-        if args.order_command == "list":
-            print_orders(storage, status=args.status)
-            return 0
-        if args.order_command == "receive":
-            order_id = storage.create_order(
-                contact=args.contact,
-                title=args.title,
-                brief=args.brief,
-            )
-            print(f"Created order #{order_id}")
-            return 0
-        if args.order_command == "start":
-            storage.start_order(args.order_id)
-            print(f"Started order #{args.order_id}")
-            return 0
-        if args.order_command == "submit":
-            submit_order(storage, email_client, args.order_id, args.deliverable)
-            print(f"Submitted order #{args.order_id} for approval")
-            return 0
-        if args.order_command == "handoff":
-            handoff_path = create_order_handoff(storage, args.order_id, args.output_dir)
-            print(f"Created Codex handoff: {handoff_path}")
-            return 0
-
     while True:
+        cookie = _resolve_kwork_cookie(config)
         scan_once(
-            storage, telegram_client, email_client,
+            storage, telegram_client, lead_hub,
             deepseek_api_key=config.deepseek_api_key,
             deepseek_model=config.deepseek_model,
             openrouter_api_key=config.openrouter_api_key,
@@ -684,7 +715,7 @@ def main() -> int:
             openrouter_vision_mode=config.openrouter_vision_mode,
             kwork_project_client=kwork_project_client,
             kwork_max_responses=config.kwork_max_responses,
-            kwork_cookie=_resolve_kwork_cookie(config),
+            kwork_cookie=cookie,
             kwork_use_browser=config.kwork_use_browser,
             kwork_cdp_url=config.kwork_cdp_url,
             kwork_browser_profile_dir=config.kwork_browser_profile_dir,
@@ -695,13 +726,7 @@ def main() -> int:
             lead_hard_reject_keywords=config.lead_hard_reject_keywords,
             lead_required_keywords=config.lead_required_keywords,
         )
-        process_approvals(
-            storage,
-            telegram_client,
-            email_client,
-            max_sends=config.max_sends_per_run,
-        )
-        process_order_reviews(storage, email_client)
+        _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
         time.sleep(config.scan_interval_seconds)
 
 

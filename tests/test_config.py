@@ -1,6 +1,31 @@
 from app.config import load_config
 
 
+def test_load_config_reads_mobile_lead_hub_settings_without_mail(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "TELEGRAM_API_ID=0",
+                "TELEGRAM_API_HASH=fill_later",
+                "TELEGRAM_CHANNELS=@unused",
+                "LEAD_HUB_URL=http://31.129.97.211",
+                "LEAD_HUB_API_KEY=mobile-integration-key",
+                "LEAD_HUB_OWNER_PHONE=79679812438",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for name in ("LEAD_HUB_URL", "LEAD_HUB_API_KEY", "LEAD_HUB_OWNER_PHONE"):
+        monkeypatch.delenv(name, raising=False)
+
+    config = load_config(env_file)
+
+    assert config.lead_hub_url == "http://31.129.97.211"
+    assert config.lead_hub_api_key == "mobile-integration-key"
+    assert config.lead_hub_owner_phone == "79679812438"
+
+
 def test_load_config_reads_optional_kwork_login_credentials(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     env_file.write_text(

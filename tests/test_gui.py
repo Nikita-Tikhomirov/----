@@ -1248,8 +1248,8 @@ def test_lead_queue_caption_explains_active_and_archive_views():
     assert lead_queue_caption(total_count=81, visible_count=81, show_archive=True) == "Все лиды: 81"
 
 
-def test_lead_status_labels_explain_email_approval_and_submission_state():
-    assert lead_status_label("emailed") == "На почте"
+def test_lead_status_labels_explain_mobile_approval_and_submission_state():
+    assert lead_status_label("new") == "Новый"
     assert lead_status_label("approved") == "Готов к отправке"
     assert lead_status_label("sending") == "Проверить отправку"
     assert lead_status_label("sent") == "Отклик отправлен"
@@ -1460,9 +1460,9 @@ def test_batch_live_check_prioritizes_fresh_low_competition_leads():
     assert [lead.id for lead in selected] == [3, 2]
 
 
-def test_scan_and_approval_processes_trigger_lead_refresh():
+def test_scan_process_triggers_lead_refresh_without_mail_check():
     assert _should_refresh_after_process("Сканирование")
-    assert _should_refresh_after_process("Проверка почты")
+    assert not _should_refresh_after_process("Проверка почты")
     assert not _should_refresh_after_process("Kwork Chrome")
 
 
@@ -2239,10 +2239,10 @@ def test_gui_keeps_current_lead_status_when_old_background_action_fails():
     assert lead_status.values == []
 
 
-def test_gui_names_mail_check_and_direct_submission_actions_clearly():
+def test_gui_names_mobile_inbox_and_direct_submission_actions_clearly():
     source = (Path(__file__).resolve().parents[1] / "src" / "app" / "gui.py").read_text(encoding="utf-8")
 
-    assert 'text="Проверить почту"' in source
+    assert 'text="Проверить почту"' not in source
     assert 'text="OK и отправить отклик"' in source
     assert "command=self.send_selected_lead" in source
 

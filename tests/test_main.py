@@ -4,6 +4,7 @@ from app.main import (
     _proposal_title_from_text,
     _summary_from_judge,
     create_order_handoff,
+    process_mobile_approvals,
     process_approvals,
     process_order_reviews,
     scan_once,
@@ -62,6 +63,35 @@ class FakeEmailClient:
 
     def fetch_approvals(self, seen_message_ids):
         return self.approvals
+
+
+class FakeLeadHub:
+    def __init__(self, commands=()):
+        self.commands = list(commands)
+        self.claimed = []
+        self.results = []
+
+    def fetch_approved_commands(self):
+        return list(self.commands)
+
+    def claim_command(self, lead_id, executor_id):
+        self.claimed.append((lead_id, executor_id))
+        for command in self.commands:
+            if command["id"] == lead_id:
+                return command | {"status": "sending"}
+        return None
+
+    def report_result(self, lead_id, executor_id, *, sent, error=""):
+        self.results.append((lead_id, executor_id, sent, error))
+
+
+class FakeKworkSender:
+    def __init__(self):
+        self.sent = []
+
+    def send_reply(self, contact, text, *, price_rub, days, title, submit):
+        self.sent.append((contact, text, price_rub, days, title, submit))
+        return "kwork-project-1"
 
 
 class FlakyEmailClient(FakeEmailClient):
@@ -1213,3 +1243,61 @@ def test_create_order_handoff_writes_codex_task_file(tmp_path):
     content = handoff_path.read_text(encoding="utf-8")
     assert "Codex task: order #1" in content
     assert "Сверстать HTML/CSS/JS лендинг" in content
+
+
+def test_mobile_approval_sends_one_claimed_kwork_lead_and_reports_result(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=1,
+        post_url="https://kwork.ru/projects/41",
+        text="Сверстать лендинг",
+        posted_at="2026-07-18T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=82,
+        summary="Адаптивная верстка",
+        draft_reply="Старый текст",
+        contact="https://kwork.ru/projects/41",
+        proposal_title="Старое название",
+        proposal_price_rub=3000,
+        proposal_days=3,
+    )
+    storage.mark_lead_hub_synced(lead_id, 91)
+    hub = FakeLeadHub(
+        commands=[
+            {
+                "id": 91,
+                "status": "approved",
+                "draft_reply": "Сделаю адаптивный лендинг и проверю форму.",
+                "proposal_title": "Адаптивная верстка лендинга",
+                "proposal_price_rub": 6500,
+                "proposal_days": 4,
+            }
+        ]
+    )
+    sender = FakeKworkSender()
+
+    processed = process_mobile_approvals(
+        storage=storage,
+        lead_hub=hub,
+        sender=sender,
+        executor_id="desktop-main",
+    )
+
+    assert processed == 1
+    assert sender.sent == [
+        (
+            "https://kwork.ru/projects/41",
+            "Сделаю адаптивный лендинг и проверю форму.",
+            6500,
+            4,
+            "Адаптивная верстка лендинга",
+            True,
+        )
+    ]
+    assert hub.claimed == [(91, "desktop-main")]
+    assert hub.results == [(91, "desktop-main", True, "")]
+    assert storage.get_lead(lead_id).status == "sent"
