@@ -370,9 +370,13 @@ def _reply_source_text(
 
 
 def _email_lead(storage: Storage, email_client: LeadMailer, lead) -> bool:
+    if not storage.claim_lead_email_delivery(lead.id):
+        logger.info("Skipping email for lead %s because another scan owns delivery", lead.id)
+        return False
     try:
         email_message_id = email_client.send_lead(lead)
     except Exception as exc:
+        storage.release_lead_email_delivery(lead.id)
         logger.warning("Failed to email lead %s from %s: %s", lead.id, lead.post_url, exc)
         return False
     storage.mark_lead_emailed(lead.id, email_message_id)

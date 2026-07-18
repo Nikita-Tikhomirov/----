@@ -159,6 +159,33 @@ def test_scan_once_creates_lead_and_sends_email(tmp_path):
     assert email_client.sent_leads == [leads[0].id]
 
 
+def test_scan_once_skips_email_when_another_process_has_claimed_the_lead(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+    post = FakeTelegramClient().fetch_recent_posts()[0]
+    post_id = storage.save_post(
+        channel=post.channel,
+        message_id=post.message_id,
+        post_url=post.url,
+        text=post.text,
+        posted_at=post.posted_at,
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=80,
+        summary="HTML/CSS лендинг",
+        draft_reply="Здравствуйте! Готов помочь.",
+        contact="@client_dev",
+    )
+
+    assert storage.claim_lead_email_delivery(lead_id) is True
+
+    scan_once(storage=storage, telegram_client=FakeTelegramClient(), email_client=email_client)
+
+    assert email_client.sent_leads == []
+    assert storage.get_lead(lead_id).status == "new"
+
 def test_scan_once_persists_the_live_kwork_response_count(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

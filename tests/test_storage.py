@@ -76,6 +76,64 @@ def test_get_lead_for_post_returns_existing_lead(tmp_path):
     assert lead.status == "new"
 
 
+def test_only_one_storage_instance_can_claim_new_lead_email_delivery(tmp_path):
+    database_path = tmp_path / "leads.sqlite3"
+    first_storage = Storage(database_path)
+    first_storage.initialize()
+    second_storage = Storage(database_path)
+    second_storage.initialize()
+    post_id = first_storage.save_post(
+        channel="jobs",
+        message_id=430,
+        post_url="https://kwork.ru/projects/430/view",
+        text="Нужно сверстать лендинг",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = first_storage.create_lead(
+        post_id=post_id,
+        score=81,
+        summary="HTML/CSS лендинг",
+        draft_reply="Здравствуйте! Готов помочь.",
+        contact="https://kwork.ru/projects/430/view",
+    )
+
+    assert first_storage.claim_lead_email_delivery(lead_id) is True
+    assert second_storage.claim_lead_email_delivery(lead_id) is False
+
+    first_storage.release_lead_email_delivery(lead_id)
+
+    assert second_storage.claim_lead_email_delivery(lead_id) is True
+    second_storage.mark_lead_emailed(lead_id, "<lead-430@example.com>")
+    assert first_storage.get_lead(lead_id).status == "emailed"
+    assert first_storage.claim_lead_email_delivery(lead_id) is False
+
+
+def test_begin_lead_send_blocks_repeat_submission_until_status_is_recorded(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="jobs",
+        message_id=431,
+        post_url="https://kwork.ru/projects/431/view",
+        text="Нужно сверстать лендинг",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=81,
+        summary="HTML/CSS лендинг",
+        draft_reply="Здравствуйте! Готов помочь.",
+        contact="https://kwork.ru/projects/431/view",
+    )
+
+    assert storage.begin_lead_send(lead_id) is True
+    assert storage.get_lead(lead_id).status == "sending"
+    assert storage.begin_lead_send(lead_id) is False
+
+    storage.mark_sent(lead_id, "https://kwork.ru/projects/431/view", "kwork-project-431")
+    assert storage.get_lead(lead_id).status == "sent"
+
+
 def test_lead_reply_and_last_error_can_be_updated(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

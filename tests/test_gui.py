@@ -37,6 +37,8 @@ from app.gui import (
     build_app_command,
     build_component_check_report,
     component_readiness_summary,
+    LeadSendBlockedError,
+    KworkReplyPersistenceError,
     filter_active_leads,
     filter_actionable_leads,
     filter_stopped_leads,
@@ -1249,6 +1251,7 @@ def test_lead_queue_caption_explains_active_and_archive_views():
 def test_lead_status_labels_explain_email_approval_and_submission_state():
     assert lead_status_label("emailed") == "На почте"
     assert lead_status_label("approved") == "Готов к отправке"
+    assert lead_status_label("sending") == "Проверить отправку"
     assert lead_status_label("sent") == "Отклик отправлен"
     assert lead_status_label("unknown") == "unknown"
 
@@ -1874,6 +1877,10 @@ def test_gui_direct_send_submits_kwork_reply_and_marks_lead_sent():
             return "kwork-project-22"
 
     class Storage:
+        def begin_lead_send(self, lead_id):
+            sent_marks.append(("begin", lead_id))
+            return True
+
         def mark_sent(self, lead_id, contact, message_id):
             sent_marks.append((lead_id, contact, message_id))
 
@@ -1898,7 +1905,160 @@ def test_gui_direct_send_submits_kwork_reply_and_marks_lead_sent():
             True,
         )
     ]
-    assert sent_marks == [(22, "https://kwork.ru/projects/22/view", "kwork-project-22")]
+    assert sent_marks == [
+        ("begin", 22),
+        (22, "https://kwork.ru/projects/22/view", "kwork-project-22"),
+    ]
+
+
+def test_gui_keeps_lead_in_send_review_state_when_kwork_succeeds_but_storage_fails():
+    lead = Lead(
+        id=23,
+        post_id=11,
+        score=82,
+        summary="Лендинг",
+        draft_reply="Здравствуйте! Сделаю лендинг.",
+        contact="https://kwork.ru/projects/23/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/23/view",
+    )
+    events = []
+
+    class Sender:
+        def send_reply(self, *_args, **_kwargs):
+            events.append("kwork-confirmed")
+            return "kwork-project-23"
+
+    class Storage:
+        def begin_lead_send(self, lead_id):
+            events.append(("begin", lead_id))
+            return True
+
+        def mark_sent(self, *_args):
+            raise OSError("database is locked")
+
+    gui = SimpleNamespace(_sender=lambda: Sender(), _storage=lambda: Storage())
+    payload = {"reply": "Здравствуйте!", "price": 12000, "days": 3, "title": "Сделать лендинг"}
+
+    with pytest.raises(KworkReplyPersistenceError, match="Kwork подтвердил"):
+        LeadFunnelGui._send_lead_now(gui, lead, payload)
+
+    assert events == [("begin", 23), "kwork-confirmed"]
+
+
+def test_gui_stops_before_kwork_when_lead_send_state_is_already_reserved():
+    lead = Lead(
+        id=24,
+        post_id=12,
+        score=82,
+        summary="Лендинг",
+        draft_reply="Здравствуйте! Сделаю лендинг.",
+        contact="https://kwork.ru/projects/24/view",
+        status="sending",
+        post_url="https://kwork.ru/projects/24/view",
+    )
+
+    class Sender:
+        def send_reply(self, *_args, **_kwargs):
+            raise AssertionError("Kwork must not open when send state is reserved")
+
+    class Storage:
+        def begin_lead_send(self, _lead_id):
+            return False
+
+    gui = SimpleNamespace(_sender=lambda: Sender(), _storage=lambda: Storage())
+    payload = {"reply": "Здравствуйте!", "price": 12000, "days": 3, "title": "Сделать лендинг"}
+
+    with pytest.raises(LeadSendBlockedError, match="уже находится"):
+        LeadFunnelGui._send_lead_now(gui, lead, payload)
+
+
+def test_gui_does_not_mark_failed_after_kwork_confirmation_persistence_error():
+    failures = []
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    class Storage:
+        def mark_failed(self, lead_id, error):
+            failures.append((lead_id, error))
+
+    class Value:
+        def __init__(self):
+            self.values = []
+
+        def set(self, value):
+            self.values.append(value)
+
+    def confirmed_action():
+        raise KworkReplyPersistenceError("Kwork подтвердил отклик, но статус не сохранен")
+
+    lead_status = Value()
+    gui = SimpleNamespace(
+        root=Root(),
+        _storage=lambda: Storage(),
+        write_log=lambda _text: None,
+        status_var=Value(),
+        lead_status_var=lead_status,
+        current_lead_id=42,
+        refresh_leads=lambda: None,
+    )
+
+    LeadFunnelGui._run_lead_action_thread(
+        gui,
+        "Отправка лида #42",
+        confirmed_action,
+        lead_id=42,
+        mark_failed=True,
+    )
+
+    assert failures == []
+    assert "Kwork подтвердил" in lead_status.values[-1]
+
+
+def test_gui_does_not_mark_failed_when_send_state_was_reserved_elsewhere():
+    failures = []
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    class Storage:
+        def mark_failed(self, lead_id, error):
+            failures.append((lead_id, error))
+
+    class Value:
+        def __init__(self):
+            self.values = []
+
+        def set(self, value):
+            self.values.append(value)
+
+    def reserved_action():
+        raise LeadSendBlockedError("Этот лид уже находится в процессе отправки или был отправлен.")
+
+    lead_status = Value()
+    gui = SimpleNamespace(
+        root=Root(),
+        _storage=lambda: Storage(),
+        write_log=lambda _text: None,
+        status_var=Value(),
+        lead_status_var=lead_status,
+        current_lead_id=42,
+        refresh_leads=lambda: None,
+    )
+
+    LeadFunnelGui._run_lead_action_thread(
+        gui,
+        "Отправка лида #42",
+        reserved_action,
+        lead_id=42,
+        mark_failed=True,
+    )
+
+    assert failures == []
+    assert "уже находится" in lead_status.values[-1]
 
 
 @pytest.mark.parametrize(

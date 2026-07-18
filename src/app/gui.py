@@ -45,10 +45,19 @@ LEAD_STATUS_LABELS = {
     "new": "Новый",
     "emailed": "На почте",
     "approved": "Готов к отправке",
+    "sending": "Проверить отправку",
     "sent": "Отклик отправлен",
     "rejected": "Отклонён",
     "failed": "Ошибка",
 }
+
+
+class KworkReplyPersistenceError(RuntimeError):
+    """Kwork accepted the reply, but its durable local status is unknown."""
+
+
+class LeadSendBlockedError(RuntimeError):
+    """The database shows another send attempt already owns this lead."""
 
 
 @dataclass(frozen=True)
@@ -1169,6 +1178,9 @@ class LeadFunnelGui:
         )
 
     def _send_lead_now(self, lead: Lead, payload: dict) -> str:
+        storage = self._storage()
+        if not storage.begin_lead_send(lead.id):
+            raise LeadSendBlockedError("Этот лид уже находится в процессе отправки или был отправлен.")
         message_id = self._sender().send_reply(
             lead.contact,
             payload["reply"],
@@ -1177,7 +1189,13 @@ class LeadFunnelGui:
             title=payload["title"],
             submit=True,
         )
-        self._storage().mark_sent(lead.id, lead.contact, message_id)
+        try:
+            storage.mark_sent(lead.id, lead.contact, message_id)
+        except Exception as exc:
+            raise KworkReplyPersistenceError(
+                "Kwork подтвердил отклик, но локальный статус не сохранился. "
+                "Не отправляй повторно: сначала проверь заказ на Kwork."
+            ) from exc
         return message_id
 
     def _release_lead_send(self, lead_id: int) -> None:
@@ -1225,6 +1243,16 @@ class LeadFunnelGui:
                     )
                 except Exception:
                     logger.exception("Unable to store Kwork replyability check for lead %s", lead_id)
+            self.write_log(f"=== {label}: отправка остановлена: {exc} ===\n")
+            self.root.after(0, lambda: self.status_var.set(f"{label}: отправка остановлена"))
+            if lead_id is not None:
+                self.root.after(0, lambda: LeadFunnelGui._show_lead_action_error(self, lead_id, str(exc)))
+        except KworkReplyPersistenceError as exc:
+            self.write_log(f"=== {label}: требуется ручная проверка: {exc} ===\n")
+            self.root.after(0, lambda: self.status_var.set(f"{label}: требуется проверка"))
+            if lead_id is not None:
+                self.root.after(0, lambda: LeadFunnelGui._show_lead_action_error(self, lead_id, str(exc)))
+        except LeadSendBlockedError as exc:
             self.write_log(f"=== {label}: отправка остановлена: {exc} ===\n")
             self.root.after(0, lambda: self.status_var.set(f"{label}: отправка остановлена"))
             if lead_id is not None:
@@ -2139,6 +2167,8 @@ def _reply_state(lead: Lead) -> str:
         return "отправлен"
     if lead.status == "approved":
         return "готов к отправке"
+    if lead.status == "sending":
+        return "требуется проверка"
     return "не отправлен"
 
 
@@ -2178,6 +2208,11 @@ def lead_send_block_reason(lead: Lead, in_flight_lead_ids: set[int], max_respons
         return "Отклик по этому лиду уже отправлен."
     if lead.id in in_flight_lead_ids:
         return "Отправка этого лида уже выполняется."
+    if lead.status == "sending":
+        return (
+            "Kwork уже мог принять этот отклик, но локальный статус не подтвержден. "
+            "Открой заказ и проверь его вручную: повторно отправлять нельзя."
+        )
     if _lead_ai_decision(lead) == "reject":
         return "AI считает, что этот заказ не подходит. Переоцени лид или исправь условия отбора перед отправкой."
     if lead.live_reason == UNAVAILABLE_PROJECT_REASON:
@@ -2327,6 +2362,7 @@ def lead_action_priority(
     """Classify how quickly an unsent lead should be handled from observable facts."""
     if (
         lead.status == "sent"
+        or lead.status == "sending"
         or lead.sent_at
         or _lead_ai_decision(lead) == "reject"
         or lead.live_reason == UNAVAILABLE_PROJECT_REASON

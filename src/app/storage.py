@@ -113,6 +113,7 @@ class Storage:
                     live_reason TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'new',
                     email_message_id TEXT,
+                    email_claimed_at TEXT NOT NULL DEFAULT '',
                     last_error TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -184,6 +185,7 @@ class Storage:
             _ensure_column(conn, "leads", "live_response_count", "INTEGER")
             _ensure_column(conn, "leads", "live_checked_at", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "live_reason", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "leads", "email_claimed_at", "TEXT NOT NULL DEFAULT ''")
             _backfill_missing_failed_errors(conn)
             _deduplicate_lead_attachment_urls(conn)
             conn.execute(
@@ -317,8 +319,55 @@ class Storage:
     def mark_lead_emailed(self, lead_id: int, email_message_id: str) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE leads SET status = 'emailed', email_message_id = ?, last_error = '' WHERE id = ?",
+                """
+                UPDATE leads
+                SET status = 'emailed', email_message_id = ?, email_claimed_at = '', last_error = ''
+                WHERE id = ?
+                """,
                 (email_message_id, lead_id),
+            )
+
+    def begin_lead_send(self, lead_id: int) -> bool:
+        """Record a Kwork send attempt before opening the reply form."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE leads
+                SET status = 'sending', last_error = ''
+                WHERE id = ? AND status IN ('new', 'emailed', 'approved', 'failed')
+                """,
+                (lead_id,),
+            )
+        return cursor.rowcount > 0
+
+    def claim_lead_email_delivery(self, lead_id: int) -> bool:
+        """Atomically reserve a new lead so concurrent scans cannot email it twice."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE leads
+                SET email_claimed_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                  AND status = 'new'
+                  AND (
+                      email_claimed_at = ''
+                      OR email_claimed_at < datetime('now', '-15 minutes')
+                  )
+                """,
+                (lead_id,),
+            )
+        return cursor.rowcount > 0
+
+    def release_lead_email_delivery(self, lead_id: int) -> None:
+        """Make a failed email attempt retryable without changing the lead's status."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE leads
+                SET email_claimed_at = ''
+                WHERE id = ? AND status = 'new'
+                """,
+                (lead_id,),
             )
 
     def update_lead_live_status(self, lead_id: int, response_count: int | None, reason: str = "") -> None:
