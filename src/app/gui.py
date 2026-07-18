@@ -903,6 +903,8 @@ class LeadFunnelGui:
             use_browser=config.kwork_use_browser,
             cdp_url=config.kwork_cdp_url,
             browser_profile_dir=config.kwork_browser_profile_dir,
+            login_email=config.kwork_login_email,
+            login_password=config.kwork_login_password,
         )
 
     def regenerate_selected_reply(self) -> None:

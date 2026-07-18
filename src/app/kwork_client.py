@@ -79,12 +79,17 @@ class KworkProjectClient:
         use_browser: bool = True,
         cdp_url: str = "http://127.0.0.1:9222",
         browser_profile_dir: str = "",
+        login_email: str = "",
+        login_password: str = "",
     ):
         self.timeout_seconds = timeout_seconds
         self.cookie = cookie
         self.use_browser = use_browser
         self.cdp_url = cdp_url
         self.browser_profile_dir = browser_profile_dir
+        self.login_email = login_email
+        self.login_password = login_password
+        self._browser_login_attempted = False
 
     def inspect(self, url: str) -> KworkProjectInfo:
         if not _is_kwork_project_url(url):
@@ -92,18 +97,132 @@ class KworkProjectClient:
         try:
             html_text = ""
             if self.use_browser:
-                html_text = _fetch_rendered_project_html(
-                    url,
-                    timeout_seconds=self.timeout_seconds,
-                    cdp_url=self.cdp_url,
-                    browser_profile_dir=self.browser_profile_dir,
-                )
+                html_text = self._fetch_browser_project_html(url)
             if not html_text:
                 html_text = _fetch_project_html(url, self.timeout_seconds, self.cookie)
         except Exception as exc:
             logger.warning("Failed to fetch Kwork project %s: %s", url, exc)
             return KworkProjectInfo(url=url, response_count=None, title="", description="", reason=f"Kwork не открылся: {exc}")
         return parse_kwork_project_html(url, html_text)
+
+    def _fetch_browser_project_html(self, url: str) -> str:
+        try:
+            return _fetch_rendered_project_html(
+                url,
+                timeout_seconds=self.timeout_seconds,
+                cdp_url=self.cdp_url,
+                browser_profile_dir=self.browser_profile_dir,
+            )
+        except Exception:
+            if self._browser_login_attempted or not self.login_email or not self.login_password:
+                raise
+            self._ensure_browser_login()
+            return _fetch_rendered_project_html(
+                url,
+                timeout_seconds=self.timeout_seconds,
+                cdp_url=self.cdp_url,
+                browser_profile_dir=self.browser_profile_dir,
+            )
+
+    def _ensure_browser_login(self) -> None:
+        """Log into the isolated Kwork Chrome profile when its session has expired."""
+        if self._browser_login_attempted:
+            return
+        self._browser_login_attempted = True
+
+        from app import kwork_source
+
+        login_url = "https://kwork.ru/login"
+        kwork_source._ensure_chrome_cdp(self.cdp_url, login_url, self.browser_profile_dir)
+        page = kwork_source._find_or_create_page(self.cdp_url, login_url, tab_kind="login")
+
+        import websocket
+
+        ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=self.timeout_seconds)
+        try:
+            kwork_source._send_cdp(ws, "Page.enable", {})
+            kwork_source._send_cdp(ws, "Page.navigate", {"url": login_url})
+            state = _wait_for_login_state(ws, self.timeout_seconds)
+            if not state["has_login_form"]:
+                return
+
+            payload = json.dumps(
+                {"email": self.login_email, "password": self.login_password},
+                ensure_ascii=False,
+            )
+            from app.kwork_sender import _AUTO_LOGIN_SCRIPT
+
+            result = kwork_source._evaluate(ws, f"({_AUTO_LOGIN_SCRIPT})({payload})")
+            data = json.loads(result) if isinstance(result, str) else {"started": False, "reason": "no result"}
+            if not data.get("started"):
+                raise RuntimeError(str(data.get("reason") or "Kwork login form was not found"))
+            _wait_for_authenticated_login(ws, self.timeout_seconds)
+        finally:
+            ws.close()
+
+
+_LOGIN_STATE_SCRIPT = """
+(() => JSON.stringify({
+  url: location.href,
+  hasLoginForm: !!(
+    document.querySelector('input[type="email"], input[name*="email" i], input[name*="login" i]')
+    && document.querySelector('input[type="password"], input[name*="password" i]')
+  ),
+  text: (document.body && document.body.innerText || '').slice(0, 6000)
+}))()
+"""
+
+
+def _wait_for_login_state(ws, timeout_seconds: float) -> dict[str, object]:
+    from app import kwork_source
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        state = _browser_login_state(kwork_source._evaluate(ws, _LOGIN_STATE_SCRIPT))
+        if bool(state["has_login_form"]) or _is_authenticated_login_state(state):
+            return state
+        time.sleep(0.25)
+    raise RuntimeError("Kwork login page did not open")
+
+
+def _wait_for_authenticated_login(ws, timeout_seconds: float) -> None:
+    from app import kwork_source
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        state = _browser_login_state(kwork_source._evaluate(ws, _LOGIN_STATE_SCRIPT))
+        if _is_authenticated_login_state(state):
+            return
+        text = str(state["text"]).lower()
+        if any(marker in text for marker in ("неверн", "неправильн", "ошибка входа")):
+            raise RuntimeError("Kwork did not accept the saved login or password")
+        if any(marker in text for marker in ("captcha", "капч", "смс", "код подтверждения")):
+            raise RuntimeError("Kwork requires manual confirmation to finish login")
+        time.sleep(0.5)
+    raise RuntimeError("Kwork auto-login did not finish; captcha or manual confirmation may be required")
+
+
+def _browser_login_state(raw_state: object) -> dict[str, object]:
+    if not isinstance(raw_state, str):
+        return {"url": "", "has_login_form": False, "text": ""}
+    try:
+        data = json.loads(raw_state)
+    except json.JSONDecodeError:
+        return {"url": "", "has_login_form": False, "text": raw_state}
+    if not isinstance(data, dict):
+        return {"url": "", "has_login_form": False, "text": ""}
+    return {
+        "url": str(data.get("url", "")),
+        "has_login_form": bool(data.get("hasLoginForm")),
+        "text": str(data.get("text", "")),
+    }
+
+
+def _is_authenticated_login_state(state: dict[str, object]) -> bool:
+    parsed = urlparse(str(state["url"]))
+    return parsed.netloc.lower().endswith("kwork.ru") and parsed.path.rstrip("/") != "/login" and not bool(
+        state["has_login_form"]
+    )
 
 
 def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:

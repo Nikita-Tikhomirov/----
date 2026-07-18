@@ -83,6 +83,40 @@ def test_kwork_client_rejects_non_kwork_links_without_fetching():
     assert "не Kwork" in result.reason
 
 
+def test_kwork_client_retries_private_project_after_browser_auto_login(monkeypatch):
+    import app.kwork_client as client_module
+
+    fetch_attempts = []
+    login_attempts = []
+
+    def fetch_rendered(*_args, **_kwargs):
+        fetch_attempts.append(True)
+        if len(fetch_attempts) == 1:
+            raise RuntimeError("Kwork page did not navigate to fresh URL; last location=https://kwork.ru/projects")
+        return "<title>Лендинг - Kwork</title><div>Предложений: 3</div>"
+
+    monkeypatch.setattr(client_module, "_fetch_rendered_project_html", fetch_rendered)
+    monkeypatch.setattr(client_module, "_fetch_project_html", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        KworkProjectClient,
+        "_ensure_browser_login",
+        lambda self: login_attempts.append((self.login_email, self.login_password)),
+        raising=False,
+    )
+
+    client = KworkProjectClient(
+        use_browser=True,
+        login_email="bot@example.com",
+        login_password="secret",
+    )
+
+    result = client.inspect("https://kwork.ru/projects/123/view")
+
+    assert result.response_count == 3
+    assert len(fetch_attempts) == 2
+    assert login_attempts == [("bot@example.com", "secret")]
+
+
 def test_replyability_accepts_project_at_response_limit():
     info = KworkProjectInfo(
         url="https://kwork.ru/projects/1/view",

@@ -164,6 +164,8 @@ class KworkReplySender:
             use_browser=True,
             cdp_url=self.cdp_url,
             browser_profile_dir=self.browser_profile_dir,
+            login_email=self.login_email,
+            login_password=self.login_password,
         )
         ensure_project_is_replyable(client.inspect(contact), max_responses)
 

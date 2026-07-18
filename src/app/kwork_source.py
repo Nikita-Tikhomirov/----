@@ -384,14 +384,20 @@ def _find_or_create_page(cdp_url: str, url: str, tab_kind: str = "any") -> dict[
 
     ws = websocket.create_connection(version["webSocketDebuggerUrl"], timeout=10)
     try:
-        _send_cdp(ws, "Target.createTarget", {"url": url})
+        response = _send_cdp(ws, "Target.createTarget", {"url": url})
     finally:
         ws.close()
+
+    target_id = str(response.get("result", {}).get("targetId", "")) if isinstance(response, dict) else ""
 
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         pages = _cdp_json(cdp_url, "/json/list", timeout=5) or []
         for page in pages:
+            if target_id and str(page.get("id", "")) == target_id and page.get("webSocketDebuggerUrl"):
+                return page
+            if target_id:
+                continue
             if page.get("type") == "page" and _matches_created_tab(page.get("url", ""), url, tab_kind):
                 if page.get("webSocketDebuggerUrl"):
                     return page
@@ -500,6 +506,11 @@ def _is_kwork_inspection_tab(url: str) -> bool:
     ) is not None
 
 
+def _is_kwork_login_tab(url: str) -> bool:
+    parsed = urlsplit(url)
+    return parsed.netloc.lower().endswith("kwork.ru") and parsed.path.rstrip("/") == "/login"
+
+
 def _matches_tab_kind(url: str, tab_kind: str) -> bool:
     if tab_kind == "list":
         return _is_kwork_list_tab(url)
@@ -507,6 +518,8 @@ def _matches_tab_kind(url: str, tab_kind: str) -> bool:
         return _is_kwork_project_tab(url)
     if tab_kind == "inspection":
         return _is_kwork_inspection_tab(url)
+    if tab_kind == "login":
+        return _is_kwork_login_tab(url)
     return _is_kwork_tab(url)
 
 
@@ -515,6 +528,8 @@ def _matches_created_tab(actual_url: str, expected_url: str, tab_kind: str) -> b
         return _is_same_kwork_page(expected_url, actual_url)
     if tab_kind == "list":
         return _is_kwork_list_tab(actual_url)
+    if tab_kind == "login":
+        return _is_kwork_tab(actual_url)
     return _matches_tab_kind(actual_url, tab_kind)
 
 

@@ -407,6 +407,65 @@ def test_find_or_create_page_reuses_list_tab_for_list(monkeypatch):
     assert page["webSocketDebuggerUrl"] == "ws://list"
 
 
+def test_find_or_create_login_page_waits_for_created_target_not_existing_list_tab(monkeypatch):
+    import websocket
+    import app.kwork_source as source
+
+    class FakeWebSocket:
+        def close(self):
+            return None
+
+    page_lists = iter(
+        [
+            [
+                {
+                    "id": "list-target",
+                    "type": "page",
+                    "url": "https://kwork.ru/projects",
+                    "webSocketDebuggerUrl": "ws://list",
+                }
+            ],
+            [
+                {
+                    "id": "list-target",
+                    "type": "page",
+                    "url": "https://kwork.ru/projects",
+                    "webSocketDebuggerUrl": "ws://list",
+                },
+                {
+                    "id": "login-target",
+                    "type": "page",
+                    "url": "https://kwork.ru/seller",
+                    "webSocketDebuggerUrl": "ws://login",
+                },
+            ],
+        ]
+    )
+
+    def fake_cdp_json(_cdp_url, path, timeout):
+        if path == "/json/list":
+            return next(page_lists)
+        if path == "/json/version":
+            return {"webSocketDebuggerUrl": "ws://browser"}
+        return None
+
+    monkeypatch.setattr(source, "_cdp_json", fake_cdp_json)
+    monkeypatch.setattr(websocket, "create_connection", lambda *_args, **_kwargs: FakeWebSocket())
+    monkeypatch.setattr(
+        source,
+        "_send_cdp",
+        lambda _ws, method, _params: {"result": {"targetId": "login-target"}} if method == "Target.createTarget" else {},
+    )
+
+    page = source._find_or_create_page(
+        "http://127.0.0.1:9222",
+        "https://kwork.ru/login",
+        tab_kind="login",
+    )
+
+    assert page["webSocketDebuggerUrl"] == "ws://login"
+
+
 def test_fetch_rendered_project_html_waits_for_body_text(monkeypatch):
     import websocket
     import app.kwork_client as client
