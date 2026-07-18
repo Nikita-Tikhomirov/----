@@ -107,6 +107,12 @@ def scan_once(
         )
         existing_lead = storage.get_lead_for_post(post_id)
         if existing_lead is not None:
+            _refresh_existing_lead_live_status(
+                storage=storage,
+                lead=existing_lead,
+                kwork_project_client=kwork_project_client,
+                kwork_max_responses=kwork_max_responses,
+            )
             if existing_lead.status == "new" and _email_lead(storage, email_client, existing_lead):
                 created += 1
             else:
@@ -295,6 +301,31 @@ def scan_once(
         if _email_lead(storage, email_client, lead):
             created += 1
     return created
+
+
+def _refresh_existing_lead_live_status(
+    storage: Storage,
+    lead,
+    kwork_project_client: ProjectInspector | None,
+    kwork_max_responses: int,
+) -> None:
+    """Refresh competition data for an actionable lead without recreating it."""
+    if kwork_project_client is None or lead.status == "sent" or lead.sent_at:
+        return
+    if lead.live_response_count is not None and lead.live_response_count > kwork_max_responses:
+        return
+
+    try:
+        project_info = kwork_project_client.inspect(lead.contact)
+    except Exception:
+        logger.warning("Unable to refresh Kwork status for lead #%s", lead.id, exc_info=True)
+        return
+
+    storage.update_lead_live_status(
+        lead.id,
+        response_count=getattr(project_info, "response_count", None),
+        reason=str(getattr(project_info, "reason", "") or ""),
+    )
 
 
 def _build_attachment_processing_result(builder, attachments: tuple[str, ...], **kwargs) -> AttachmentProcessingResult:

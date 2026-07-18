@@ -16,6 +16,7 @@ from urllib.request import urlopen
 from app.ai_lead_judge import sanitize_customer_reply
 from app.config import load_config
 from app.kwork_sender import KworkReplySender, _extract_reply_terms
+from app.kwork_status import UNAVAILABLE_PROJECT_REASON
 from app.reply_composer import (
     ReplyDraftContext,
     compose_customer_reply,
@@ -2069,6 +2070,8 @@ def lead_send_block_reason(lead: Lead, in_flight_lead_ids: set[int], max_respons
         return "Отправка этого лида уже выполняется."
     if _lead_ai_decision(lead) == "reject":
         return "AI считает, что этот заказ не подходит. Переоцени лид или исправь условия отбора перед отправкой."
+    if lead.live_reason == UNAVAILABLE_PROJECT_REASON:
+        return "Заказ на Kwork уже недоступен: он закрыт, удалён или страница не найдена."
     if max_responses is not None and lead.live_response_count is not None and lead.live_response_count > max_responses:
         return (
             f"Kwork сейчас показывает {lead.live_response_count} откликов при лимите {max_responses}. "
@@ -2173,7 +2176,12 @@ def lead_action_priority(
     now: datetime | None = None,
 ) -> str:
     """Classify how quickly an unsent lead should be handled from observable facts."""
-    if lead.status == "sent" or lead.sent_at or _lead_ai_decision(lead) == "reject":
+    if (
+        lead.status == "sent"
+        or lead.sent_at
+        or _lead_ai_decision(lead) == "reject"
+        or lead.live_reason == UNAVAILABLE_PROJECT_REASON
+    ):
         return "Стоп"
     response_count = _extract_offer_count(lead)
     if response_count is not None and response_count > max_responses:

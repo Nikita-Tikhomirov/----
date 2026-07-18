@@ -1493,6 +1493,25 @@ def test_direct_send_blocks_lead_that_live_kwork_check_already_put_over_limit():
     assert "8" in lead_send_block_reason(lead, in_flight_lead_ids=set(), max_responses=5)
 
 
+def test_direct_send_blocks_lead_when_kwork_project_is_unavailable():
+    lead = Lead(
+        id=24,
+        post_id=12,
+        score=82,
+        summary="Лендинг",
+        draft_reply="Здравствуйте! Сделаю лендинг.",
+        contact="https://kwork.ru/projects/24/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/24/view",
+        live_reason="Kwork project is unavailable: page not found, closed, or removed.",
+    )
+
+    reason = lead_send_block_reason(lead, in_flight_lead_ids=set(), max_responses=5)
+
+    assert "недоступен" in reason
+    assert lead_action_priority(lead, max_responses=5) == "Стоп"
+
+
 def test_lead_table_marks_live_kwork_response_limit_exceeded():
     lead = Lead(
         id=23,
