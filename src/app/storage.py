@@ -32,6 +32,9 @@ class Lead:
     proposal_title: str = ""
     proposal_price_rub: int | None = None
     proposal_days: int | None = None
+    live_response_count: int | None = None
+    live_checked_at: str = ""
+    live_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,6 +108,9 @@ class Storage:
                     proposal_title TEXT NOT NULL DEFAULT '',
                     proposal_price_rub INTEGER,
                     proposal_days INTEGER,
+                    live_response_count INTEGER,
+                    live_checked_at TEXT NOT NULL DEFAULT '',
+                    live_reason TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'new',
                     email_message_id TEXT,
                     last_error TEXT NOT NULL DEFAULT '',
@@ -175,6 +181,9 @@ class Storage:
             _ensure_column(conn, "leads", "proposal_title", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "proposal_price_rub", "INTEGER")
             _ensure_column(conn, "leads", "proposal_days", "INTEGER")
+            _ensure_column(conn, "leads", "live_response_count", "INTEGER")
+            _ensure_column(conn, "leads", "live_checked_at", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "leads", "live_reason", "TEXT NOT NULL DEFAULT ''")
             _backfill_missing_failed_errors(conn)
             _deduplicate_lead_attachment_urls(conn)
             conn.execute(
@@ -310,6 +319,20 @@ class Storage:
             conn.execute(
                 "UPDATE leads SET status = 'emailed', email_message_id = ?, last_error = '' WHERE id = ?",
                 (email_message_id, lead_id),
+            )
+
+    def update_lead_live_status(self, lead_id: int, response_count: int | None, reason: str = "") -> None:
+        """Store the latest non-destructive Kwork page check for a lead."""
+        if response_count is not None and response_count < 0:
+            raise ValueError("Lead response count must not be negative")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE leads
+                SET live_response_count = ?, live_checked_at = CURRENT_TIMESTAMP, live_reason = ?
+                WHERE id = ?
+                """,
+                (response_count, reason.strip()[:2000], lead_id),
             )
 
     def update_lead_reply(self, lead_id: int, draft_reply: str) -> None:
@@ -766,6 +789,13 @@ def _lead_from_row(row: sqlite3.Row) -> Lead:
             if "proposal_days" in keys and row["proposal_days"] is not None
             else None
         ),
+        live_response_count=(
+            int(row["live_response_count"])
+            if "live_response_count" in keys and row["live_response_count"] is not None
+            else None
+        ),
+        live_checked_at=str(row["live_checked_at"] or "") if "live_checked_at" in keys else "",
+        live_reason=str(row["live_reason"] or "") if "live_reason" in keys else "",
     )
 
 

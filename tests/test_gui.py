@@ -15,6 +15,7 @@ from app.gui import (
     _extract_price,
     _extract_remaining_time,
     _format_datetime,
+    _format_storage_datetime,
     _lead_title,
     _kwork_price_limit,
     _parse_optional_int,
@@ -32,7 +33,7 @@ from app.gui import (
     read_env_values,
     update_env_values,
 )
-from app.storage import Lead, LeadAttachment, PostRejection
+from app.storage import Lead, LeadAttachment, PostRejection, Storage
 
 
 def test_build_app_command_runs_module_with_src_pythonpath(tmp_path, monkeypatch):
@@ -725,6 +726,10 @@ def test_format_datetime_displays_moscow_time():
     assert _format_datetime("2026-05-04 10:30:00") == "04.05 10:30 МСК"
 
 
+def test_storage_datetime_is_converted_from_utc_to_moscow_time():
+    assert _format_storage_datetime("2026-07-18 00:04:25") == "18.07 03:04 МСК"
+
+
 def test_scan_and_approval_processes_trigger_lead_refresh():
     assert _should_refresh_after_process("Сканирование")
     assert _should_refresh_after_process("Проверка почты")
@@ -819,6 +824,23 @@ def test_direct_send_blocks_second_click_while_first_send_is_running():
     assert lead_send_block_reason(lead, in_flight_lead_ids={21}) == "Отправка этого лида уже выполняется."
 
 
+def test_direct_send_blocks_lead_that_live_kwork_check_already_put_over_limit():
+    lead = Lead(
+        id=22,
+        post_id=10,
+        score=82,
+        summary="Лендинг",
+        draft_reply="Здравствуйте! Сделаю лендинг.",
+        contact="https://kwork.ru/projects/22/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/22/view",
+        live_response_count=8,
+        live_checked_at="2026-07-18 00:04:25",
+    )
+
+    assert "8" in lead_send_block_reason(lead, in_flight_lead_ids=set(), max_responses=5)
+
+
 def test_lead_status_summary_keeps_action_error_after_list_refresh():
     lead = Lead(
         id=28,
@@ -835,6 +857,56 @@ def test_lead_status_summary_keeps_action_error_after_list_refresh():
 
     assert "Лид #28" in status
     assert "ошибка: Стоимость может быть не более 3 000 руб." in status
+
+
+def test_gui_live_project_check_persists_current_kwork_count(monkeypatch, tmp_path):
+    import app.gui as gui_module
+    import app.kwork_client as kwork_client_module
+
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=29,
+        post_url="https://kwork.ru/projects/29/view",
+        text="Предложений: 2",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=82,
+        summary="Правки",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/29/view",
+    )
+    lead = storage.get_lead(lead_id)
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def inspect(self, _contact):
+            return SimpleNamespace(response_count=7, reason="выше лимита")
+
+    monkeypatch.setattr(kwork_client_module, "KworkProjectClient", Client)
+    monkeypatch.setattr(
+        gui_module,
+        "load_config",
+        lambda: SimpleNamespace(
+            kwork_cookie="",
+            kwork_use_browser=True,
+            kwork_cdp_url="http://127.0.0.1:9222",
+            kwork_browser_profile_dir="",
+        ),
+    )
+    gui = SimpleNamespace(_storage=lambda: storage)
+
+    result = LeadFunnelGui._refresh_lead_live_status(gui, lead)
+
+    refreshed = storage.get_lead(lead_id)
+    assert result == "Kwork responses: 7"
+    assert refreshed.live_response_count == 7
+    assert refreshed.live_reason == "выше лимита"
 
 
 def test_gui_direct_send_blocks_stale_reply_with_unsupported_task_action(monkeypatch):
@@ -1114,7 +1186,7 @@ def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
         18,
         "04.05 10:30 МСК",
         4,
-        "отправлен 04.05 10:45 МСК",
+        "отправлен 04.05 13:45 МСК",
         "sent",
         65,
         9000,
@@ -1129,6 +1201,28 @@ def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
     assert "Осталось: 2 д. 17 ч." in details
     assert "КАРТОЧКА KWORK" in details
     assert "AI написал слишком общий заголовок" in details
+
+
+def test_lead_table_prefers_live_kwork_offer_count_and_shows_check_time():
+    lead = Lead(
+        id=19,
+        post_id=8,
+        score=70,
+        summary="Задача: Исправить форму",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/19/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/19/view",
+        post_text="Предложений: 2",
+        live_response_count=8,
+        live_checked_at="2026-07-18 02:45:00",
+        live_reason="выше установленного лимита",
+    )
+
+    assert build_lead_row_values(lead)[2] == 8
+    details = _lead_details_text(lead)
+    assert "Проверка Kwork: 8 предложений, 18.07 05:45 МСК" in details
+    assert "выше установленного лимита" in details
 
 
 def test_lead_url_is_rendered_as_clickable_link():

@@ -438,6 +438,7 @@ class LeadFunnelGui:
         )
         self.apply_kwork_price_button.pack(side="left", padx=6)
         ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Проверить заказ", command=self.check_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
         ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
         self.send_lead_button = ttk.Button(
@@ -589,7 +590,7 @@ class LeadFunnelGui:
                 "",
                 END,
                 values=(
-                    _format_datetime(rejection.posted_at or rejection.rejected_at),
+                    _format_datetime(rejection.posted_at) if rejection.posted_at else _format_storage_datetime(rejection.rejected_at),
                     _post_title(rejection.post_text),
                     rejection.reason,
                 ),
@@ -693,6 +694,37 @@ class LeadFunnelGui:
         if lead is None:
             return
         self._run_lead_action("Открытие заказа", lambda: self._open_kwork_lead(lead), lead_id=lead.id)
+
+    def check_selected_lead(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        self._run_lead_action(
+            "Проверка заказа",
+            lambda: self._refresh_lead_live_status(lead),
+            lead_id=lead.id,
+        )
+
+    def _refresh_lead_live_status(self, lead: Lead) -> str:
+        from app.kwork_client import KworkProjectClient
+
+        config = load_config()
+        client = KworkProjectClient(
+            timeout_seconds=45,
+            cookie=config.kwork_cookie,
+            use_browser=config.kwork_use_browser,
+            cdp_url=config.kwork_cdp_url,
+            browser_profile_dir=config.kwork_browser_profile_dir,
+        )
+        project_info = client.inspect(lead.contact)
+        self._storage().update_lead_live_status(
+            lead.id,
+            response_count=project_info.response_count,
+            reason=project_info.reason,
+        )
+        if project_info.response_count is None:
+            return f"Kwork status unknown: {project_info.reason or 'response count was not found'}"
+        return f"Kwork responses: {project_info.response_count}"
 
     def regenerate_selected_reply(self) -> None:
         lead = self._selected_lead()
@@ -829,7 +861,11 @@ class LeadFunnelGui:
         lead = self._selected_lead()
         if lead is None:
             return
-        block_reason = lead_send_block_reason(lead, self.in_flight_lead_ids)
+        block_reason = lead_send_block_reason(
+            lead,
+            self.in_flight_lead_ids,
+            max_responses=load_config().kwork_max_responses,
+        )
         if block_reason:
             messagebox.showinfo("Отправка отклика", block_reason)
             return
@@ -1547,10 +1583,11 @@ def _reply_context_from_lead(
 
 
 def build_lead_row_values(lead: Lead) -> tuple:
+    offer_count = _extract_offer_count(lead)
     return (
         lead.id,
-        _format_datetime(lead.posted_at or lead.created_at),
-        _extract_offer_count(lead) or "",
+        _format_lead_posted_at(lead),
+        offer_count if offer_count is not None else "",
         _reply_state(lead),
         lead.status,
         lead.score,
@@ -1566,12 +1603,18 @@ def _lead_details_text(lead: Lead) -> str:
     lines = [
         f"Название: {_lead_title(lead)}",
         f"Ссылка: {lead.contact or lead.post_url}",
-        f"Дата: {_format_datetime(lead.posted_at or lead.created_at)}",
+        f"Дата: {_format_lead_posted_at(lead)}",
         f"Предложений: {offer_count if offer_count is not None else 'не найдено'}",
         f"Осталось: {remaining or 'не найдено'}",
         f"Наш отклик: {_reply_state(lead)}",
         f"Статус: {lead.status}; score: {lead.score}",
     ]
+    if lead.live_checked_at:
+        live_count = lead.live_response_count
+        live_text = f"{live_count} предложений" if live_count is not None else "счетчик не прочитан"
+        lines.append(f"Проверка Kwork: {live_text}, {_format_storage_datetime(lead.live_checked_at)}")
+    if lead.live_reason:
+        lines.append(f"Причина: {lead.live_reason}")
     if lead.channel or lead.message_id:
         lines.append(f"Источник: {lead.channel or 'unknown'} / {lead.message_id or '-'}")
     if lead.last_error:
@@ -1590,6 +1633,8 @@ def _lead_details_text(lead: Lead) -> str:
 
 
 def _extract_offer_count(lead: Lead) -> int | None:
+    if lead.live_response_count is not None:
+        return lead.live_response_count
     for text in (lead.post_text, lead.summary):
         match = re.search(r"Предложений:\s*(\d+)", text, re.IGNORECASE)
         if match:
@@ -1607,7 +1652,7 @@ def _extract_remaining_time(lead: Lead) -> str:
 
 def _reply_state(lead: Lead) -> str:
     if lead.sent_at:
-        return f"отправлен {_format_datetime(lead.sent_at)}"
+        return f"отправлен {_format_storage_datetime(lead.sent_at)}"
     if lead.status == "sent":
         return "отправлен"
     return "нет"
@@ -1621,10 +1666,13 @@ def lead_status_summary(
     action_error: str = "",
 ) -> str:
     """Build the concise state shown above the selected lead's editable fields."""
+    offer_count = _extract_offer_count(lead)
     status = (
         f"Лид #{lead.id}: {lead.status}; score {lead.score}; "
-        f"предложений: {_extract_offer_count(lead) or 'не видно'}; наш отклик: {_reply_state(lead)}"
+        f"предложений: {offer_count if offer_count is not None else 'не видно'}; наш отклик: {_reply_state(lead)}"
     )
+    if lead.live_checked_at:
+        status += f"; Kwork проверен {_format_storage_datetime(lead.live_checked_at)}"
     if reply_notice:
         status += f"; {reply_notice}"
     if pending_reply:
@@ -1636,11 +1684,16 @@ def lead_status_summary(
     return status
 
 
-def lead_send_block_reason(lead: Lead, in_flight_lead_ids: set[int]) -> str:
+def lead_send_block_reason(lead: Lead, in_flight_lead_ids: set[int], max_responses: int | None = None) -> str:
     if lead.status == "sent" or lead.sent_at:
         return "Отклик по этому лиду уже отправлен."
     if lead.id in in_flight_lead_ids:
         return "Отправка этого лида уже выполняется."
+    if max_responses is not None and lead.live_response_count is not None and lead.live_response_count > max_responses:
+        return (
+            f"Kwork сейчас показывает {lead.live_response_count} откликов при лимите {max_responses}. "
+            "Не отправляю отклик; сначала обнови заказ, если считаешь данные устаревшими."
+        )
     return ""
 
 
@@ -1677,7 +1730,7 @@ def _lead_row_tags(lead: Lead) -> tuple[str, ...]:
     return tuple(tags)
 
 
-def _format_datetime(value: str) -> str:
+def _format_datetime(value: str, naive_timezone=MOSCOW_TZ) -> str:
     clean = value.strip()
     if not clean:
         return "-"
@@ -1690,11 +1743,22 @@ def _format_datetime(value: str) -> str:
         try:
             parsed = parser(normalized)
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=MOSCOW_TZ)
+                parsed = parsed.replace(tzinfo=naive_timezone)
             return parsed.astimezone(MOSCOW_TZ).strftime("%d.%m %H:%M МСК")
         except ValueError:
             continue
     return clean.replace("T", " ")[:16]
+
+
+def _format_storage_datetime(value: str) -> str:
+    """Render SQLite CURRENT_TIMESTAMP values, which are stored in UTC, in Moscow time."""
+    return _format_datetime(value, naive_timezone=timezone.utc)
+
+
+def _format_lead_posted_at(lead: Lead) -> str:
+    if lead.posted_at:
+        return _format_datetime(lead.posted_at)
+    return _format_storage_datetime(lead.created_at)
 
 
 def _should_refresh_after_process(label: str) -> bool:

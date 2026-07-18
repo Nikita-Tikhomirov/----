@@ -135,6 +135,23 @@ def test_scan_once_creates_lead_and_sends_email(tmp_path):
     assert email_client.sent_leads == [leads[0].id]
 
 
+def test_scan_once_persists_the_live_kwork_response_count(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=FakeKworkProjectClient(response_count=4),
+    )
+
+    lead = storage.list_leads()[0]
+    assert lead.live_response_count == 4
+    assert lead.live_checked_at
+    assert lead.live_reason == ""
+
+
 def test_scan_once_keeps_new_lead_retryable_when_email_fails(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

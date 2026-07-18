@@ -136,6 +136,7 @@ def scan_once(
         attachment_context = ""
         attachment_reports = ()
         kwork_facts: tuple[str, ...] = ()
+        project_info = None
         project_title = ""
         project_description = ""
         project_page_text = ""
@@ -277,6 +278,12 @@ def scan_once(
             proposal_price_rub=judge_result.price_rub or None,
             proposal_days=judge_result.estimated_days or None,
         )
+        if project_info is not None:
+            storage.update_lead_live_status(
+                lead_id,
+                response_count=getattr(project_info, "response_count", None),
+                reason=str(getattr(project_info, "reason", "") or ""),
+            )
         if attachment_reports:
             storage.replace_lead_attachments(lead_id, attachment_reports)
         lead = storage.get_lead(lead_id)

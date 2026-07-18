@@ -129,6 +129,32 @@ def test_mark_failed_keeps_a_diagnostic_message_when_exception_text_is_empty(tmp
     assert storage.get_lead(lead_id).last_error == "Причина ошибки не получена."
 
 
+def test_lead_live_kwork_status_is_persisted_separately_from_the_original_post(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=47,
+        post_url="https://kwork.ru/projects/47/view",
+        text="Предложений: 2",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=80,
+        summary="Правки",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/47/view",
+    )
+
+    storage.update_lead_live_status(lead_id, response_count=6, reason="выше установленного лимита")
+
+    lead = storage.get_lead(lead_id)
+    assert lead.live_response_count == 6
+    assert lead.live_checked_at
+    assert lead.live_reason == "выше установленного лимита"
+
+
 def test_initialize_backfills_missing_error_for_legacy_failed_lead(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
