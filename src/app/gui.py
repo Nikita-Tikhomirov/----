@@ -378,7 +378,7 @@ class LeadFunnelGui:
         self.leads_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=5)
         headings = {
             "id": "ID",
-            "posted": "Дата",
+            "posted": "Дата (МСК)",
             "priority": "Срочность",
             "offers": "Откл.",
             "sent": "Наш отклик",
@@ -390,7 +390,7 @@ class LeadFunnelGui:
         }
         widths = {
             "id": 48,
-            "posted": 92,
+            "posted": 112,
             "priority": 78,
             "offers": 58,
             "sent": 116,
@@ -398,7 +398,7 @@ class LeadFunnelGui:
             "score": 58,
             "price": 70,
             "days": 44,
-            "title": 420,
+            "title": 400,
         }
         for column in columns:
             self.leads_table.heading(column, text=headings[column])
@@ -1951,7 +1951,7 @@ def build_lead_row_values(lead: Lead, max_responses: int = 5) -> tuple:
     offer_count = _extract_offer_count(lead)
     return (
         lead.id,
-        _format_lead_posted_at(lead),
+        _format_lead_queue_time(lead),
         lead_action_priority(lead, max_responses=max_responses),
         offer_count if offer_count is not None else "",
         _reply_state(lead),
@@ -2236,6 +2236,11 @@ def _format_lead_posted_at(lead: Lead) -> str:
     if lead.posted_at:
         return _format_datetime(lead.posted_at)
     return _format_storage_datetime(lead.created_at)
+
+
+def _format_lead_queue_time(lead: Lead) -> str:
+    """Keep the compact table date readable; the heading supplies the timezone."""
+    return _format_lead_posted_at(lead).removesuffix(" МСК")
 
 
 def _should_refresh_after_process(label: str) -> bool:

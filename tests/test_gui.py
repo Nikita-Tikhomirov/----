@@ -1893,7 +1893,7 @@ def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
     assert _extract_remaining_time(lead) == "2 д. 17 ч."
     assert build_lead_row_values(lead) == (
         18,
-        "04.05 10:30 МСК",
+        "04.05 10:30",
         "Стоп",
         4,
         "отправлен 04.05 13:45 МСК",
