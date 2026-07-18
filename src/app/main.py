@@ -254,7 +254,10 @@ def scan_once(
             ),
             attachment_context=attachment_context,
             estimated_days=judge_result.estimated_days,
-            blocking_question=judge_result.questions[0] if judge_result.questions else "",
+            # The first Kwork response should sell the solution, not make the
+            # customer answer a discovery question. Keep AI questions in the
+            # internal assessment for the follow-up conversation instead.
+            blocking_question="",
         )
         draft_reply = reply_composer(
             reply_context,

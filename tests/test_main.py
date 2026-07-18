@@ -405,7 +405,7 @@ def test_scan_once_persists_composed_price_free_reply(tmp_path):
             summary="Исправить отправку формы заявки и адаптив лендинга",
             reasons=["задача понятна"],
             risks=[],
-            questions=[],
+            questions=["Куда должны приходить заявки после отправки формы?"],
             draft_reply="Здравствуйте! Цена 5000 руб. Уточните детали.",
         )
 
@@ -441,6 +441,7 @@ def test_scan_once_persists_composed_price_free_reply(tmp_path):
     assert "Бюджет" not in seen_contexts[0][0].source_text
     assert seen_contexts[0][0].task_summary != "Исправить отправку формы заявки и адаптив лендинга"
     assert seen_contexts[0][0].task_summary == "Kwork project"
+    assert seen_contexts[0][0].blocking_question == ""
     assert seen_contexts[0][2:] == ("sk-test", "deepseek-chat")
 
 

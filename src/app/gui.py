@@ -375,7 +375,7 @@ class LeadFunnelGui:
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill="x", pady=(0, 8))
         columns = ("id", "posted", "priority", "offers", "sent", "status", "score", "price", "days", "title")
-        self.leads_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=9)
+        self.leads_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=5)
         headings = {
             "id": "ID",
             "posted": "Дата",
@@ -506,13 +506,12 @@ class LeadFunnelGui:
         text_frame.columnconfigure(1, weight=1)
         text_frame.rowconfigure(1, weight=1)
 
-        attachments_frame = ttk.Frame(frame)
-        attachments_frame.pack(fill="x", pady=(2, 6))
-        ttk.Label(attachments_frame, text="Вложения и отработка", style="Muted.TLabel").pack(anchor="w")
-        attachment_table_frame = ttk.Frame(attachments_frame)
+        self.attachments_frame = ttk.Frame(frame)
+        ttk.Label(self.attachments_frame, text="Вложения и отработка", style="Muted.TLabel").pack(anchor="w")
+        attachment_table_frame = ttk.Frame(self.attachments_frame)
         attachment_table_frame.pack(fill="x", pady=(4, 0))
         attachment_columns = ("label", "status", "kind", "local", "summary")
-        self.attachments_table = ttk.Treeview(attachment_table_frame, columns=attachment_columns, show="headings", height=4)
+        self.attachments_table = ttk.Treeview(attachment_table_frame, columns=attachment_columns, show="headings", height=3)
         attachment_headings = {
             "label": "Файл",
             "status": "Статус",
@@ -529,7 +528,7 @@ class LeadFunnelGui:
         self.attachments_table.pack(side="left", fill="x", expand=True)
         attachment_scrollbar.pack(side="right", fill="y")
 
-        attachment_buttons = ttk.Frame(attachments_frame)
+        attachment_buttons = ttk.Frame(self.attachments_frame)
         attachment_buttons.pack(fill="x", pady=(4, 0))
         ttk.Button(attachment_buttons, text="Открыть файл", command=self.open_selected_attachment, style="Modern.TButton").pack(side="left", padx=(0, 6))
         ttk.Button(attachment_buttons, text="Открыть ссылку", command=self.open_selected_attachment_link, style="Modern.TButton").pack(side="left", padx=6)
@@ -1455,6 +1454,10 @@ class LeadFunnelGui:
         self.attachments_table.delete(*self.attachments_table.get_children())
         if attachments is None:
             attachments = self._attachments_for_lead(lead)
+        if attachments:
+            self.attachments_frame.pack(fill="x", pady=(2, 6))
+        else:
+            self.attachments_frame.pack_forget()
         for attachment in attachments:
             item_id = self.attachments_table.insert("", END, values=_attachment_row_values(attachment))
             self.attachment_rows[item_id] = attachment

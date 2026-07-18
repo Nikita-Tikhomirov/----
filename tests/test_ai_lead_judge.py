@@ -31,6 +31,13 @@ def test_parse_judge_response_accepts_medium_week_task():
     assert "доступ" in result.questions[0]
 
 
+def test_judge_prompt_keeps_questions_internal_and_out_of_customer_draft():
+    prompt = _build_prompt("Нужно исправить форму заявки на сайте.").lower()
+
+    assert "вопросы нужны только как внутренняя заметка" in prompt
+    assert "в draft_reply вопросов быть не должно" in prompt
+
+
 def test_parse_judge_response_keeps_customer_goal_and_fact_grounded_work_plan():
     raw = """
     {

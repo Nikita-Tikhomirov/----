@@ -2019,3 +2019,41 @@ def test_gui_extracts_attachment_rows_from_existing_lead_summary():
         "нет локального файла",
         "brief.txt: прочитан Нужно сверстать форму",
     )
+
+
+def test_gui_hides_attachment_section_when_selected_lead_has_no_files():
+    class Table:
+        def get_children(self):
+            return ()
+
+        def delete(self, *_items):
+            pass
+
+        def insert(self, *_args, **_kwargs):
+            raise AssertionError("No attachment rows should be inserted")
+
+    class Frame:
+        def __init__(self):
+            self.calls = []
+
+        def pack(self, **kwargs):
+            self.calls.append(("pack", kwargs))
+
+        def pack_forget(self):
+            self.calls.append(("forget", {}))
+
+    lead = Lead(
+        id=23,
+        post_id=8,
+        score=74,
+        summary="AI: accept",
+        draft_reply="Здравствуйте! Сделаю.",
+        contact="https://kwork.ru/projects/23/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/23/view",
+    )
+    dummy = SimpleNamespace(attachment_rows={}, attachments_table=Table(), attachments_frame=Frame())
+
+    LeadFunnelGui._load_lead_attachments(dummy, lead, attachments=[])
+
+    assert dummy.attachments_frame.calls == [("forget", {})]
