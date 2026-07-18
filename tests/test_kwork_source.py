@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.kwork_source import KworkWebSource, parse_kwork_project_cards
 
 
@@ -259,6 +261,18 @@ def test_kwork_fresh_location_accepts_view_redirect_and_cache_strip():
         "https://kwork.ru/projects/3187247?_lf_refresh=1",
         "https://kwork.ru/projects/3187247/view",
     )
+
+
+def test_kwork_project_redirect_to_list_fails_without_waiting_for_timeout(monkeypatch):
+    import app.kwork_source as source
+
+    times = iter((0.0, 0.0, 1.0))
+    monkeypatch.setattr(source.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(source.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(source, "_evaluate", lambda _ws, _expression: "https://kwork.ru/projects")
+
+    with pytest.raises(RuntimeError, match="redirected to the list"):
+        source._wait_for_location(object(), "https://kwork.ru/projects/3187247/view", timeout_seconds=0.5)
 
 
 def test_kwork_project_tab_accepts_new_offer_page():

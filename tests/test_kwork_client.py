@@ -117,6 +117,22 @@ def test_kwork_client_retries_private_project_after_browser_auto_login(monkeypat
     assert login_attempts == [("bot@example.com", "secret")]
 
 
+def test_kwork_client_marks_project_redirected_to_list_as_unavailable(monkeypatch):
+    import app.kwork_client as client_module
+
+    monkeypatch.setattr(
+        client_module,
+        "_fetch_rendered_project_html",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("Kwork project redirected to the list; it is closed or unavailable")
+        ),
+    )
+
+    result = KworkProjectClient(use_browser=True).inspect("https://kwork.ru/projects/123/view")
+
+    assert result.is_unavailable is True
+
+
 def test_replyability_accepts_project_at_response_limit():
     info = KworkProjectInfo(
         url="https://kwork.ru/projects/1/view",

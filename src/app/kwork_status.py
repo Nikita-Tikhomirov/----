@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 UNAVAILABLE_PROJECT_REASON = "Kwork project is unavailable: page not found, closed, or removed."
+PROJECT_REDIRECTED_TO_LIST_MESSAGE = "Kwork project redirected to the list; it is closed or unavailable"
 UNAVAILABLE_PROJECT_MARKERS = (
     "страница не найдена",
     "проект не найден",

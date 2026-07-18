@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request
 
-from app.kwork_status import UNAVAILABLE_PROJECT_REASON, unavailable_project_message
+from app.kwork_status import (
+    PROJECT_REDIRECTED_TO_LIST_MESSAGE,
+    UNAVAILABLE_PROJECT_REASON,
+    unavailable_project_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +105,14 @@ class KworkProjectClient:
             if not html_text:
                 html_text = _fetch_project_html(url, self.timeout_seconds, self.cookie)
         except Exception as exc:
+            if PROJECT_REDIRECTED_TO_LIST_MESSAGE in str(exc):
+                return KworkProjectInfo(
+                    url=url,
+                    response_count=None,
+                    title="",
+                    description="",
+                    reason=UNAVAILABLE_PROJECT_REASON,
+                )
             logger.warning("Failed to fetch Kwork project %s: %s", url, exc)
             return KworkProjectInfo(url=url, response_count=None, title="", description="", reason=f"Kwork не открылся: {exc}")
         return parse_kwork_project_html(url, html_text)
@@ -113,7 +125,9 @@ class KworkProjectClient:
                 cdp_url=self.cdp_url,
                 browser_profile_dir=self.browser_profile_dir,
             )
-        except Exception:
+        except Exception as exc:
+            if PROJECT_REDIRECTED_TO_LIST_MESSAGE in str(exc):
+                raise
             if self._browser_login_attempted or not self.login_email or not self.login_password:
                 raise
             self._ensure_browser_login()

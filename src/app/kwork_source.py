@@ -16,6 +16,7 @@ from urllib.request import Request
 import websocket
 
 from app.kwork_sender import KworkReplySender
+from app.kwork_status import PROJECT_REDIRECTED_TO_LIST_MESSAGE
 from app.telegram_client import TelegramPost
 
 logger = logging.getLogger(__name__)
@@ -318,6 +319,8 @@ def _wait_for_location(ws, expected_url: str, timeout_seconds: float) -> None:
         last_location = str(_evaluate(ws, "location.href") or "")
         if _is_same_kwork_page(expected_url, last_location):
             return
+        if _is_kwork_project_tab(expected_url) and _is_kwork_list_tab(last_location):
+            raise RuntimeError(PROJECT_REDIRECTED_TO_LIST_MESSAGE)
         time.sleep(0.25)
     raise RuntimeError(f"Kwork page did not navigate to fresh URL; last location={last_location}")
 
