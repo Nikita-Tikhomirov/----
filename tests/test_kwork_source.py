@@ -34,6 +34,19 @@ def test_parse_kwork_project_cards_keeps_only_low_offer_projects():
     assert "Отклик: https://kwork.ru/projects/3177548/view" in posts[0].text
 
 
+def test_rendered_cards_without_publication_time_are_skipped_when_freshness_filter_is_on():
+    html = """
+    <div class="want-card">
+      <a class="want-card__title" href="/projects/3177548/view">Старый активный заказ</a>
+      <div class="want-card__informers-row"><span>Предложений: 1</span></div>
+    </div>
+    """
+
+    posts = parse_kwork_project_cards(html, max_responses=5, max_age_hours=24)
+
+    assert posts == []
+
+
 def test_parse_kwork_project_cards_skips_cards_without_offer_count():
     html = """
     <div class="want-card">

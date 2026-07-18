@@ -150,6 +150,10 @@ def parse_kwork_project_cards(
     )
     if embedded_posts is not None:
         return embedded_posts
+    if max_age_hours is not None and max_age_hours > 0:
+        # A rendered card has no canonical publication time. Do not guess that
+        # it is fresh when the user explicitly enabled the freshness limit.
+        return []
 
     posts: list[TelegramPost] = []
     seen_ids: set[int] = set()
@@ -300,7 +304,7 @@ def _fetch_rendered_html(url: str, cdp_url: str, timeout_seconds: float, browser
     try:
         _refresh_page(ws, url, timeout_seconds)
         _wait_for_cards(ws, timeout_seconds)
-        return _evaluate(ws, 'Array.from(document.querySelectorAll(".want-card")).map(x=>x.outerHTML).join("\\n")')
+        return _evaluate(ws, "document.documentElement.outerHTML")
     finally:
         ws.close()
 
