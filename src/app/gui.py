@@ -96,6 +96,13 @@ def build_script_command(script_path: Path) -> list[str]:
     return ["cmd", "/c", str(script_path)]
 
 
+def monitoring_status_text(interval_seconds: int | None = None) -> str:
+    """Use a human-readable state instead of a vague idle label in the GUI header."""
+    if interval_seconds is None:
+        return "Мониторинг выключен"
+    return f"Мониторинг включен: каждые {interval_seconds} сек"
+
+
 def build_component_check_report(
     values: dict[str, str],
     *,
@@ -218,7 +225,7 @@ class LeadFunnelGui:
         self.show_archive_var = BooleanVar(value=False)
         self.lead_queue_var = StringVar(value="Активная очередь: загрузка")
         self.batch_live_check_in_flight = False
-        self.status_var = StringVar(value="Готово")
+        self.status_var = StringVar(value=monitoring_status_text())
 
         self._configure_style()
 
@@ -1290,6 +1297,7 @@ class LeadFunnelGui:
             self.write_log("Мониторинг уже запущен.\n")
             return
         command, env = build_app_command("watch")
+        interval_seconds = load_config().scan_interval_seconds
         self.watch_process = subprocess.Popen(
             command,
             cwd=ROOT_DIR,
@@ -1301,7 +1309,7 @@ class LeadFunnelGui:
             errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-        self.status_var.set("Мониторинг запущен")
+        self.status_var.set(monitoring_status_text(interval_seconds))
         self.start_watch_button.config(state=DISABLED)
         self.stop_watch_button.config(state=NORMAL)
         self.write_log("=== Мониторинг запущен ===\n")
@@ -1310,7 +1318,7 @@ class LeadFunnelGui:
 
     def stop_watch(self) -> None:
         if not self.watch_process or self.watch_process.poll() is not None:
-            self.status_var.set("Мониторинг не запущен")
+            self.status_var.set(monitoring_status_text())
             self.start_watch_button.config(state=NORMAL)
             self.stop_watch_button.config(state=DISABLED)
             self._cancel_watch_refresh()
@@ -1321,7 +1329,7 @@ class LeadFunnelGui:
             self.watch_process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             self.watch_process.kill()
-        self.status_var.set("Мониторинг остановлен")
+        self.status_var.set(monitoring_status_text())
         self.start_watch_button.config(state=NORMAL)
         self.stop_watch_button.config(state=DISABLED)
         self.write_log("=== Мониторинг остановлен ===\n")
@@ -1447,7 +1455,7 @@ class LeadFunnelGui:
             self.root.after(0, self.refresh_leads)
             self.root.after(0, lambda: self.start_watch_button.config(state=NORMAL))
             self.root.after(0, lambda: self.stop_watch_button.config(state=DISABLED))
-            self.root.after(0, lambda: self.status_var.set(f"{label}: остановлен"))
+            self.root.after(0, lambda: self.status_var.set(monitoring_status_text()))
 
     def write_log(self, text: str) -> None:
         self.root.after(0, lambda: self._append_log(text))

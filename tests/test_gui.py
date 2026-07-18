@@ -37,6 +37,7 @@ from app.gui import (
     build_component_check_report,
     filter_active_leads,
     lead_queue_caption,
+    monitoring_status_text,
     select_leads_for_live_check,
     build_script_command,
     normalize_filter_settings,
@@ -1370,6 +1371,11 @@ def test_scan_and_approval_processes_trigger_lead_refresh():
     assert not _should_refresh_after_process("Kwork Chrome")
 
 
+def test_monitoring_status_text_makes_idle_and_running_state_unambiguous():
+    assert monitoring_status_text() == "Мониторинг выключен"
+    assert monitoring_status_text(60) == "Мониторинг включен: каждые 60 сек"
+
+
 def test_gui_shows_process_error_when_background_command_fails(monkeypatch):
     import app.gui as gui_module
 
@@ -2001,6 +2007,15 @@ def test_monitoring_schedules_periodic_lead_refresh():
     assert "self._schedule_watch_refresh()" in source
     assert "self.watch_refresh_after_id = self.root.after" in source
     assert "self._cancel_watch_refresh()" in source
+
+
+def test_desktop_gui_launcher_prevents_a_second_monitoring_window():
+    source = (Path(__file__).resolve().parents[1] / "lead-funnel-gui.vbs").read_text(encoding="utf-8")
+
+    assert "Win32_Process" in source
+    assert "-m app.gui" in source
+    assert "already open" in source
+    assert "AppActivate" in source
 
 
 def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
