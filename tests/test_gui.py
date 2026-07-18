@@ -36,6 +36,7 @@ from app.gui import (
     build_lead_row_values,
     build_app_command,
     build_component_check_report,
+    component_readiness_summary,
     filter_active_leads,
     filter_actionable_leads,
     filter_stopped_leads,
@@ -123,6 +124,35 @@ def test_component_check_report_explains_invalid_non_d_tesseract_path():
 
     assert "Tesseract OCR: ошибка настройки" in report
     assert "D: диск" in report
+
+
+@pytest.mark.parametrize(
+    ("report", "expected"),
+    [
+        (
+            "Tesseract OCR: готов (rus, eng)\nDeepSeek: настроен (deepseek-chat)\n"
+            "OpenRouter vision: настроен (qwen/qwen3.7-plus, smart)\nKwork Chrome: доступен",
+            ("Компоненты: готово", "ComponentReady.TLabel"),
+        ),
+        (
+            "Tesseract OCR: готов (rus, eng)\nDeepSeek: настроен (deepseek-chat)\n"
+            "OpenRouter vision: настроен (qwen/qwen3.7-plus, smart)\nKwork Chrome: не запущен",
+            ("Компоненты: открой Kwork Chrome", "ComponentWarning.TLabel"),
+        ),
+        (
+            "Tesseract OCR: не найден (D:\\Tesseract-OCR\\tesseract.exe)\nDeepSeek: ключ не настроен\n"
+            "OpenRouter vision: ключ или модель не настроены\nKwork Chrome: доступен",
+            ("Компоненты: нужна настройка", "ComponentError.TLabel"),
+        ),
+        (
+            "Tesseract OCR: готов (rus, eng)\nDeepSeek: настроен (deepseek-chat)\n"
+            "OpenRouter vision: ключ или модель не настроены\nKwork Chrome: доступен",
+            ("Компоненты: vision не настроен", "ComponentWarning.TLabel"),
+        ),
+    ],
+)
+def test_component_readiness_summary_maps_live_report_to_header_state(report, expected):
+    assert component_readiness_summary(report) == expected
 
 
 def test_gui_sender_passes_live_response_limit_to_kwork_sender(monkeypatch):

@@ -172,6 +172,26 @@ def build_component_check_report(
     return "\n".join(lines)
 
 
+def component_readiness_summary(report: str) -> tuple[str, str]:
+    """Reduce the detailed component report to a stable header indicator."""
+    lines = [line.strip().lower() for line in report.splitlines() if line.strip()]
+    def is_configured(line: str) -> bool:
+        return ": настроен (" in line
+
+    required_errors = any(
+        line.startswith("tesseract ocr:") and any(marker in line for marker in ("ошибка", "не найден", "не хватает"))
+        or line.startswith("deepseek:") and not is_configured(line)
+        for line in lines
+    )
+    if required_errors:
+        return "Компоненты: нужна настройка", "ComponentError.TLabel"
+    if any("kwork chrome: не запущен" in line for line in lines):
+        return "Компоненты: открой Kwork Chrome", "ComponentWarning.TLabel"
+    if any(line.startswith("openrouter vision:") and not is_configured(line) for line in lines):
+        return "Компоненты: vision не настроен", "ComponentWarning.TLabel"
+    return "Компоненты: готово", "ComponentReady.TLabel"
+
+
 def _configured_tesseract_command(configured: str) -> Path:
     value = configured.strip()
     if value:
@@ -238,6 +258,7 @@ class LeadFunnelGui:
         self.lead_queue_var = StringVar(value="Доступно сейчас: загрузка")
         self.batch_live_check_in_flight = False
         self.status_var = StringVar(value=monitoring_status_text())
+        self.readiness_var = StringVar(value="Компоненты: проверяются")
 
         self._configure_style()
 
@@ -266,6 +287,7 @@ class LeadFunnelGui:
         self.write_log("Открой Kwork Chrome, войди в Kwork один раз, затем запускай сканирование или мониторинг.\n")
         self.write_log(self._filter_summary())
         self.refresh_leads()
+        self._start_component_check(show_dialog=False)
 
     def _configure_style(self) -> None:
         self.root.option_add("*Font", ("Segoe UI", 10))
@@ -283,6 +305,10 @@ class LeadFunnelGui:
         style.configure("Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"])
         style.configure("Muted.TLabel", background=COLORS["panel"], foreground=COLORS["muted"])
         style.configure("Status.TLabel", background=COLORS["panel_alt"], foreground=COLORS["accent"], padding=(12, 6), font=("Segoe UI Semibold", 10))
+        style.configure("ComponentChecking.TLabel", background=COLORS["panel_alt"], foreground=COLORS["muted"], padding=(10, 6), font=("Segoe UI Semibold", 10))
+        style.configure("ComponentReady.TLabel", background="#ecfdf3", foreground="#047857", padding=(10, 6), font=("Segoe UI Semibold", 10))
+        style.configure("ComponentWarning.TLabel", background="#fff7ed", foreground="#b45309", padding=(10, 6), font=("Segoe UI Semibold", 10))
+        style.configure("ComponentError.TLabel", background="#fff1f0", foreground=COLORS["danger"], padding=(10, 6), font=("Segoe UI Semibold", 10))
         style.configure("Link.TLabel", background=COLORS["panel"], foreground="#2563eb", font=("Segoe UI", 10, "underline"))
         style.configure("Modern.TButton", padding=(12, 8), background=COLORS["panel"], foreground=COLORS["text"], bordercolor=COLORS["line"])
         style.map("Modern.TButton", background=[("active", COLORS["panel_alt"])])
@@ -310,6 +336,12 @@ class LeadFunnelGui:
             style="Subtle.TLabel",
         ).pack(anchor="w", pady=(3, 0))
         ttk.Label(header, textvariable=self.status_var, style="Status.TLabel").pack(side="right", anchor="ne")
+        self.readiness_label = ttk.Label(
+            header,
+            textvariable=self.readiness_var,
+            style="ComponentChecking.TLabel",
+        )
+        self.readiness_label.pack(side="right", anchor="ne", padx=(0, 8))
 
     def _create_action_bar(self, parent: ttk.Frame) -> None:
         bar = ttk.Frame(parent, style="App.TFrame")
@@ -1392,21 +1424,31 @@ class LeadFunnelGui:
         self.write_log("Настройки перечитаны из .env.\n")
 
     def check_components(self) -> None:
+        self._start_component_check(show_dialog=True)
+
+    def _start_component_check(self, show_dialog: bool) -> None:
         if self.component_check_in_flight:
             return
         self.component_check_in_flight = True
         self.component_check_button.config(state=DISABLED)
-        self.status_var.set("Проверка компонентов: выполняется")
-        threading.Thread(target=self._check_components_thread, daemon=True).start()
+        if show_dialog:
+            self.status_var.set("Проверка компонентов: выполняется")
+        threading.Thread(target=self._check_components_thread, args=(show_dialog,), daemon=True).start()
 
-    def _check_components_thread(self) -> None:
+    def _check_components_thread(self, show_dialog: bool) -> None:
         report = build_component_check_report(read_env_values(ENV_PATH))
-        self.write_log("=== Проверка компонентов ===\n" + report + "\n")
-        self.root.after(0, lambda: self._finish_component_check(report))
+        self.root.after(0, lambda: self._finish_component_check(report, show_dialog=show_dialog))
 
-    def _finish_component_check(self, report: str) -> None:
+    def _finish_component_check(self, report: str, *, show_dialog: bool) -> None:
         self.component_check_in_flight = False
         self.component_check_button.config(state=NORMAL)
+        readiness_text, readiness_style = component_readiness_summary(report)
+        self.readiness_var.set(readiness_text)
+        self.readiness_label.config(style=readiness_style)
+        if not show_dialog:
+            self.write_log(readiness_text + ".\n")
+            return
+        self.write_log("=== Проверка компонентов ===\n" + report + "\n")
         self.status_var.set("Проверка компонентов завершена")
         messagebox.showinfo("Проверка компонентов", report)
 
