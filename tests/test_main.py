@@ -736,7 +736,7 @@ def test_scan_once_skips_ai_rejected_lead(tmp_path):
     assert email_client.sent_leads == []
 
 
-def test_process_approvals_sends_only_approved_once(tmp_path):
+def test_process_approvals_marks_email_approval_once_without_sending(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     post_id = storage.save_post(
@@ -772,22 +772,11 @@ def test_process_approvals_sends_only_approved_once(tmp_path):
         email_client=email_client,
     )
 
-    assert telegram_client.sent == [
-        (
-            "@client_dev",
-            (
-                "Здравствуйте! Посмотрел задачу по лендингу HTML/CSS/JS. "
-                "Сверстаю нужные блоки, настрою адаптивное отображение и проверю основной сценарий страницы. "
-                "После этого покажу готовый рабочий вариант."
-            ),
-        )
-    ]
-    assert storage.get_lead(lead_id).status == "sent"
+    assert telegram_client.sent == []
+    assert storage.get_lead(lead_id).status == "approved"
 
 
-def test_process_approvals_keeps_lead_emailed_when_kwork_blocks_before_submission(tmp_path):
-    from app.kwork_client import KworkProjectInfo, ensure_project_is_replyable
-
+def test_process_approvals_does_not_run_kwork_preflight_before_gui_send(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     post_id = storage.save_post(
@@ -813,32 +802,19 @@ def test_process_approvals_keeps_lead_emailed_when_kwork_blocks_before_submissio
     )
     storage.mark_lead_emailed(lead_id, "<lead@example.com>")
 
-    class ReplyBlockedClient(FakeTelegramClient):
-        def send_message(self, *_args, **_kwargs):
-            ensure_project_is_replyable(
-                KworkProjectInfo(
-                    url="https://kwork.ru/projects/42/view",
-                    response_count=7,
-                    title="Лендинг",
-                    description="",
-                ),
-                max_responses=5,
-            )
-
-    sent = process_approvals(
+    processed = process_approvals(
         storage=storage,
-        telegram_client=ReplyBlockedClient(),
+        telegram_client=FakeTelegramClient(),
         email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
     )
 
     lead = storage.get_lead(lead_id)
-    assert sent == 0
-    assert lead.status == "emailed"
-    assert lead.live_response_count == 7
-    assert "7" in lead.last_error
+    assert processed == 1
+    assert lead.status == "approved"
+    assert lead.live_response_count is None
 
 
-def test_process_approvals_blocks_stale_reply_that_invents_missing_form_work(tmp_path):
+def test_process_approvals_keeps_stale_reply_for_gui_review_without_sending(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     post_id = storage.save_post(
@@ -867,21 +843,21 @@ def test_process_approvals_blocks_stale_reply_that_invents_missing_form_work(tmp
     telegram_client = FakeTelegramClient()
     approval_message_id = "<approval@example.com>"
 
-    sent = process_approvals(
+    processed = process_approvals(
         storage=storage,
         telegram_client=telegram_client,
         email_client=FakeEmailClient(approvals=[(lead_id, approval_message_id)]),
     )
 
     lead = storage.get_lead(lead_id)
-    assert sent == 0
+    assert processed == 1
     assert telegram_client.sent == []
-    assert lead.status == "emailed"
-    assert "требует правки" in lead.last_error.lower()
+    assert lead.status == "approved"
+    assert lead.draft_reply == stale_reply
     assert approval_message_id in storage.seen_approval_message_ids()
 
 
-def test_process_approvals_can_retry_after_blocked_email_once_reply_is_corrected(tmp_path):
+def test_process_approvals_ignores_second_email_ok_after_gui_ready_status(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     post_id = storage.save_post(
@@ -908,37 +884,24 @@ def test_process_approvals_can_retry_after_blocked_email_once_reply_is_corrected
     storage.mark_lead_emailed(lead_id, "<lead@example.com>")
     telegram_client = FakeTelegramClient()
 
-    first_sent = process_approvals(
+    first_processed = process_approvals(
         storage=storage,
         telegram_client=telegram_client,
         email_client=FakeEmailClient(approvals=[(lead_id, "<blocked@example.com>")]),
     )
-    storage.update_lead_proposal(
-        lead_id,
-        draft_reply=(
-            "Здравствуйте! Посмотрел задачу по посадке информационной страницы и каталога на WordPress. "
-            "Сверю структуру страниц и макеты PSD, затем соберу нужные разделы на WordPress. "
-            "Проверю карточки товаров и отображение каталога, чтобы страницы работали корректно. "
-            "Могу приступить сразу и покажу готовый рабочий вариант."
-        ),
-        title="Посадить каталог на WordPress",
-        price_rub=12000,
-        days=5,
-    )
-
-    second_sent = process_approvals(
+    second_processed = process_approvals(
         storage=storage,
         telegram_client=telegram_client,
         email_client=FakeEmailClient(approvals=[(lead_id, "<retry@example.com>")]),
     )
 
-    assert first_sent == 0
-    assert second_sent == 1
-    assert len(telegram_client.sent) == 1
-    assert storage.get_lead(lead_id).status == "sent"
+    assert first_processed == 1
+    assert second_processed == 0
+    assert telegram_client.sent == []
+    assert storage.get_lead(lead_id).status == "approved"
 
 
-def test_process_approvals_skips_sending_in_read_only_fallback(tmp_path):
+def test_process_approvals_marks_email_ok_even_with_read_only_source(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     post_id = storage.save_post(
@@ -957,17 +920,17 @@ def test_process_approvals_skips_sending_in_read_only_fallback(tmp_path):
     )
     storage.mark_lead_emailed(lead_id, "<lead@example.com>")
 
-    sent = process_approvals(
+    processed = process_approvals(
         storage=storage,
         telegram_client=ReadOnlyTelegramClient(),
         email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
     )
 
-    assert sent == 0
-    assert storage.get_lead(lead_id).status == "emailed"
+    assert processed == 1
+    assert storage.get_lead(lead_id).status == "approved"
 
 
-def test_process_approvals_sends_kwork_web_reply_after_ok(tmp_path):
+def test_process_approvals_marks_kwork_lead_for_gui_without_sending(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     post_id = storage.save_post(
@@ -988,17 +951,15 @@ def test_process_approvals_sends_kwork_web_reply_after_ok(tmp_path):
     telegram_client = FakeTelegramClient()
     email_client = FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")])
 
-    sent = process_approvals(
+    processed = process_approvals(
         storage=storage,
         telegram_client=telegram_client,
         email_client=email_client,
     )
 
-    assert sent == 1
-    sent_text = telegram_client.sent[0][1].lower()
-    assert "10000" not in sent_text
-    assert "руб" not in sent_text
-    assert storage.get_lead(lead_id).status == "sent"
+    assert processed == 1
+    assert telegram_client.sent == []
+    assert storage.get_lead(lead_id).status == "approved"
 
 
 def test_proposal_title_ignores_inline_kwork_offer_metadata():
@@ -1007,7 +968,7 @@ def test_proposal_title_ignores_inline_kwork_offer_metadata():
     ) == "Нужно поправить WordPress"
 
 
-def test_process_approvals_passes_kwork_form_terms_without_price_in_reply_text(tmp_path):
+def test_process_approvals_keeps_kwork_form_terms_for_gui_without_sending(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     project_url = "https://kwork.ru/projects/3186746/view"
@@ -1032,20 +993,21 @@ def test_process_approvals_passes_kwork_form_terms_without_price_in_reply_text(t
     storage.mark_lead_emailed(lead_id, "<lead@example.com>")
     telegram_client = FakeTelegramClient()
 
-    sent = process_approvals(
+    processed = process_approvals(
         storage=storage,
         telegram_client=telegram_client,
         email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
     )
 
-    assert sent == 1
+    assert processed == 1
     assert "10000" not in reply_text
-    assert telegram_client.sent_details == [
-        (project_url, reply_text, 10000, 3, "Название заказа")
-    ]
+    assert telegram_client.sent_details == []
+    lead = storage.get_lead(lead_id)
+    assert lead.status == "approved"
+    assert lead.draft_reply == reply_text
 
 
-def test_process_approvals_uses_saved_form_terms_after_ok(tmp_path):
+def test_process_approvals_keeps_saved_form_terms_for_gui(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     project_url = "https://kwork.ru/projects/3186747/view"
@@ -1077,19 +1039,24 @@ def test_process_approvals_uses_saved_form_terms_after_ok(tmp_path):
     storage.mark_lead_emailed(lead_id, "<lead@example.com>")
     telegram_client = FakeTelegramClient()
 
-    sent = process_approvals(
+    processed = process_approvals(
         storage=storage,
         telegram_client=telegram_client,
         email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
     )
 
-    assert sent == 1
-    assert telegram_client.sent_details == [
-        (project_url, reply_text, 14000, 5, "Сохраненное название")
-    ]
+    assert processed == 1
+    assert telegram_client.sent_details == []
+    lead = storage.get_lead(lead_id)
+    assert lead.status == "approved"
+    assert (lead.proposal_title, lead.proposal_price_rub, lead.proposal_days) == (
+        "Сохраненное название",
+        14000,
+        5,
+    )
 
 
-def test_process_approvals_removes_price_from_legacy_customer_reply(tmp_path):
+def test_process_approvals_keeps_legacy_reply_for_gui_review(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     project_url = "https://kwork.ru/projects/3186748/view"
@@ -1117,18 +1084,17 @@ def test_process_approvals_removes_price_from_legacy_customer_reply(tmp_path):
     storage.mark_lead_emailed(lead_id, "<lead@example.com>")
     telegram_client = FakeTelegramClient()
 
-    sent = process_approvals(
+    processed = process_approvals(
         storage=storage,
         telegram_client=telegram_client,
         email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
     )
 
-    assert sent == 1
-    sent_text = telegram_client.sent_details[0][1].lower()
-    assert "10000" not in sent_text
-    assert "руб" not in sent_text
-    assert telegram_client.sent_details[0][2:] == (10000, 3, "Доработать форму")
-    assert "руб" not in storage.get_lead(lead_id).draft_reply.lower()
+    assert processed == 1
+    assert telegram_client.sent_details == []
+    lead = storage.get_lead(lead_id)
+    assert lead.status == "approved"
+    assert lead.draft_reply == legacy_reply
 
 
 def test_submit_order_sends_for_approval_and_review_can_request_revision(tmp_path):

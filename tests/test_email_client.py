@@ -65,7 +65,7 @@ def test_send_lead_retries_connection_drop_before_message_submission(monkeypatch
     assert len(attempts) == 2
 
 
-def test_build_lead_email_contains_reply_instruction():
+def test_build_lead_email_explains_gui_only_submission():
     lead = Lead(
         id=12,
         post_id=3,
@@ -88,9 +88,11 @@ def test_build_lead_email_contains_reply_instruction():
     assert "https://t.me/jobs/42" in message.get_content()
     assert "Здравствуйте!" in message.get_content()
     assert "АПРУВ" in message.get_content()
+    assert "OK и отправить отклик" in message.get_content()
+    assert "автоматически" not in message.get_content().lower()
 
 
-def test_build_manual_lead_email_contains_copyable_reply_and_no_ok_instruction():
+def test_build_lead_email_keeps_copyable_reply_for_gui_review():
     lead = Lead(
         id=12,
         post_id=3,
@@ -106,14 +108,12 @@ def test_build_manual_lead_email_contains_copyable_reply_and_no_ok_instruction()
         lead=lead,
         from_address="bot@example.com",
         to_address="me@example.com",
-        manual_reply_only=True,
     )
     content = message.get_content()
 
-    assert "РУЧНОЙ РЕЖИМ" in content
     assert "СКОПИРОВАТЬ ОТКЛИК" in content
     assert "https://t.me/client_dev" in content
-    assert "OK 12" not in content
+    assert "OK 12" in content
 
 
 def test_parse_approval_messages_reads_ok_lead_id_once():

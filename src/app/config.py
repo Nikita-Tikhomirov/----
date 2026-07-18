@@ -40,7 +40,6 @@ class AppConfig:
     kwork_cdp_url: str = "http://127.0.0.1:9222"
     kwork_browser_profile_dir: str = ""
     kwork_auto_chrome_cookies: bool = True
-    kwork_auto_reply: bool = True
     kwork_login_email: str = ""
     kwork_login_password: str = ""
     lead_min_score: int = 60
@@ -90,7 +89,6 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         kwork_cdp_url=os.getenv("KWORK_CDP_URL", "http://127.0.0.1:9222"),
         kwork_browser_profile_dir=os.getenv("KWORK_BROWSER_PROFILE_DIR", ""),
         kwork_auto_chrome_cookies=_bool_env("KWORK_AUTO_CHROME_COOKIES", True),
-        kwork_auto_reply=_bool_env("KWORK_AUTO_REPLY", True),
         kwork_login_email=os.getenv("KWORK_LOGIN_EMAIL", ""),
         kwork_login_password=os.getenv("KWORK_LOGIN_PASSWORD", ""),
         lead_min_score=_int_env("LEAD_MIN_SCORE", 60),

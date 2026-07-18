@@ -13,14 +13,13 @@ from app.ai_lead_judge import (
     DEFAULT_HARD_REJECT_KEYWORDS,
     LeadJudgeResult,
     judge_lead,
-    sanitize_customer_reply,
 )
 from app.attachments import AttachmentProcessingResult, build_attachment_report
 from app.chrome_cookies import chrome_cookie_header
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
 from app.handoff import write_codex_handoff
-from app.kwork_client import KworkProjectClient, KworkProjectReplyabilityError
+from app.kwork_client import KworkProjectClient
 from app.kwork_source import KworkWebSource
 from app.lead_filter import evaluate_post
 from app.public_telegram_client import PublicTelegramClient
@@ -415,54 +414,6 @@ def _format_kwork_facts(facts: tuple[str, ...], limit: int = 1200) -> str:
     return report[: limit - 1].rstrip() + "…"
 
 
-def _approval_reply_fields(lead) -> tuple[int | None, int | None, str]:
-    """Read Kwork form data stored in the lead while keeping the reply price-free."""
-    price_match = re.search(r"Цена:\s*(\d[\d\s]*)\s*руб", lead.summary, re.IGNORECASE)
-    days_match = re.search(r"Срок:\s*(\d{1,2})\s*дн", lead.summary, re.IGNORECASE)
-    price_rub = lead.proposal_price_rub
-    if price_rub is None and price_match:
-        price_rub = int(price_match.group(1).replace(" ", ""))
-    days = lead.proposal_days
-    if days is None and days_match:
-        days = int(days_match.group(1))
-    title = _approval_reply_title(lead)
-    return price_rub, days, title
-
-
-def _approval_reply_title(lead) -> str:
-    return lead.proposal_title or _proposal_title_from_text(lead.post_text, lead.summary)
-
-
-def _customer_reply_for_delivery(lead, title: str, days: int | None) -> str:
-    return sanitize_customer_reply(
-        lead.draft_reply,
-        summary=title or _approval_reply_title(lead),
-        estimated_days=days or 3,
-    )
-
-
-def _reply_context_for_delivery(
-    storage: Storage,
-    lead,
-    title: str,
-    days: int | None,
-) -> ReplyDraftContext:
-    attachments = storage.list_lead_attachments(lead.id)
-    attachment_context = "\n".join(
-        f"{attachment.label}: {(attachment.summary or attachment.status).strip()}"
-        for attachment in attachments
-        if attachment.label.strip() and (attachment.summary or attachment.status).strip()
-    )
-    safe_title = title or _approval_reply_title(lead) or "вашу задачу"
-    return ReplyDraftContext(
-        title=safe_title,
-        task_summary=safe_title,
-        source_text=lead.post_text.strip(),
-        attachment_context=attachment_context,
-        estimated_days=days or 3,
-    )
-
-
 def _proposal_title_from_text(post_text: str, summary: str = "") -> str:
     meta_prefixes = ("осталось:", "предложений:", "бюджет:", "контакт:", "kwork facts:")
     for line in post_text.splitlines():
@@ -497,63 +448,22 @@ def process_approvals(
     email_client: LeadMailer,
     max_sends: int = 5,
 ) -> int:
-    if not getattr(telegram_client, "can_send_replies", True):
-        logger.info("Skipping approvals because Telegram client is read-only")
-        return 0
-
-    sent = 0
+    """Record email confirmations; Kwork submission remains a GUI-only action."""
+    del telegram_client, max_sends
+    processed = 0
     approvals = email_client.fetch_approvals(storage.seen_approval_message_ids())
     for lead_id, approval_message_id in approvals:
-        if sent >= max_sends:
-            logger.warning("Send limit reached, skipping remaining approvals")
-            break
         try:
-            lead = storage.get_lead(lead_id)
+            storage.get_lead(lead_id)
         except KeyError:
             logger.info("Skipping approval for missing lead %s", lead_id)
-            continue
-        price_rub, days, title = _approval_reply_fields(lead)
-        reply_text = _customer_reply_for_delivery(lead, title, days)
-        reply_context = _reply_context_for_delivery(storage, lead, title, days)
-        block_reason = reply_delivery_issue_summary(reply_text, reply_context)
-        if block_reason:
-            if storage.record_blocked_approval(lead_id, approval_message_id, block_reason):
-                logger.warning("Blocked approved lead %s: %s", lead_id, block_reason)
-            else:
-                logger.info("Skipping duplicate or invalid approval for lead %s", lead_id)
             continue
         if not storage.record_approval(lead_id, approval_message_id):
             logger.info("Skipping duplicate or invalid approval for lead %s", lead_id)
             continue
-        try:
-            if reply_text != lead.draft_reply:
-                storage.update_lead_reply(lead.id, reply_text)
-            telegram_message_id = telegram_client.send_message(
-                lead.contact,
-                reply_text,
-                price_rub=price_rub,
-                days=days,
-                title=title,
-            )
-        except KworkProjectReplyabilityError as exc:
-            project_info = exc.project_info
-            if project_info is not None:
-                storage.update_lead_live_status(
-                    lead_id,
-                    response_count=project_info.response_count,
-                    reason=project_info.reason,
-                )
-            storage.restore_approved_lead(lead_id, str(exc))
-            logger.warning("Kwork blocked approved lead %s before submission: %s", lead_id, exc)
-            continue
-        except Exception as exc:
-            logger.exception("Failed to send Telegram reply for lead %s", lead_id)
-            storage.mark_failed(lead_id, str(exc))
-            continue
-        storage.mark_sent(lead_id, lead.contact, telegram_message_id)
-        logger.info("Sent approved lead %s to %s", lead_id, lead.contact)
-        sent += 1
-    return sent
+        logger.info("Recorded email approval for lead %s; submit it from the GUI", lead_id)
+        processed += 1
+    return processed
 
 
 def submit_order(
@@ -612,11 +522,7 @@ def build_runtime(config: AppConfig):
         login_password=config.kwork_login_password,
     )
     if config.kwork_source == "web":
-        manual_reply_only = not config.kwork_auto_reply
-        if config.kwork_auto_reply:
-            logger.warning("Using Kwork web source with email-approved browser replies enabled")
-        else:
-            logger.warning("Using Kwork web source in read-only manual reply mode")
+        logger.warning("Using Kwork web source with GUI-only replies")
         telegram_client = KworkWebSource(
             projects_url=config.kwork_projects_url,
             max_posts=config.max_posts_per_channel,
@@ -626,12 +532,11 @@ def build_runtime(config: AppConfig):
             use_browser=config.kwork_use_browser,
             cdp_url=config.kwork_cdp_url,
             browser_profile_dir=config.kwork_browser_profile_dir,
-            enable_replies=config.kwork_auto_reply,
+            enable_replies=False,
             login_email=config.kwork_login_email,
             login_password=config.kwork_login_password,
         )
     elif config.telegram_api_id > 0 and config.telegram_api_hash != "fill_later":
-        manual_reply_only = False
         telegram_client = TelegramLeadClient(
             api_id=config.telegram_api_id,
             api_hash=config.telegram_api_hash,
@@ -640,7 +545,6 @@ def build_runtime(config: AppConfig):
             max_posts_per_channel=config.max_posts_per_channel,
         )
     else:
-        manual_reply_only = True
         logger.warning("Telegram API is not configured; using public read-only fallback")
         telegram_client = PublicTelegramClient(
             channels=config.telegram_channels,
@@ -657,7 +561,6 @@ def build_runtime(config: AppConfig):
         imap_port=config.imap_port,
         imap_user=config.imap_user,
         imap_password=config.imap_password,
-        manual_reply_only=manual_reply_only,
     )
     return storage, telegram_client, email_client, kwork_project_client
 

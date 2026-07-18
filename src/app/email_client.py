@@ -44,7 +44,6 @@ class EmailClient:
         imap_port: int,
         imap_user: str,
         imap_password: str,
-        manual_reply_only: bool = False,
     ):
         self.smtp_host = smtp_host
         self.smtp_port = smtp_port
@@ -56,15 +55,9 @@ class EmailClient:
         self.imap_port = imap_port
         self.imap_user = imap_user
         self.imap_password = imap_password
-        self.manual_reply_only = manual_reply_only
 
     def send_lead(self, lead: Lead) -> str:
-        message = build_lead_email(
-            lead,
-            self.mail_from,
-            self.mail_to,
-            manual_reply_only=self.manual_reply_only,
-        )
+        message = build_lead_email(lead, self.mail_from, self.mail_to)
         self._send_smtp_message(message)
         return message["Message-ID"]
 
@@ -117,18 +110,17 @@ def build_lead_email(
     lead: Lead,
     from_address: str,
     to_address: str,
-    manual_reply_only: bool = False,
 ) -> EmailMessage:
     message = EmailMessage()
     message["From"] = from_address
     message["To"] = to_address
     message["Subject"] = f"Новый заказ #{lead.id}: score {lead.score}"
     message["Message-ID"] = f"<lead-{lead.id}@telegram-lead-funnel.local>"
-    message.set_content(_lead_email_body(lead, manual_reply_only), charset="utf-8")
+    message.set_content(_lead_email_body(lead), charset="utf-8")
     return message
 
 
-def _lead_email_body(lead: Lead, manual_reply_only: bool) -> str:
+def _lead_email_body(lead: Lead) -> str:
     lines = [
         f"Lead ID: {lead.id}",
         f"Score: {lead.score}",
@@ -150,24 +142,15 @@ def _lead_email_body(lead: Lead, manual_reply_only: bool) -> str:
             "-----",
         ]
     )
-    if manual_reply_only:
-        lines.extend(
-            [
-                "",
-                "РУЧНОЙ РЕЖИМ:",
-                "1. Открой ссылку на пост или контакт.",
-                "2. Скопируй текст между линиями выше.",
-                "3. Вставь его в Telegram и отправь вручную.",
-            ]
-        )
-    else:
-        lines.extend(
-            [
-                "",
-                "АПРУВ:",
-                f"Чтобы отправить отклик автоматически, ответь на это письмо строкой: OK {lead.id}",
-            ]
-        )
+    lines.extend(
+        [
+            "",
+            "АПРУВ:",
+            f"Ответь на это письмо строкой: OK {lead.id}",
+            "Это только отметит лид готовым в приложении.",
+            "Перед отправкой открой лид в Kwork Lead Funnel и нажми «OK и отправить отклик».",
+        ]
+    )
     return "\n".join(lines)
 
 
