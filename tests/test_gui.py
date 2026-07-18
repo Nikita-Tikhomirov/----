@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime, timezone
 from tkinter import Text, Tk
 
 import pytest
@@ -28,6 +29,7 @@ from app.gui import (
     build_lead_row_values,
     build_app_command,
     build_component_check_report,
+    filter_active_leads,
     build_script_command,
     normalize_filter_settings,
     read_env_values,
@@ -728,6 +730,51 @@ def test_format_datetime_displays_moscow_time():
 
 def test_storage_datetime_is_converted_from_utc_to_moscow_time():
     assert _format_storage_datetime("2026-07-18 00:04:25") == "18.07 03:04 МСК"
+
+
+def test_active_queue_keeps_recent_kwork_and_sqlite_leads_but_hides_archive():
+    fresh_sqlite = Lead(
+        id=1,
+        post_id=1,
+        score=70,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/1/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/1/view",
+        created_at="2026-07-17 23:40:00",
+    )
+    fresh_kwork = Lead(
+        id=2,
+        post_id=2,
+        score=70,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/2/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/2/view",
+        posted_at="2026-07-18 02:30:00",
+        created_at="2026-06-01 00:00:00",
+    )
+    archived = Lead(
+        id=3,
+        post_id=3,
+        score=70,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/3/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/3/view",
+        created_at="2026-07-16 00:00:00",
+    )
+
+    visible = filter_active_leads(
+        [fresh_sqlite, fresh_kwork, archived],
+        max_age_hours=24,
+        now=datetime(2026, 7, 18, 0, 10, tzinfo=timezone.utc),
+    )
+
+    assert [lead.id for lead in visible] == [1, 2]
 
 
 def test_scan_and_approval_processes_trigger_lead_refresh():

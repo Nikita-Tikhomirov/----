@@ -7,7 +7,7 @@ import sys
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, TclError, Tk, messagebox, scrolledtext
+from tkinter import BOTH, DISABLED, END, NORMAL, BooleanVar, StringVar, TclError, Tk, messagebox, scrolledtext
 from tkinter import ttk
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -200,6 +200,7 @@ class LeadFunnelGui:
         self.kwork_price_limits: dict[int, int] = {}
         self.reply_regeneration_in_flight = False
         self.component_check_in_flight = False
+        self.show_archive_var = BooleanVar(value=False)
         self.status_var = StringVar(value="Готово")
 
         self._configure_style()
@@ -348,7 +349,15 @@ class LeadFunnelGui:
     def _create_leads_panel(self, parent: ttk.Frame) -> None:
         frame = ttk.Frame(parent, style="Panel.TFrame")
         frame.pack(fill=BOTH, expand=True)
-        ttk.Label(frame, text="Лиды", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(anchor="w")
+        lead_header = ttk.Frame(frame)
+        lead_header.pack(fill="x")
+        ttk.Label(lead_header, text="Лиды", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(side="left")
+        ttk.Checkbutton(
+            lead_header,
+            text="Показать архив",
+            variable=self.show_archive_var,
+            command=self.refresh_leads,
+        ).pack(side="right")
         ttk.Label(frame, text="Выбери лид, поправь цену, срок и текст, затем заполни или отправь отклик.", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
 
         table_frame = ttk.Frame(frame)
@@ -544,10 +553,11 @@ class LeadFunnelGui:
     def refresh_leads(self) -> None:
         try:
             storage = self._storage()
-            leads = storage.list_leads()
+            all_leads = storage.list_leads()
         except Exception as exc:
             self.write_log(f"Не удалось загрузить лиды: {exc}\n")
             return
+        leads = all_leads if self.show_archive_var.get() else filter_active_leads(all_leads, self._queue_max_age_hours())
         self.lead_rows.clear()
         self.leads_table.delete(*self.leads_table.get_children())
         target_item = None
@@ -573,6 +583,13 @@ class LeadFunnelGui:
         else:
             self._clear_lead_details()
         self.refresh_rejections()
+
+    def _queue_max_age_hours(self) -> int:
+        value = self.setting_vars.get("KWORK_MAX_AGE_HOURS")
+        try:
+            return max(0, int(value.get())) if value is not None else 24
+        except (TypeError, ValueError):
+            return 24
 
     def refresh_rejections(self) -> None:
         table = getattr(self, "rejections_table", None)
@@ -1753,6 +1770,45 @@ def _format_datetime(value: str, naive_timezone=MOSCOW_TZ) -> str:
 def _format_storage_datetime(value: str) -> str:
     """Render SQLite CURRENT_TIMESTAMP values, which are stored in UTC, in Moscow time."""
     return _format_datetime(value, naive_timezone=timezone.utc)
+
+
+def filter_active_leads(
+    leads: list[Lead],
+    max_age_hours: int,
+    now: datetime | None = None,
+) -> list[Lead]:
+    """Keep the actionable queue focused on recently seen Kwork work without deleting history."""
+    if max_age_hours <= 0:
+        return list(leads)
+    current_time = now or datetime.now(timezone.utc)
+    cutoff = current_time.astimezone(timezone.utc) - timedelta(hours=max_age_hours)
+    active_leads: list[Lead] = []
+    for lead in leads:
+        activity_at = _lead_activity_datetime(lead)
+        if activity_at is not None and activity_at >= cutoff:
+            active_leads.append(lead)
+    return active_leads
+
+
+def _lead_activity_datetime(lead: Lead) -> datetime | None:
+    value = lead.posted_at or lead.created_at
+    if not value.strip():
+        return None
+    naive_timezone = MOSCOW_TZ if lead.posted_at else timezone.utc
+    normalized = value.strip().replace("Z", "+00:00")
+    for parser in (
+        lambda item: datetime.fromisoformat(item),
+        lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M:%S"),
+        lambda item: datetime.strptime(item, "%Y-%m-%d %H:%M"),
+    ):
+        try:
+            parsed = parser(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=naive_timezone)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            continue
+    return None
 
 
 def _format_lead_posted_at(lead: Lead) -> str:
