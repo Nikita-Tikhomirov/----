@@ -18,6 +18,7 @@ from app.gui import (
     _format_datetime,
     _format_storage_datetime,
     _lead_title,
+    _lead_row_tags,
     _kwork_price_limit,
     _parse_optional_int,
     _post_title,
@@ -886,6 +887,22 @@ def test_direct_send_blocks_lead_that_live_kwork_check_already_put_over_limit():
     )
 
     assert "8" in lead_send_block_reason(lead, in_flight_lead_ids=set(), max_responses=5)
+
+
+def test_lead_table_marks_live_kwork_response_limit_exceeded():
+    lead = Lead(
+        id=23,
+        post_id=11,
+        score=82,
+        summary="Лендинг",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/23/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/23/view",
+        live_response_count=9,
+    )
+
+    assert "over_limit" in _lead_row_tags(lead, max_responses=5)
 
 
 def test_lead_status_summary_keeps_action_error_after_list_refresh():

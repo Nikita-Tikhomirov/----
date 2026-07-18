@@ -399,6 +399,7 @@ class LeadFunnelGui:
         self.leads_table.tag_configure("failed", background="#fff1f0")
         self.leads_table.tag_configure("sent", background="#ecfdf3")
         self.leads_table.tag_configure("low_score", background="#fff7ed")
+        self.leads_table.tag_configure("over_limit", background="#fee2e2")
 
         fields = ttk.Frame(frame)
         fields.pack(fill="x", pady=(6, 4))
@@ -558,6 +559,7 @@ class LeadFunnelGui:
             self.write_log(f"Не удалось загрузить лиды: {exc}\n")
             return
         leads = all_leads if self.show_archive_var.get() else filter_active_leads(all_leads, self._queue_max_age_hours())
+        max_responses = self._kwork_max_responses()
         self.lead_rows.clear()
         self.leads_table.delete(*self.leads_table.get_children())
         target_item = None
@@ -567,7 +569,7 @@ class LeadFunnelGui:
                 "",
                 END,
                 values=build_lead_row_values(lead),
-                tags=_lead_row_tags(lead),
+                tags=_lead_row_tags(lead, max_responses=max_responses),
             )
             self.lead_rows[item_id] = lead.id
             if lead.id == selected_lead_id:
@@ -585,11 +587,17 @@ class LeadFunnelGui:
         self.refresh_rejections()
 
     def _queue_max_age_hours(self) -> int:
-        value = self.setting_vars.get("KWORK_MAX_AGE_HOURS")
+        return self._setting_integer("KWORK_MAX_AGE_HOURS", 24)
+
+    def _kwork_max_responses(self) -> int:
+        return self._setting_integer("KWORK_MAX_RESPONSES", 5)
+
+    def _setting_integer(self, key: str, default: int) -> int:
+        value = self.setting_vars.get(key)
         try:
-            return max(0, int(value.get())) if value is not None else 24
+            return max(0, int(value.get())) if value is not None else default
         except (TypeError, ValueError):
-            return 24
+            return default
 
     def refresh_rejections(self) -> None:
         table = getattr(self, "rejections_table", None)
@@ -1740,10 +1748,12 @@ def direct_send_reply_block_reason(reply: str, context: ReplyDraftContext) -> st
     )
 
 
-def _lead_row_tags(lead: Lead) -> tuple[str, ...]:
+def _lead_row_tags(lead: Lead, max_responses: int | None = None) -> tuple[str, ...]:
     tags = [lead.status]
     if lead.score < 70 and lead.status != "sent":
         tags.append("low_score")
+    if max_responses is not None and lead.live_response_count is not None and lead.live_response_count > max_responses:
+        tags.append("over_limit")
     return tuple(tags)
 
 
