@@ -354,6 +354,10 @@ def _summary_from_judge(result: LeadJudgeResult) -> str:
         f"Цена: {result.price_rub} руб." if result.price_rub else "Цена: не определена",
         f"Задача: {result.summary}",
     ]
+    if result.customer_goal:
+        lines.append("Боль клиента: " + result.customer_goal)
+    if result.work_plan:
+        lines.append("План работ: " + "; ".join(result.work_plan))
     if result.reasons:
         lines.append("Почему подходит: " + "; ".join(result.reasons))
     if result.risks:

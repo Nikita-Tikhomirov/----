@@ -31,6 +31,38 @@ def test_parse_judge_response_accepts_medium_week_task():
     assert "доступ" in result.questions[0]
 
 
+def test_parse_judge_response_keeps_customer_goal_and_fact_grounded_work_plan():
+    raw = """
+    {
+      "decision": "accept",
+      "score": 84,
+      "complexity": "medium",
+      "estimated_days": 5,
+      "price_rub": 18000,
+      "summary": "Доработать WordPress-сайт и форму заявки",
+      "customer_goal": "Чтобы заявки с сайта стабильно доходили и страница корректно выглядела на телефоне",
+      "work_plan": [
+        "Проверить текущую форму и точки отправки заявки",
+        "Внести правки в шаблон и стили WordPress",
+        "Протестировать сценарий заявки на мобильном и десктопе"
+      ],
+      "reasons": ["понятный результат", "реально сделать за неделю с AI"],
+      "risks": ["нужно проверить доступы"],
+      "questions": ["Есть ли доступ к админке WordPress?"],
+      "draft_reply": "Здравствуйте! Посмотрел задачу, могу взяться."
+    }
+    """
+
+    result = parse_judge_response(raw)
+
+    assert result.customer_goal.startswith("Чтобы заявки")
+    assert result.work_plan == [
+        "Проверить текущую форму и точки отправки заявки",
+        "Внести правки в шаблон и стили WordPress",
+        "Протестировать сценарий заявки на мобильном и десктопе",
+    ]
+
+
 def test_judge_lead_rejects_bitrix_without_api_call():
     result = judge_lead(
         "Нужна интеграция Битрикс24 с CRM. Отклик: https://kwork.ru/projects/1",

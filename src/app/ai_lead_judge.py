@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.reply_policy import COMMERCIAL_REPLY_PATTERN
@@ -53,6 +53,8 @@ class LeadJudgeResult:
     risks: list[str]
     questions: list[str]
     draft_reply: str
+    customer_goal: str = ""
+    work_plan: list[str] = field(default_factory=list)
 
 
 def judge_lead(
@@ -108,6 +110,8 @@ def parse_judge_response(raw: str) -> LeadJudgeResult:
     price_rub = _clamp_int(payload.get("price_rub"), 0, 500_000, default=0)
     complexity = _clean_complexity(str(payload.get("complexity", "unknown")))
     summary = _clean_text(str(payload.get("summary", ""))) or "Kwork-заказ"
+    customer_goal = _clean_text(str(payload.get("customer_goal", "")))[:420]
+    work_plan = _list_of_strings(payload.get("work_plan"))[:4]
     reasons = _list_of_strings(payload.get("reasons"))[:5]
     risks = _list_of_strings(payload.get("risks"))[:5]
     questions = _list_of_strings(payload.get("questions"))[:1]
@@ -133,6 +137,8 @@ def parse_judge_response(raw: str) -> LeadJudgeResult:
         risks=risks,
         questions=questions,
         draft_reply=draft_reply,
+        customer_goal=customer_goal,
+        work_plan=work_plan,
     )
 
 
@@ -188,6 +194,8 @@ def _fallback_judge(text: str) -> LeadJudgeResult:
         risks=[] if simple else ["нужно быстро сверить детали перед стартом"],
         questions=questions,
         draft_reply=_fallback_reply(summary, estimated_days),
+        customer_goal=summary,
+        work_plan=_fallback_work_plan(text),
     )
 
 
@@ -225,6 +233,8 @@ def _apply_acceptance_settings(
         risks=result.risks,
         questions=result.questions,
         draft_reply=result.draft_reply,
+        customer_goal=result.customer_goal,
+        work_plan=result.work_plan,
     )
 
 
@@ -282,6 +292,9 @@ def _build_prompt(text: str) -> str:
         "Техническую задачу про прием платежей можно упомянуть только если она прямо есть в заказе. "
         "В draft_reply коротко покажи, что понял главную боль клиента, дай конкретный следующий шаг, назови 2-3 конкретных шага "
         "и результат проверки. Укажи реалистичный срок без канцелярита и обещаний невозможного. "
+        "Отдельно сформулируй customer_goal: главную боль клиента или нужный итог одним простым предложением. "
+        "В work_plan перечисли 2-4 проверяемых шага, которые следуют только из ТЗ и вложений; это внутренний план для исполнителя, "
+        "не добавляй туда отсутствующие технологии, доступы или интеграции. "
         "Отклик должен звучать как сообщение реального специалиста: 4-6 предложений, 350-800 символов, по делу. "
         "Верни строго JSON без markdown:\n"
         "{\n"
@@ -291,6 +304,8 @@ def _build_prompt(text: str) -> str:
         '  "estimated_days": 1-7,\n'
         '  "price_rub": число,\n'
         '  "summary": "краткое резюме",\n'
+        '  "customer_goal": "главная боль или нужный заказчику результат, только по фактам",\n'
+        '  "work_plan": ["2-4 конкретных шага по фактам ТЗ"],\n'
         '  "reasons": ["почему подходит или нет"],\n'
         '  "risks": ["риски"],\n'
         '  "questions": ["0-1 важный вопрос"],\n'
@@ -362,6 +377,22 @@ def _first_budget(text: str) -> int:
 def _summary_from_text(text: str) -> str:
     first_line = _clean_text(text).removeprefix("📌").strip()
     return first_line[:120].rstrip() or "Kwork-заказ"
+
+
+def _fallback_work_plan(text: str) -> list[str]:
+    """Produce a conservative internal plan when the cloud judge is unavailable."""
+    lowered = text.lower()
+    plan = ["Проверить задачу и текущий сценарий"]
+    if re.search(r"форм|заявк", lowered):
+        plan.append("Исправить логику формы и обработку заявки")
+    elif re.search(r"верст|лендинг|адаптив", lowered):
+        plan.append("Внести правки в разметку и адаптивные стили")
+    elif re.search(r"wordpress|вордпресс|\bwp\b", lowered):
+        plan.append("Внести правки в WordPress-шаблон или настройки")
+    else:
+        plan.append("Реализовать изменения по описанию заказа")
+    plan.append("Проверить результат по основному пользовательскому сценарию")
+    return plan
 
 
 def clean_customer_reply(reply: str, summary: str, estimated_days: int) -> str:

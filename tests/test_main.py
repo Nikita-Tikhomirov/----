@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from app.main import (
     _proposal_title_from_text,
+    _summary_from_judge,
     create_order_handoff,
     process_approvals,
     process_order_reviews,
@@ -117,6 +118,29 @@ class ReadOnlyTelegramClient(FakeTelegramClient):
 
     def send_message(self, contact, text):
         raise AssertionError("read-only fallback must not send Telegram replies")
+
+
+def test_summary_from_judge_shows_customer_goal_and_work_plan():
+    result = LeadJudgeResult(
+        accepted=True,
+        decision="accept",
+        score=84,
+        complexity="medium",
+        estimated_days=4,
+        price_rub=15000,
+        summary="Доработать форму заявки на WordPress",
+        reasons=["результат понятен"],
+        risks=["нужен доступ к админке"],
+        questions=[],
+        draft_reply="Здравствуйте!",
+        customer_goal="Чтобы заявки стабильно приходили с сайта",
+        work_plan=["Проверить форму", "Исправить обработку", "Протестировать отправку"],
+    )
+
+    summary = _summary_from_judge(result)
+
+    assert "Боль клиента: Чтобы заявки стабильно приходили с сайта" in summary
+    assert "План работ: Проверить форму; Исправить обработку; Протестировать отправку" in summary
 
 
 def test_scan_once_creates_lead_and_sends_email(tmp_path):
