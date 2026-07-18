@@ -9,6 +9,8 @@ from app.gui import (
     LeadFunnelGui,
     _lead_details_text,
     _attachment_row_values,
+    _assessment_source_from_lead,
+    _rejudge_existing_lead,
     _copy_widget_selection_to_clipboard,
     _fallback_attachments_from_summary,
     _extract_days,
@@ -37,6 +39,7 @@ from app.gui import (
     read_env_values,
     update_env_values,
 )
+from app.ai_lead_judge import LeadJudgeResult
 from app.storage import Lead, LeadAttachment, PostRejection, Storage
 
 
@@ -202,6 +205,172 @@ def test_reply_context_for_regeneration_excludes_ai_summary_from_task_facts():
     assert "информационную страницу" in context.source_text
     assert "сложной для новичка" not in context.source_text
     assert "сложной для новичка" not in context.task_summary
+
+
+def test_assessment_source_uses_original_order_and_attachment_reports_not_old_ai_summary():
+    lead = Lead(
+        id=27,
+        post_id=13,
+        score=65,
+        summary="AI: accept\nЗадача: Старая неподходящая интерпретация",
+        draft_reply="Старый текст",
+        contact="https://kwork.ru/projects/27/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/27/view",
+        post_text="Правки формы заявки на WordPress\nПредложений: 3",
+        proposal_title="Правки формы",
+    )
+    attachments = [
+        LeadAttachment(
+            id=1,
+            lead_id=27,
+            label="ТЗ.pdf",
+            url="https://kwork.ru/files/tz.pdf",
+            local_path="C:/tmp/tz.pdf",
+            status="скачан, текст прочитан",
+            summary="Нужно проверить отправку формы на мобильном.",
+            kind="pdf",
+            opened_archive=False,
+            ocr_scanned=False,
+        )
+    ]
+
+    source = _assessment_source_from_lead(lead, attachments)
+
+    assert "Правки формы заявки на WordPress" in source
+    assert "ТЗ.pdf" in source
+    assert "проверить отправку формы" in source
+    assert "Старая неподходящая интерпретация" not in source
+
+
+def test_rejudge_existing_lead_updates_assessment_without_overwriting_manual_proposal():
+    lead = Lead(
+        id=28,
+        post_id=14,
+        score=65,
+        summary="Старая AI-оценка",
+        draft_reply="Вручную исправленный отклик",
+        contact="https://kwork.ru/projects/28/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/28/view",
+        post_text="Нужно исправить форму заявки на WordPress",
+        proposal_title="Мое название",
+        proposal_price_rub=9000,
+        proposal_days=3,
+    )
+    captured = {}
+
+    class Storage:
+        def update_lead_assessment(self, lead_id, **values):
+            captured["lead_id"] = lead_id
+            captured.update(values)
+
+    def judge(source, **kwargs):
+        captured["source"] = source
+        captured["judge_kwargs"] = kwargs
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=88,
+            complexity="medium",
+            estimated_days=5,
+            price_rub=15000,
+            summary="Исправить форму заявки",
+            reasons=["задача понятна"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте!",
+            customer_goal="Чтобы заявки доходили",
+            work_plan=["Проверить форму", "Исправить обработку", "Протестировать"],
+        )
+
+    result = _rejudge_existing_lead(
+        Storage(),
+        lead,
+        [],
+        api_key="sk-test",
+        model="deepseek-chat",
+        min_score=60,
+        max_days=7,
+        accept_decisions=("accept", "maybe"),
+        blocked_keywords=("bitrix",),
+        hard_reject_keywords=(),
+        judge=judge,
+        summary_builder=lambda _result: "Новая AI-оценка",
+    )
+
+    assert result.score == 88
+    assert "исправить форму" in captured["source"].lower()
+    assert captured["lead_id"] == 28
+    assert captured["score"] == 88
+    assert captured["summary"] == "Новая AI-оценка"
+    assert captured["price_rub"] == 9000
+    assert captured["days"] == 3
+    assert "draft_reply" not in captured
+
+
+def test_gui_rejudge_confirmation_starts_background_analysis_without_kwork_send(monkeypatch):
+    import app.gui as gui_module
+
+    lead = Lead(
+        id=29,
+        post_id=15,
+        score=65,
+        summary="Старая AI-оценка",
+        draft_reply="Старый отклик",
+        contact="https://kwork.ru/projects/29/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/29/view",
+        post_text="Нужно исправить форму заявки",
+    )
+    calls = []
+
+    class Button:
+        def config(self, **kwargs):
+            calls.append(("button", kwargs))
+
+    class Root:
+        def after(self, *_args, **_kwargs):
+            pytest.fail("AI rejudge must not run inline from the GUI click")
+
+    class Thread:
+        def __init__(self, *, target, args, daemon):
+            calls.append(("thread", target, args, daemon))
+
+        def start(self):
+            calls.append(("start",))
+
+    config = SimpleNamespace(
+        deepseek_api_key="sk-test",
+        deepseek_model="deepseek-chat",
+        lead_min_score=60,
+        lead_max_days=7,
+        lead_accept_decisions=("accept", "maybe"),
+        lead_blocked_keywords=("bitrix",),
+        lead_hard_reject_keywords=(),
+    )
+    dummy = SimpleNamespace(
+        _selected_lead=lambda: lead,
+        rejudge_in_flight=False,
+        pending_replies={},
+        _attachments_for_lead=lambda _lead: [],
+        rejudge_button=Button(),
+        status_var=SimpleNamespace(set=lambda value: calls.append(("status", value))),
+        write_log=lambda value: calls.append(("log", value)),
+        _rejudge_selected_lead_thread=lambda *args: None,
+        root=Root(),
+    )
+    monkeypatch.setattr(gui_module, "load_config", lambda: config)
+    monkeypatch.setattr(gui_module.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(gui_module.threading, "Thread", Thread)
+
+    LeadFunnelGui.rejudge_selected_lead(dummy)
+
+    assert dummy.rejudge_in_flight is True
+    assert ("button", {"state": "disabled"}) in calls
+    assert ("start",) in calls
+    assert any(item[0] == "thread" and item[3] is True for item in calls)
+    assert not any(item[0] == "send" for item in calls)
 
 
 def test_selected_lead_shows_reply_repair_warning_before_send():

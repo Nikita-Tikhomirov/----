@@ -345,6 +345,37 @@ class Storage:
                 (clean_reply, lead_id),
             )
 
+    def update_lead_assessment(
+        self,
+        lead_id: int,
+        *,
+        score: int,
+        summary: str,
+        price_rub: int | None,
+        days: int | None,
+    ) -> None:
+        """Replace only the AI assessment while preserving user-edited proposal content."""
+        if not 0 <= score <= 100:
+            raise ValueError("Lead score must be between 0 and 100")
+        clean_summary = summary.strip()
+        if not clean_summary:
+            raise ValueError("Lead assessment summary must not be empty")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE leads
+                SET score = ?, summary = ?, proposal_price_rub = ?, proposal_days = ?
+                WHERE id = ?
+                """,
+                (
+                    score,
+                    clean_summary,
+                    _optional_positive_int(price_rub, "Lead proposal price"),
+                    _optional_positive_int(days, "Lead proposal days"),
+                    lead_id,
+                ),
+            )
+
     def update_lead_proposal(
         self,
         lead_id: int,

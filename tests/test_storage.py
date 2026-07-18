@@ -106,6 +106,46 @@ def test_lead_reply_and_last_error_can_be_updated(tmp_path):
     assert storage.get_lead(lead_id).last_error == ""
 
 
+def test_lead_assessment_update_preserves_manual_reply_title_and_status(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=145,
+        post_url="https://kwork.ru/projects/145/view",
+        text="Нужно поправить форму заявки",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=65,
+        summary="Старая AI-оценка",
+        draft_reply="Вручную исправленный отклик",
+        contact="https://kwork.ru/projects/145/view",
+        proposal_title="Правки формы",
+        proposal_price_rub=7000,
+        proposal_days=3,
+    )
+    storage.mark_lead_emailed(lead_id, "<lead-145@example.com>")
+
+    storage.update_lead_assessment(
+        lead_id,
+        score=88,
+        summary="Новая AI-оценка",
+        price_rub=12000,
+        days=5,
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert lead.score == 88
+    assert lead.summary == "Новая AI-оценка"
+    assert lead.proposal_price_rub == 12000
+    assert lead.proposal_days == 5
+    assert lead.draft_reply == "Вручную исправленный отклик"
+    assert lead.proposal_title == "Правки формы"
+    assert lead.status == "emailed"
+
+
 def test_mark_failed_keeps_a_diagnostic_message_when_exception_text_is_empty(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

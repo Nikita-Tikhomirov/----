@@ -200,6 +200,7 @@ class LeadFunnelGui:
         self.lead_action_errors: dict[int, str] = {}
         self.kwork_price_limits: dict[int, int] = {}
         self.reply_regeneration_in_flight = False
+        self.rejudge_in_flight = False
         self.component_check_in_flight = False
         self.show_archive_var = BooleanVar(value=False)
         self.batch_live_check_in_flight = False
@@ -461,6 +462,13 @@ class LeadFunnelGui:
             style="Modern.TButton",
         )
         self.check_fresh_leads_button.pack(side="left", padx=6)
+        self.rejudge_button = ttk.Button(
+            secondary_actions,
+            text="Переоценить AI",
+            command=self.rejudge_selected_lead,
+            style="Modern.TButton",
+        )
+        self.rejudge_button.pack(side="left", padx=6)
         self.apply_kwork_price_button = ttk.Button(
             secondary_actions,
             text="Применить максимум Kwork",
@@ -808,6 +816,72 @@ class LeadFunnelGui:
         if project_info.response_count is None:
             return f"Kwork status unknown: {project_info.reason or 'response count was not found'}"
         return f"Kwork responses: {project_info.response_count}"
+
+    def rejudge_selected_lead(self) -> None:
+        lead = self._selected_lead()
+        if lead is None:
+            return
+        if self.rejudge_in_flight:
+            messagebox.showinfo("Переоценка AI", "Переоценка уже выполняется.")
+            return
+        if lead.id in self.pending_replies:
+            messagebox.showinfo(
+                "Переоценка AI",
+                "Сначала сохрани новый текст отклика. Переоценка не должна перезаписать незакрепленные правки.",
+            )
+            return
+        config = load_config()
+        if not config.deepseek_api_key:
+            messagebox.showwarning("Переоценка AI", "Для переоценки нужен настроенный ключ DeepSeek.")
+            return
+        if not messagebox.askyesno(
+            "Переоценить AI",
+            "Обновить score, боль клиента, план работ и риски по сохраненной карточке и ТЗ?\n\n"
+            "Отклик, название, цена и срок не изменятся. Ничего на Kwork не отправляется.",
+        ):
+            return
+        attachments = self._attachments_for_lead(lead)
+        self.rejudge_in_flight = True
+        self.rejudge_button.config(state=DISABLED)
+        self.status_var.set(f"Переоценка AI #{lead.id}: выполняется")
+        self.write_log(f"=== Переоценка AI #{lead.id}: старт ===\n")
+        threading.Thread(
+            target=self._rejudge_selected_lead_thread,
+            args=(lead, attachments, config),
+            daemon=True,
+        ).start()
+
+    def _rejudge_selected_lead_thread(self, lead: Lead, attachments: list[LeadAttachment], config) -> None:
+        try:
+            result = _rejudge_existing_lead(
+                self._storage(),
+                lead,
+                attachments,
+                api_key=config.deepseek_api_key,
+                model=config.deepseek_model,
+                min_score=config.lead_min_score,
+                max_days=config.lead_max_days,
+                accept_decisions=config.lead_accept_decisions,
+                blocked_keywords=config.lead_blocked_keywords,
+                hard_reject_keywords=config.lead_hard_reject_keywords,
+            )
+        except Exception as exc:
+            self.write_log(f"=== Переоценка AI #{lead.id}: ошибка: {exc} ===\n")
+            self.root.after(0, lambda: self.status_var.set(f"Переоценка AI #{lead.id}: ошибка"))
+        else:
+            decision = "подходит" if result.accepted else "не подходит"
+            self.write_log(f"=== Переоценка AI #{lead.id}: {decision}, score {result.score} ===\n")
+            self.root.after(
+                0,
+                lambda: self.status_var.set(f"Переоценка AI #{lead.id}: {decision}, score {result.score}"),
+            )
+        finally:
+            self.root.after(0, self._finish_rejudge)
+
+    def _finish_rejudge(self) -> None:
+        self.rejudge_in_flight = False
+        self.rejudge_button.config(state=NORMAL)
+        self.refresh_leads()
 
     def _kwork_project_client(self):
         from app.kwork_client import KworkProjectClient
@@ -1675,6 +1749,67 @@ def _reply_context_from_lead(
         attachment_context=attachment_context,
         estimated_days=max(1, days),
     )
+
+
+def _assessment_source_from_lead(lead: Lead, attachments: list[LeadAttachment]) -> str:
+    """Build a fresh AI-judge context from customer facts, never from a prior AI verdict."""
+    parts = [
+        f"Название заказа: {_lead_title(lead)}" if _lead_title(lead) else "",
+        "Карточка Kwork:\n" + lead.post_text.strip() if lead.post_text.strip() else "",
+    ]
+    attachment_lines = [
+        f"- {attachment.label}: {(attachment.summary or attachment.status).strip()}"
+        for attachment in attachments
+        if attachment.label.strip() and (attachment.summary or attachment.status).strip()
+    ]
+    if attachment_lines:
+        parts.append("ФАЙЛЫ/ТЗ:\n" + "\n".join(attachment_lines))
+    return "\n\n".join(part for part in parts if part)
+
+
+def _rejudge_existing_lead(
+    storage: Storage,
+    lead: Lead,
+    attachments: list[LeadAttachment],
+    *,
+    api_key: str,
+    model: str,
+    min_score: int,
+    max_days: int,
+    accept_decisions: tuple[str, ...],
+    blocked_keywords: tuple[str, ...],
+    hard_reject_keywords: tuple[str, ...],
+    judge=None,
+    summary_builder=None,
+):
+    """Refresh AI judgment while leaving a user's text and terms intact."""
+    if judge is None:
+        from app.ai_lead_judge import judge_lead
+
+        judge = judge_lead
+    if summary_builder is None:
+        from app.main import _summary_from_judge
+
+        summary_builder = _summary_from_judge
+
+    result = judge(
+        _assessment_source_from_lead(lead, attachments),
+        api_key=api_key,
+        model=model,
+        min_score=min_score,
+        max_estimated_days=max_days,
+        accept_decisions=accept_decisions,
+        blocked_keywords=blocked_keywords,
+        hard_reject_keywords=hard_reject_keywords,
+    )
+    storage.update_lead_assessment(
+        lead.id,
+        score=result.score,
+        summary=summary_builder(result),
+        price_rub=lead.proposal_price_rub,
+        days=lead.proposal_days,
+    )
+    return result
 
 
 def build_lead_row_values(lead: Lead) -> tuple:
