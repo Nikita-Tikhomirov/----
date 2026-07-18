@@ -1308,6 +1308,56 @@ def test_batch_live_check_uses_only_active_unsent_leads():
     assert [lead.id for lead in selected] == [1]
 
 
+def test_batch_live_check_prioritizes_fresh_low_competition_leads():
+    now = datetime(2026, 7, 18, 15, 0, tzinfo=timezone.utc)
+    blocked = Lead(
+        id=1,
+        post_id=1,
+        score=95,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/1/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/1/view",
+        posted_at="2026-07-18 14:30:00",
+        live_response_count=12,
+    )
+    ordinary = Lead(
+        id=2,
+        post_id=2,
+        score=80,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/2/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/2/view",
+        posted_at="2026-07-18 08:00:00",
+        live_response_count=4,
+    )
+    urgent = Lead(
+        id=3,
+        post_id=3,
+        score=70,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/3/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/3/view",
+        posted_at="2026-07-18 14:15:00",
+        live_response_count=1,
+    )
+
+    selected = select_leads_for_live_check(
+        [blocked, ordinary, urgent],
+        max_age_hours=24,
+        max_responses=5,
+        limit=2,
+        now=now,
+    )
+
+    assert [lead.id for lead in selected] == [3, 2]
+
+
 def test_scan_and_approval_processes_trigger_lead_refresh():
     assert _should_refresh_after_process("Сканирование")
     assert _should_refresh_after_process("Проверка почты")

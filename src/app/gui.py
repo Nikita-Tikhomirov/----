@@ -770,6 +770,7 @@ class LeadFunnelGui:
         leads = select_leads_for_live_check(
             self._storage().list_leads(),
             max_age_hours=self._queue_max_age_hours(),
+            max_responses=self._kwork_max_responses(),
             limit=BATCH_LIVE_CHECK_LIMIT,
         )
         if not leads:
@@ -2196,13 +2197,15 @@ def select_leads_for_live_check(
     leads: list[Lead],
     max_age_hours: int,
     limit: int = BATCH_LIVE_CHECK_LIMIT,
+    max_responses: int = 5,
     now: datetime | None = None,
 ) -> list[Lead]:
     """Choose the current queue for a bounded, read-only Kwork status refresh."""
     if limit <= 0:
         return []
     active_leads = filter_active_leads(leads, max_age_hours=max_age_hours, now=now)
-    return [lead for lead in active_leads if lead.status != "sent" and not lead.sent_at][:limit]
+    actionable_leads = [lead for lead in active_leads if lead.status != "sent" and not lead.sent_at]
+    return rank_leads_for_action(actionable_leads, max_responses=max_responses, now=now)[:limit]
 
 
 def _lead_activity_datetime(lead: Lead) -> datetime | None:
