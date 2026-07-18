@@ -41,6 +41,14 @@ QUEUE_VIEW_ACTIONABLE = "Доступно сейчас"
 QUEUE_VIEW_STOPPED = "Стоп-лиды"
 QUEUE_VIEW_ARCHIVE = "Архив"
 QUEUE_VIEW_OPTIONS = (QUEUE_VIEW_ACTIONABLE, QUEUE_VIEW_STOPPED, QUEUE_VIEW_ARCHIVE)
+LEAD_STATUS_LABELS = {
+    "new": "Новый",
+    "emailed": "На почте",
+    "approved": "Готов к отправке",
+    "sent": "Отклик отправлен",
+    "rejected": "Отклонён",
+    "failed": "Ошибка",
+}
 
 
 @dataclass(frozen=True)
@@ -430,6 +438,7 @@ class LeadFunnelGui:
         self.leads_table.bind("<<TreeviewSelect>>", self.on_lead_select)
         self.leads_table.tag_configure("new", background="#fffbeb")
         self.leads_table.tag_configure("emailed", background="#f8fafc")
+        self.leads_table.tag_configure("approved", background="#ecfdf3")
         self.leads_table.tag_configure("failed", background="#fff1f0")
         self.leads_table.tag_configure("sent", background="#ecfdf3")
         self.leads_table.tag_configure("low_score", background="#fff7ed")
@@ -2018,7 +2027,7 @@ def build_lead_row_values(lead: Lead, max_responses: int = 5) -> tuple:
         lead_action_priority(lead, max_responses=max_responses),
         offer_count if offer_count is not None else "",
         _reply_state(lead),
-        lead.status,
+        lead_status_label(lead.status),
         lead.score,
         _extract_price(lead) or "",
         _extract_days(lead) or "",
@@ -2036,7 +2045,7 @@ def _lead_details_text(lead: Lead) -> str:
         f"Предложений: {offer_count if offer_count is not None else 'не найдено'}",
         f"Осталось: {remaining or 'не найдено'}",
         f"Наш отклик: {_reply_state(lead)}",
-        f"Статус: {lead.status}; score: {lead.score}",
+        f"Статус: {lead_status_label(lead.status)}; score: {lead.score}",
     ]
     if lead.live_checked_at:
         live_count = lead.live_response_count
@@ -2084,7 +2093,14 @@ def _reply_state(lead: Lead) -> str:
         return f"отправлен {_format_storage_datetime(lead.sent_at)}"
     if lead.status == "sent":
         return "отправлен"
-    return "нет"
+    if lead.status == "approved":
+        return "готов к отправке"
+    return "не отправлен"
+
+
+def lead_status_label(status: str) -> str:
+    """Translate stored workflow states into the language used by the desktop UI."""
+    return LEAD_STATUS_LABELS.get(status, status)
 
 
 def lead_status_summary(
@@ -2097,7 +2113,7 @@ def lead_status_summary(
     """Build the concise state shown above the selected lead's editable fields."""
     offer_count = _extract_offer_count(lead)
     status = (
-        f"Лид #{lead.id}: {lead.status}; score {lead.score}; "
+        f"Лид #{lead.id}: {lead_status_label(lead.status)}; score {lead.score}; "
         f"предложений: {offer_count if offer_count is not None else 'не видно'}; наш отклик: {_reply_state(lead)}"
     )
     if lead.live_checked_at:

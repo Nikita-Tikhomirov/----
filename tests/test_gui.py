@@ -31,6 +31,7 @@ from app.gui import (
     _should_refresh_after_process,
     direct_send_confirmation,
     lead_status_summary,
+    lead_status_label,
     lead_send_block_reason,
     build_lead_row_values,
     build_app_command,
@@ -1214,6 +1215,13 @@ def test_lead_queue_caption_explains_active_and_archive_views():
     assert lead_queue_caption(total_count=81, visible_count=81, show_archive=True) == "Все лиды: 81"
 
 
+def test_lead_status_labels_explain_email_approval_and_submission_state():
+    assert lead_status_label("emailed") == "На почте"
+    assert lead_status_label("approved") == "Готов к отправке"
+    assert lead_status_label("sent") == "Отклик отправлен"
+    assert lead_status_label("unknown") == "unknown"
+
+
 def test_action_queue_separates_live_over_limit_leads_from_available_work():
     now = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
     available = Lead(
@@ -2093,7 +2101,7 @@ def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
         "Стоп",
         4,
         "отправлен 04.05 13:45 МСК",
-        "sent",
+        "Отклик отправлен",
         65,
         9000,
         4,
