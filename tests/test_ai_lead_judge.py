@@ -63,6 +63,28 @@ def test_parse_judge_response_keeps_customer_goal_and_fact_grounded_work_plan():
     ]
 
 
+def test_parse_judge_response_rejects_scope_longer_than_one_week():
+    raw = """
+    {
+      "decision": "accept",
+      "score": 89,
+      "complexity": "medium",
+      "estimated_days": 14,
+      "price_rub": 35000,
+      "summary": "Доработать сайт с личным кабинетом",
+      "reasons": ["задача подробно описана"],
+      "risks": ["объем больше недели"],
+      "questions": [],
+      "draft_reply": "Здравствуйте!"
+    }
+    """
+
+    result = parse_judge_response(raw)
+
+    assert result.estimated_days == 14
+    assert result.accepted is False
+
+
 def test_judge_lead_rejects_bitrix_without_api_call():
     result = judge_lead(
         "Нужна интеграция Битрикс24 с CRM. Отклик: https://kwork.ru/projects/1",

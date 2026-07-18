@@ -106,7 +106,9 @@ def parse_judge_response(raw: str) -> LeadJudgeResult:
     payload = _extract_json(raw)
     decision = _clean_decision(str(payload.get("decision", "reject")))
     score = _clamp_int(payload.get("score"), 0, 100, default=0)
-    estimated_days = _clamp_int(payload.get("estimated_days"), 1, 7, default=7)
+    # Keep the reported estimate above the default weekly target so the
+    # acceptance gate can reject it instead of silently turning 14 days into 7.
+    estimated_days = _clamp_int(payload.get("estimated_days"), 1, 30, default=30)
     price_rub = _clamp_int(payload.get("price_rub"), 0, 500_000, default=0)
     complexity = _clean_complexity(str(payload.get("complexity", "unknown")))
     summary = _clean_text(str(payload.get("summary", ""))) or "Kwork-заказ"
@@ -278,7 +280,7 @@ def _build_prompt(text: str) -> str:
         "Критерии reject:\n"
         "- Bitrix/Битрикс, 1C/1С, мобильные приложения, React Native/Flutter, DevOps, blockchain, сложная CRM/ERP;\n"
         "- нет понятного результата;\n"
-        "- явно больше недели;\n"
+        "- явно больше недели: укажи реальный estimated_days и решение reject, не сокращай оценку до 7 дней;\n"
         "- слишком низкая цена при большом объёме.\n\n"
         "Составь живой отклик как нормальный человек. Не пиши как бот. "
         "Опирайся на Kwork facts: бюджет, срок, число предложений, вложения и текст ТЗ. "
@@ -301,7 +303,7 @@ def _build_prompt(text: str) -> str:
         '  "decision": "accept|maybe|reject",\n'
         '  "score": 0-100,\n'
         '  "complexity": "simple|medium|too_complex|unknown",\n'
-        '  "estimated_days": 1-7,\n'
+        '  "estimated_days": 1-30,\n'
         '  "price_rub": число,\n'
         '  "summary": "краткое резюме",\n'
         '  "customer_goal": "главная боль или нужный заказчику результат, только по фактам",\n'
