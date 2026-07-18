@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.attachments import ArchiveSelection, build_attachment_context, build_attachment_report, parse_attachment
-from app.attachments import _cookie_header_from_cdp_cookies
+from app.attachments import _cookie_header_from_cdp_cookies, _save_attachment_file
 
 
 def test_parse_attachment_splits_label_and_url():
@@ -74,6 +74,16 @@ def test_attachment_report_downloads_each_url_once_when_collector_repeats_a_file
     assert downloaded_urls == ["https://kwork.ru/files/tz.txt"]
     assert len(result.reports) == 1
     assert result.reports[0].label == "ТЗ.txt"
+
+
+def test_saving_identical_attachment_reuses_existing_file(tmp_path):
+    ref = parse_attachment("ТЗ.pdf: https://kwork.ru/files/tz.pdf")
+
+    first_path = _save_attachment_file(ref, b"same attachment content", tmp_path)
+    second_path = _save_attachment_file(ref, b"same attachment content", tmp_path)
+
+    assert second_path == first_path
+    assert [path.name for path in tmp_path.iterdir()] == ["ТЗ.pdf"]
 
 
 def test_build_attachment_context_can_download_with_browser_session(monkeypatch):

@@ -246,7 +246,11 @@ def _save_attachment_file(ref: AttachmentRef, content: bytes, output_dir: str | 
     if not _extension(filename):
         ext = _extension(ref.url)
         filename = f"{filename}{ext}" if ext else filename
-    path = _unique_path(directory / filename)
+    requested_path = directory / filename
+    existing_path = _matching_saved_attachment(requested_path, content)
+    if existing_path is not None:
+        return str(existing_path)
+    path = _unique_path(requested_path)
     path.write_bytes(content)
     return str(path)
 
@@ -268,6 +272,26 @@ def _unique_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     raise FileExistsError(f"слишком много файлов с именем {path.name}")
+
+
+def _matching_saved_attachment(path: Path, content: bytes) -> Path | None:
+    """Reuse a prior numbered copy of the same downloaded attachment."""
+    numbered_name = re.compile(rf"^{re.escape(path.stem)}-\d+{re.escape(path.suffix)}$")
+    candidates = [path]
+    candidates.extend(
+        candidate
+        for candidate in path.parent.iterdir()
+        if candidate.is_file() and numbered_name.fullmatch(candidate.name)
+    )
+    for candidate in candidates:
+        if not candidate.is_file() or candidate.stat().st_size != len(content):
+            continue
+        try:
+            if candidate.read_bytes() == content:
+                return candidate
+        except OSError:
+            continue
+    return None
 
 
 def download_attachment(url: str, cookie: str = "", max_bytes: int = 2_000_000) -> bytes:
