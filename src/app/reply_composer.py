@@ -62,6 +62,7 @@ UNFOUNDED_GUARANTEE_PATTERN = re.compile(
     r"\b(?:гарантир\w*|сто\s*процент\w*|100\s*%)\b",
     re.IGNORECASE,
 )
+UNSUPPORTED_TECHNICAL_COMPONENTS = ("smtp", "плагин")
 ACTION_PATTERN = re.compile(
     r"(?:провер|исправ|внес|сверста|настро|реализ|подключ|доработ|адапт|"
     r"протестир|подготов|собер|интегр|оптимизир|разбер)",
@@ -126,6 +127,7 @@ DELIVERY_BLOCKING_ISSUES = frozenset(
         "unapproved clarification",
         "unsupported current state",
         "unsupported task action",
+        "unsupported technical detail",
         "uncertain commitment",
         "customer skill assumption",
         "robotic phrasing",
@@ -142,6 +144,7 @@ DELIVERY_ISSUE_LABELS = {
     "unapproved clarification": "просит неподтвержденное уточнение",
     "unsupported current state": "заявляет непроверенное состояние сайта",
     "unsupported task action": "обещает действие, которого нет в заказе",
+    "unsupported technical detail": "называет техническую деталь, которой нет в заказе",
     "uncertain commitment": "содержит неуверенное обещание",
     "customer skill assumption": "оценивает навыки заказчика",
     "robotic phrasing": "звучит шаблонно или слишком по-ботовски",
@@ -235,6 +238,8 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
         issues.append("unsupported current state")
     if _has_unsupported_task_action(clean, context):
         issues.append("unsupported task action")
+    if _has_unsupported_technical_detail(clean, context):
+        issues.append("unsupported technical detail")
     if UNCERTAIN_COMMITMENT_PATTERN.search(clean):
         issues.append("uncertain commitment")
     if CUSTOMER_SKILL_ASSUMPTION_PATTERN.search(clean):
@@ -379,6 +384,7 @@ def _writer_prompt(context: ReplyDraftContext) -> str:
         else "Не задавай вопросов и не проси уточнения, файлы, доступы или подтверждения. "
         "Если детали неизвестны, не выдумывай их и продолжай по фактам задачи. "
         "Не добавляй факты о текущем состоянии сайта, устройствах, доступах или технологиях, если их нет в фактах."
+        " В частности, не называй SMTP или плагины, если они не упомянуты в заказе."
         " Не описывай внутренние сомнения и условные обещания: не пиши «пока исхожу», «это уточняется» или «если понадобится»."
         " Не оценивай навыки заказчика и не пиши «если вы не работали с этим раньше» или «вам будет сложно»."
     )
@@ -419,6 +425,7 @@ def _review_prompt(candidate: str, context: ReplyDraftContext) -> str:
         "не содержит коммерческих условий, выдуманных утверждений, AI-слов и пустых фраз. "
         "Утверждение о том, что что-то уже работает или не работает на конкретном устройстве или в среде, "
         "допустимо только если это прямо есть в фактах. "
+        "Отклони непроверенные технические компоненты, например SMTP или плагины, если их нет в фактах. "
         "Отклони условные обещания и фразы про внутреннюю неопределенность, например «пока исхожу» или «это уточняется». "
         "Отклони оценку навыков заказчика, например «если вы не работали с этим раньше» или «вам будет сложно». "
         "Отклони шаблонные начала «Привет», «понял задачу», фразы «сделаю следующее», «на всё уйдёт» "
@@ -444,7 +451,8 @@ def _repair_prompt(candidate: str, issues: tuple[str, ...], context: ReplyDraftC
         "Не добавляй коммерческие условия, выдуманный опыт или AI-слова. "
         "Начни с «Здравствуйте!», не используй «понял задачу», «сделаю следующее», «на всё уйдёт» "
         "и не давай необоснованных гарантий. "
-        "Не добавляй неподтвержденные факты о текущем состоянии сайта, устройствах, доступах или технологиях. "
+        "Не добавляй неподтвержденные факты о текущем состоянии сайта, устройствах, доступах или технологиях, "
+        "включая SMTP и плагины, если они не названы в заказе. "
         "Не описывай внутренние сомнения, условные обещания или фразы «пока исхожу» и «это уточняется». "
         "Не оценивай навыки заказчика и не добавляй формулировки про его опыт или сложность для него. "
         f"{question_policy}\n\n"
@@ -565,6 +573,24 @@ def _has_unsupported_task_action(reply: str, context: ReplyDraftContext) -> bool
     ):
         return True
     return ALL_DEVICES_ACTION_PATTERN.search(reply) is not None and RESPONSIVE_FACT_PATTERN.search(facts) is None
+
+
+def _has_unsupported_technical_detail(reply: str, context: ReplyDraftContext) -> bool:
+    """Keep a proposal from inventing a specific component behind a broad symptom."""
+    facts = " ".join(
+        (context.title, context.task_summary, context.source_text, context.attachment_context)
+    ).lower()
+    allowed_question = _question_key(_safe_question(context.blocking_question))
+    for sentence in _sentences(reply):
+        if _question_key(sentence) == allowed_question and allowed_question:
+            continue
+        lowered_sentence = sentence.lower()
+        if any(
+            component in lowered_sentence and component not in facts
+            for component in UNSUPPORTED_TECHNICAL_COMPONENTS
+        ):
+            return True
+    return False
 
 
 def _fallback_reply(context: ReplyDraftContext) -> str:

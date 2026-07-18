@@ -122,6 +122,20 @@ def test_quality_gate_rejects_hidden_clarification_without_allowed_question():
     assert "unapproved clarification" in issues
 
 
+def test_quality_gate_rejects_unmentioned_technical_components():
+    issues = reply_quality_issues(
+        (
+            "Здравствуйте! Вижу задачу по исправлению формы заявки и адаптиву лендинга. "
+            "Проверю логику отправки, настройки SMTP или плагина почты, затем внесу нужные правки. "
+            "После этого протестирую форму на телефоне и в основных браузерах. "
+            "Готов приступить сразу."
+        ),
+        _form_context(),
+    )
+
+    assert "unsupported technical detail" in issues
+
+
 def test_quality_gate_allows_only_explicit_blocking_question():
     context = replace(
         _form_context(),
