@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -15,6 +16,7 @@ from urllib.request import urlopen
 
 from app.ai_lead_judge import sanitize_customer_reply
 from app.config import load_config
+from app.kwork_client import KworkProjectReplyabilityError
 from app.kwork_sender import KworkReplySender, _extract_reply_terms
 from app.kwork_status import UNAVAILABLE_PROJECT_REASON
 from app.reply_composer import (
@@ -26,6 +28,7 @@ from app.reply_composer import (
 from app.storage import Lead, LeadAttachment, PostRejection, Storage
 
 
+logger = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).resolve().parents[2]
 ENV_PATH = ROOT_DIR / ".env"
 MOSCOW_TZ = timezone(timedelta(hours=3), "МСК")
@@ -1137,6 +1140,21 @@ class LeadFunnelGui:
     ) -> None:
         try:
             result = action()
+        except KworkProjectReplyabilityError as exc:
+            project_info = exc.project_info
+            if lead_id is not None and project_info is not None:
+                try:
+                    self._storage().update_lead_live_status(
+                        lead_id,
+                        project_info.response_count,
+                        project_info.reason,
+                    )
+                except Exception:
+                    logger.exception("Unable to store Kwork replyability check for lead %s", lead_id)
+            self.write_log(f"=== {label}: отправка остановлена: {exc} ===\n")
+            self.root.after(0, lambda: self.status_var.set(f"{label}: отправка остановлена"))
+            if lead_id is not None:
+                self.root.after(0, lambda: LeadFunnelGui._show_lead_action_error(self, lead_id, str(exc)))
         except Exception as exc:
             if mark_failed and lead_id is not None:
                 try:

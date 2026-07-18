@@ -1855,6 +1855,116 @@ def test_gui_marks_lead_failed_only_for_actual_submission_errors(mark_failed, ex
     assert "Стоимость может быть не более 3 000 руб." in lead_status.values[-1]
 
 
+def test_gui_keeps_lead_actionable_when_kwork_blocks_reply_before_submission():
+    from app.kwork_client import KworkProjectInfo, ensure_project_is_replyable
+
+    failures = []
+    live_updates = []
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    class Storage:
+        def mark_failed(self, lead_id, error):
+            failures.append((lead_id, error))
+
+        def update_lead_live_status(self, lead_id, response_count, reason):
+            live_updates.append((lead_id, response_count, reason))
+
+    class Value:
+        def __init__(self):
+            self.values = []
+
+        def set(self, value):
+            self.values.append(value)
+
+    def blocked_action():
+        ensure_project_is_replyable(
+            KworkProjectInfo(
+                url="https://kwork.ru/projects/42/view",
+                response_count=7,
+                title="Лендинг",
+                description="",
+            ),
+            max_responses=5,
+        )
+
+    lead_status = Value()
+    gui = SimpleNamespace(
+        root=Root(),
+        _storage=lambda: Storage(),
+        write_log=lambda _text: None,
+        status_var=Value(),
+        lead_status_var=lead_status,
+        current_lead_id=42,
+        refresh_leads=lambda: None,
+    )
+
+    LeadFunnelGui._run_lead_action_thread(
+        gui,
+        "Отправка лида #42",
+        blocked_action,
+        lead_id=42,
+        mark_failed=True,
+    )
+
+    assert failures == []
+    assert live_updates == [(42, 7, "")]
+    assert "7" in lead_status.values[-1]
+
+
+def test_gui_reports_kwork_block_even_when_live_status_cannot_be_saved():
+    from app.kwork_client import KworkProjectInfo, ensure_project_is_replyable
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    class Storage:
+        def update_lead_live_status(self, *_args):
+            raise OSError("database is locked")
+
+    class Value:
+        def __init__(self):
+            self.values = []
+
+        def set(self, value):
+            self.values.append(value)
+
+    def blocked_action():
+        ensure_project_is_replyable(
+            KworkProjectInfo(
+                url="https://kwork.ru/projects/42/view",
+                response_count=7,
+                title="Лендинг",
+                description="",
+            ),
+            max_responses=5,
+        )
+
+    lead_status = Value()
+    gui = SimpleNamespace(
+        root=Root(),
+        _storage=lambda: Storage(),
+        write_log=lambda _text: None,
+        status_var=Value(),
+        lead_status_var=lead_status,
+        current_lead_id=42,
+        refresh_leads=lambda: None,
+    )
+
+    LeadFunnelGui._run_lead_action_thread(
+        gui,
+        "Отправка лида #42",
+        blocked_action,
+        lead_id=42,
+        mark_failed=True,
+    )
+
+    assert "7" in lead_status.values[-1]
+
+
 def test_gui_keeps_current_lead_status_when_old_background_action_fails():
     class Value:
         def __init__(self):

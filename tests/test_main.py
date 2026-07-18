@@ -785,6 +785,59 @@ def test_process_approvals_sends_only_approved_once(tmp_path):
     assert storage.get_lead(lead_id).status == "sent"
 
 
+def test_process_approvals_keeps_lead_emailed_when_kwork_blocks_before_submission(tmp_path):
+    from app.kwork_client import KworkProjectInfo, ensure_project_is_replyable
+
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=42,
+        post_url="https://kwork.ru/projects/42/view",
+        text="Нужно сделать адаптивный лендинг и настроить форму заявки.",
+        posted_at="",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=84,
+        summary="Лендинг",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу по лендингу. Сверю структуру страницы, "
+            "соберу адаптивную верстку и проверю отправку формы на мобильных. "
+            "После тестирования покажу готовый результат."
+        ),
+        contact="https://kwork.ru/projects/42/view",
+        proposal_title="Сделать лендинг",
+        proposal_price_rub=12000,
+        proposal_days=3,
+    )
+    storage.mark_lead_emailed(lead_id, "<lead@example.com>")
+
+    class ReplyBlockedClient(FakeTelegramClient):
+        def send_message(self, *_args, **_kwargs):
+            ensure_project_is_replyable(
+                KworkProjectInfo(
+                    url="https://kwork.ru/projects/42/view",
+                    response_count=7,
+                    title="Лендинг",
+                    description="",
+                ),
+                max_responses=5,
+            )
+
+    sent = process_approvals(
+        storage=storage,
+        telegram_client=ReplyBlockedClient(),
+        email_client=FakeEmailClient(approvals=[(lead_id, "<approval@example.com>")]),
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert sent == 0
+    assert lead.status == "emailed"
+    assert lead.live_response_count == 7
+    assert "7" in lead.last_error
+
+
 def test_process_approvals_blocks_stale_reply_that_invents_missing_form_work(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

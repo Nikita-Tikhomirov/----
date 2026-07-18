@@ -20,7 +20,7 @@ from app.chrome_cookies import chrome_cookie_header
 from app.config import AppConfig, load_config
 from app.email_client import EmailClient
 from app.handoff import write_codex_handoff
-from app.kwork_client import KworkProjectClient
+from app.kwork_client import KworkProjectClient, KworkProjectReplyabilityError
 from app.kwork_source import KworkWebSource
 from app.lead_filter import evaluate_post
 from app.public_telegram_client import PublicTelegramClient
@@ -535,6 +535,17 @@ def process_approvals(
                 days=days,
                 title=title,
             )
+        except KworkProjectReplyabilityError as exc:
+            project_info = exc.project_info
+            if project_info is not None:
+                storage.update_lead_live_status(
+                    lead_id,
+                    response_count=project_info.response_count,
+                    reason=project_info.reason,
+                )
+            storage.restore_approved_lead(lead_id, str(exc))
+            logger.warning("Kwork blocked approved lead %s before submission: %s", lead_id, exc)
+            continue
         except Exception as exc:
             logger.exception("Failed to send Telegram reply for lead %s", lead_id)
             storage.mark_failed(lead_id, str(exc))

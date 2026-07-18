@@ -476,6 +476,20 @@ class Storage:
             )
             return True
 
+    def restore_approved_lead(self, lead_id: int, reason: str) -> bool:
+        """Return a preflight-blocked approval to the actionable email queue."""
+        clean_reason = reason.strip()[:2000] or MISSING_ERROR_MESSAGE
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE leads
+                SET status = 'emailed', last_error = ?
+                WHERE id = ? AND status = 'approved'
+                """,
+                (clean_reason, lead_id),
+            )
+        return cursor.rowcount > 0
+
     def mark_sent(self, lead_id: int, contact: str, telegram_message_id: str) -> None:
         with self._connect() as conn:
             conn.execute(

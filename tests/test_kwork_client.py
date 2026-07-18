@@ -152,8 +152,10 @@ def test_replyability_rejects_project_above_live_response_limit():
         description="",
     )
 
-    with pytest.raises(KworkProjectReplyabilityError, match=r"7.*5"):
+    with pytest.raises(KworkProjectReplyabilityError, match=r"7.*5") as caught:
         ensure_project_is_replyable(info, max_responses=5)
+
+    assert caught.value.project_info is info
 
 
 def test_replyability_rejects_unavailable_or_unreadable_project():
