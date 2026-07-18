@@ -29,6 +29,7 @@ ENV_PATH = ROOT_DIR / ".env"
 MOSCOW_TZ = timezone(timedelta(hours=3), "МСК")
 WATCH_REFRESH_MS = 5000
 REFRESH_AFTER_LABELS = {"Сканирование", "Проверка почты"}
+BATCH_LIVE_CHECK_LIMIT = 30
 
 FILTER_SETTINGS = (
     ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
@@ -201,6 +202,7 @@ class LeadFunnelGui:
         self.reply_regeneration_in_flight = False
         self.component_check_in_flight = False
         self.show_archive_var = BooleanVar(value=False)
+        self.batch_live_check_in_flight = False
         self.status_var = StringVar(value="Готово")
 
         self._configure_style()
@@ -430,34 +432,46 @@ class LeadFunnelGui:
 
         buttons = ttk.Frame(frame)
         buttons.pack(fill="x", pady=(4, 6))
-        ttk.Button(buttons, text="Обновить", command=self.refresh_leads, style="Modern.TButton").pack(side="left", padx=(0, 6))
-        ttk.Button(buttons, text="Сохранить", command=self.save_lead_edits, style="Modern.TButton").pack(side="left", padx=6)
+        primary_actions = ttk.Frame(buttons)
+        primary_actions.pack(fill="x")
+        secondary_actions = ttk.Frame(buttons)
+        secondary_actions.pack(fill="x", pady=(5, 0))
+        ttk.Button(primary_actions, text="Сохранить", command=self.save_lead_edits, style="Modern.TButton").pack(side="left", padx=(0, 6))
         self.regenerate_reply_button = ttk.Button(
-            buttons,
+            primary_actions,
             text="Пересобрать отклик",
             command=self.regenerate_selected_reply,
             style="Accent.TButton",
         )
         self.regenerate_reply_button.pack(side="left", padx=6)
+        ttk.Button(primary_actions, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
+        self.send_lead_button = ttk.Button(
+            primary_actions,
+            text="OK и отправить отклик",
+            command=self.send_selected_lead,
+            style="Danger.TButton",
+        )
+        self.send_lead_button.pack(side="right")
+
+        ttk.Button(secondary_actions, text="Обновить", command=self.refresh_leads, style="Modern.TButton").pack(side="left", padx=(0, 6))
+        self.check_fresh_leads_button = ttk.Button(
+            secondary_actions,
+            text="Проверить свежие",
+            command=self.check_fresh_leads,
+            style="Modern.TButton",
+        )
+        self.check_fresh_leads_button.pack(side="left", padx=6)
         self.apply_kwork_price_button = ttk.Button(
-            buttons,
+            secondary_actions,
             text="Применить максимум Kwork",
             command=self.apply_kwork_price_limit,
             state=DISABLED,
             style="Modern.TButton",
         )
         self.apply_kwork_price_button.pack(side="left", padx=6)
-        ttk.Button(buttons, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
-        ttk.Button(buttons, text="Проверить заказ", command=self.check_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
-        ttk.Button(buttons, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
-        ttk.Button(buttons, text="Заполнить в Kwork", command=self.prepare_selected_lead, style="Accent.TButton").pack(side="left", padx=6)
-        self.send_lead_button = ttk.Button(
-            buttons,
-            text="OK и отправить отклик",
-            command=self.send_selected_lead,
-            style="Danger.TButton",
-        )
-        self.send_lead_button.pack(side="right")
+        ttk.Button(secondary_actions, text="Открыть заказ", command=self.open_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(secondary_actions, text="Проверить заказ", command=self.check_selected_lead, style="Modern.TButton").pack(side="left", padx=6)
+        ttk.Button(secondary_actions, text="Скопировать ссылку", command=self.copy_selected_lead_url, style="Modern.TButton").pack(side="left", padx=6)
 
         text_frame = ttk.Frame(frame)
         text_frame.pack(fill="both", expand=True, pady=6)
@@ -730,17 +744,61 @@ class LeadFunnelGui:
             lead_id=lead.id,
         )
 
-    def _refresh_lead_live_status(self, lead: Lead) -> str:
-        from app.kwork_client import KworkProjectClient
-
-        config = load_config()
-        client = KworkProjectClient(
-            timeout_seconds=45,
-            cookie=config.kwork_cookie,
-            use_browser=config.kwork_use_browser,
-            cdp_url=config.kwork_cdp_url,
-            browser_profile_dir=config.kwork_browser_profile_dir,
+    def check_fresh_leads(self) -> None:
+        if self.batch_live_check_in_flight:
+            return
+        leads = select_leads_for_live_check(
+            self._storage().list_leads(),
+            max_age_hours=self._queue_max_age_hours(),
+            limit=BATCH_LIVE_CHECK_LIMIT,
         )
+        if not leads:
+            messagebox.showinfo("Проверка свежих", "Свежих неотправленных лидов для проверки нет.")
+            return
+        self.batch_live_check_in_flight = True
+        self.check_fresh_leads_button.config(state=DISABLED)
+        self.status_var.set(f"Проверка свежих: {len(leads)} шт.")
+        threading.Thread(target=self._check_fresh_leads_thread, args=(leads,), daemon=True).start()
+
+    def _check_fresh_leads_thread(self, leads: list[Lead]) -> None:
+        checked = 0
+        unreadable = 0
+        try:
+            client = self._kwork_project_client()
+            storage = self._storage()
+            for lead in leads:
+                try:
+                    project_info = client.inspect(lead.contact)
+                    storage.update_lead_live_status(
+                        lead.id,
+                        response_count=project_info.response_count,
+                        reason=project_info.reason,
+                    )
+                    checked += 1
+                    if project_info.response_count is None:
+                        unreadable += 1
+                except Exception as exc:
+                    storage.update_lead_live_status(lead.id, response_count=None, reason=f"Kwork check failed: {exc}")
+                    unreadable += 1
+        except Exception as exc:
+            self.write_log(f"=== Проверка свежих: ошибка: {exc} ===\n")
+            self.root.after(0, lambda: self._finish_fresh_live_check(checked, unreadable, error=str(exc)))
+            return
+        self.write_log(f"=== Проверка свежих: обновлено {checked}, без счетчика {unreadable} ===\n")
+        self.root.after(0, lambda: self._finish_fresh_live_check(checked, unreadable))
+
+    def _finish_fresh_live_check(self, checked: int, unreadable: int, error: str = "") -> None:
+        self.batch_live_check_in_flight = False
+        self.check_fresh_leads_button.config(state=NORMAL)
+        if error:
+            self.status_var.set("Проверка свежих: ошибка")
+        else:
+            suffix = f", без счетчика {unreadable}" if unreadable else ""
+            self.status_var.set(f"Проверка свежих: обновлено {checked}{suffix}")
+        self.refresh_leads()
+
+    def _refresh_lead_live_status(self, lead: Lead) -> str:
+        client = self._kwork_project_client()
         project_info = client.inspect(lead.contact)
         self._storage().update_lead_live_status(
             lead.id,
@@ -750,6 +808,18 @@ class LeadFunnelGui:
         if project_info.response_count is None:
             return f"Kwork status unknown: {project_info.reason or 'response count was not found'}"
         return f"Kwork responses: {project_info.response_count}"
+
+    def _kwork_project_client(self):
+        from app.kwork_client import KworkProjectClient
+
+        config = load_config()
+        return KworkProjectClient(
+            timeout_seconds=45,
+            cookie=config.kwork_cookie,
+            use_browser=config.kwork_use_browser,
+            cdp_url=config.kwork_cdp_url,
+            browser_profile_dir=config.kwork_browser_profile_dir,
+        )
 
     def regenerate_selected_reply(self) -> None:
         lead = self._selected_lead()
@@ -1798,6 +1868,19 @@ def filter_active_leads(
         if activity_at is not None and activity_at >= cutoff:
             active_leads.append(lead)
     return active_leads
+
+
+def select_leads_for_live_check(
+    leads: list[Lead],
+    max_age_hours: int,
+    limit: int = BATCH_LIVE_CHECK_LIMIT,
+    now: datetime | None = None,
+) -> list[Lead]:
+    """Choose the current queue for a bounded, read-only Kwork status refresh."""
+    if limit <= 0:
+        return []
+    active_leads = filter_active_leads(leads, max_age_hours=max_age_hours, now=now)
+    return [lead for lead in active_leads if lead.status != "sent" and not lead.sent_at][:limit]
 
 
 def _lead_activity_datetime(lead: Lead) -> datetime | None:

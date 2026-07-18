@@ -31,6 +31,7 @@ from app.gui import (
     build_app_command,
     build_component_check_report,
     filter_active_leads,
+    select_leads_for_live_check,
     build_script_command,
     normalize_filter_settings,
     read_env_values,
@@ -778,6 +779,51 @@ def test_active_queue_keeps_recent_kwork_and_sqlite_leads_but_hides_archive():
     assert [lead.id for lead in visible] == [1, 2]
 
 
+def test_batch_live_check_uses_only_active_unsent_leads():
+    fresh = Lead(
+        id=1,
+        post_id=1,
+        score=70,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/1/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/1/view",
+        created_at="2026-07-17 23:40:00",
+    )
+    already_sent = Lead(
+        id=2,
+        post_id=2,
+        score=70,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/2/view",
+        status="sent",
+        post_url="https://kwork.ru/projects/2/view",
+        created_at="2026-07-17 23:45:00",
+    )
+    archived = Lead(
+        id=3,
+        post_id=3,
+        score=70,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/3/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/3/view",
+        created_at="2026-07-16 00:00:00",
+    )
+
+    selected = select_leads_for_live_check(
+        [fresh, already_sent, archived],
+        max_age_hours=24,
+        limit=10,
+        now=datetime(2026, 7, 18, 0, 10, tzinfo=timezone.utc),
+    )
+
+    assert [lead.id for lead in selected] == [1]
+
+
 def test_scan_and_approval_processes_trigger_lead_refresh():
     assert _should_refresh_after_process("Сканирование")
     assert _should_refresh_after_process("Проверка почты")
@@ -963,7 +1009,7 @@ def test_gui_live_project_check_persists_current_kwork_count(monkeypatch, tmp_pa
             kwork_browser_profile_dir="",
         ),
     )
-    gui = SimpleNamespace(_storage=lambda: storage)
+    gui = SimpleNamespace(_storage=lambda: storage, _kwork_project_client=lambda: Client())
 
     result = LeadFunnelGui._refresh_lead_live_status(gui, lead)
 
@@ -971,6 +1017,53 @@ def test_gui_live_project_check_persists_current_kwork_count(monkeypatch, tmp_pa
     assert result == "Kwork responses: 7"
     assert refreshed.live_response_count == 7
     assert refreshed.live_reason == "выше лимита"
+
+
+def test_gui_batch_live_check_updates_each_selected_lead_without_sending(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    lead_ids = []
+    for message_id in (30, 31):
+        post_id = storage.save_post(
+            channel="kwork-web",
+            message_id=message_id,
+            post_url=f"https://kwork.ru/projects/{message_id}/view",
+            text="Предложений: 1",
+            posted_at="2026-07-18T02:30:00+03:00",
+        )
+        lead_ids.append(
+            storage.create_lead(
+                post_id=post_id,
+                score=82,
+                summary="Правки",
+                draft_reply="Здравствуйте!",
+                contact=f"https://kwork.ru/projects/{message_id}/view",
+            )
+        )
+
+    class Client:
+        def inspect(self, contact):
+            return SimpleNamespace(response_count=5 if contact.endswith("30/view") else 8, reason="")
+
+    finished = []
+
+    class Root:
+        def after(self, _delay, callback):
+            callback()
+
+    gui = SimpleNamespace(
+        _kwork_project_client=lambda: Client(),
+        _storage=lambda: storage,
+        write_log=lambda _text: None,
+        root=Root(),
+        _finish_fresh_live_check=lambda checked, unreadable, error="": finished.append((checked, unreadable, error)),
+    )
+
+    LeadFunnelGui._check_fresh_leads_thread(gui, [storage.get_lead(lead_id) for lead_id in lead_ids])
+
+    assert [storage.get_lead(lead_id).live_response_count for lead_id in lead_ids] == [5, 8]
+    assert [storage.get_lead(lead_id).status for lead_id in lead_ids] == ["new", "new"]
+    assert finished == [(2, 0, "")]
 
 
 def test_gui_direct_send_blocks_stale_reply_with_unsupported_task_action(monkeypatch):
