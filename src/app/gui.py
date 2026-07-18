@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tkinter import BOTH, DISABLED, END, NORMAL, BooleanVar, StringVar, TclError, Tk, messagebox, scrolledtext
@@ -32,6 +33,12 @@ REFRESH_AFTER_LABELS = {"Сканирование", "Проверка почты
 BATCH_LIVE_CHECK_LIMIT = 30
 AI_DECISION_PATTERN = re.compile(r"^\s*AI:\s*(accept|maybe|reject)\b", re.IGNORECASE | re.MULTILINE)
 PRESERVED_ASSESSMENT_CONTEXT_MARKERS = ("KWORK-ДАННЫЕ:", "ФАЙЛЫ/ТЗ:")
+
+
+@dataclass(frozen=True)
+class LiveRejudgeOutcome:
+    result: object
+    attachment_reports: tuple
 
 FILTER_SETTINGS = (
     ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
@@ -838,44 +845,42 @@ class LeadFunnelGui:
             return
         if not messagebox.askyesno(
             "Переоценить AI",
-            "Обновить score, боль клиента, план работ и риски по сохраненной карточке и ТЗ?\n\n"
-            "Отклик, название, цена и срок не изменятся. Ничего на Kwork не отправляется.",
+            "Перечитать текущую страницу Kwork и ТЗ, затем обновить score, боль клиента, план работ и риски?\n\n"
+            "Отклик, название, цена и срок не изменятся. Форма Kwork не откроется и ничего не отправится.",
         ):
             return
-        attachments = self._attachments_for_lead(lead)
         self.rejudge_in_flight = True
         self.rejudge_button.config(state=DISABLED)
         self.status_var.set(f"Переоценка AI #{lead.id}: выполняется")
         self.write_log(f"=== Переоценка AI #{lead.id}: старт ===\n")
         threading.Thread(
             target=self._rejudge_selected_lead_thread,
-            args=(lead, attachments, config),
+            args=(lead, config),
             daemon=True,
         ).start()
 
-    def _rejudge_selected_lead_thread(self, lead: Lead, attachments: list[LeadAttachment], config) -> None:
+    def _rejudge_selected_lead_thread(self, lead: Lead, config) -> None:
         try:
-            result = _rejudge_existing_lead(
+            from app.attachments import build_attachment_report
+
+            outcome = _refresh_and_rejudge_existing_lead(
                 self._storage(),
                 lead,
-                attachments,
-                api_key=config.deepseek_api_key,
-                model=config.deepseek_model,
-                min_score=config.lead_min_score,
-                max_days=config.lead_max_days,
-                accept_decisions=config.lead_accept_decisions,
-                blocked_keywords=config.lead_blocked_keywords,
-                hard_reject_keywords=config.lead_hard_reject_keywords,
+                client=self._kwork_project_client(),
+                attachment_builder=build_attachment_report,
+                config=config,
+                output_dir=config.database_path.parent / "attachments" / f"post_{lead.post_id}",
             )
         except Exception as exc:
             self.write_log(f"=== Переоценка AI #{lead.id}: ошибка: {exc} ===\n")
             self.root.after(0, lambda: self.status_var.set(f"Переоценка AI #{lead.id}: ошибка"))
         else:
-            decision = "подходит" if result.accepted else "не подходит"
-            self.write_log(f"=== Переоценка AI #{lead.id}: {decision}, score {result.score} ===\n")
+            decision = "подходит" if outcome.result.accepted else "не подходит"
+            file_suffix = f", файлов: {len(outcome.attachment_reports)}" if outcome.attachment_reports else ""
+            self.write_log(f"=== Переоценка AI #{lead.id}: {decision}, score {outcome.result.score}{file_suffix} ===\n")
             self.root.after(
                 0,
-                lambda: self.status_var.set(f"Переоценка AI #{lead.id}: {decision}, score {result.score}"),
+                lambda: self.status_var.set(f"Переоценка AI #{lead.id}: {decision}, score {outcome.result.score}{file_suffix}"),
             )
         finally:
             self.root.after(0, self._finish_rejudge)
@@ -1818,12 +1823,121 @@ def _rejudge_existing_lead(
     return result
 
 
+def _refresh_and_rejudge_existing_lead(
+    storage: Storage,
+    lead: Lead,
+    *,
+    client,
+    attachment_builder,
+    config,
+    output_dir: Path,
+    judge=None,
+    summary_builder=None,
+) -> LiveRejudgeOutcome:
+    """Read the current Kwork card and files, then refresh only its AI assessment."""
+    from app.attachments import AttachmentProcessingResult
+
+    project_info = client.inspect(lead.contact)
+    storage.update_lead_live_status(
+        lead.id,
+        response_count=project_info.response_count,
+        reason=project_info.reason,
+    )
+    if project_info.is_unavailable:
+        raise RuntimeError(project_info.reason or "Kwork заказ недоступен")
+
+    lead_context = _live_lead_context(lead, project_info)
+    attachment_result = AttachmentProcessingResult(context="", reports=())
+    if project_info.attachments:
+        attachment_result = attachment_builder(
+            project_info.attachments,
+            cookie=config.kwork_cookie,
+            use_browser=config.kwork_use_browser,
+            cdp_url=config.kwork_cdp_url,
+            browser_profile_dir=config.kwork_browser_profile_dir,
+            output_dir=output_dir,
+            lead_context=lead_context,
+            deepseek_api_key=config.deepseek_api_key,
+            deepseek_model=config.deepseek_model,
+            openrouter_api_key=config.openrouter_api_key,
+            openrouter_base_url=config.openrouter_base_url,
+            openrouter_vision_model=config.openrouter_vision_model,
+            openrouter_vision_mode=config.openrouter_vision_mode,
+        )
+
+    source_parts = [lead_context]
+    if attachment_result.context:
+        source_parts.append("Kwork attachment contents:\n" + attachment_result.context)
+    source = "\n\n".join(part for part in source_parts if part)
+    if judge is None:
+        from app.ai_lead_judge import judge_lead
+
+        judge = judge_lead
+    if summary_builder is None:
+        from app.main import _summary_from_judge
+
+        summary_builder = _summary_from_judge
+    result = judge(
+        source,
+        api_key=config.deepseek_api_key,
+        model=config.deepseek_model,
+        min_score=config.lead_min_score,
+        max_estimated_days=config.lead_max_days,
+        accept_decisions=config.lead_accept_decisions,
+        blocked_keywords=config.lead_blocked_keywords,
+        hard_reject_keywords=config.lead_hard_reject_keywords,
+    )
+
+    summary_parts = [summary_builder(result)]
+    old_kwork_context = _preserved_assessment_context_for_marker(lead.summary, "KWORK-ДАННЫЕ:")
+    old_file_context = _preserved_assessment_context_for_marker(lead.summary, "ФАЙЛЫ/ТЗ:")
+    if project_info.facts:
+        summary_parts.append(_format_live_kwork_facts(project_info.facts))
+    elif old_kwork_context:
+        summary_parts.append(old_kwork_context)
+    if attachment_result.context:
+        summary_parts.append(attachment_result.context)
+    elif old_file_context and (project_info.facts or "ФАЙЛЫ/ТЗ:" not in old_kwork_context):
+        summary_parts.append(old_file_context)
+    storage.update_lead_assessment(
+        lead.id,
+        score=result.score,
+        summary="\n\n".join(summary_parts),
+        price_rub=lead.proposal_price_rub,
+        days=lead.proposal_days,
+    )
+    if project_info.attachments:
+        storage.replace_lead_attachments(lead.id, attachment_result.reports)
+    return LiveRejudgeOutcome(result=result, attachment_reports=attachment_result.reports)
+
+
+def _live_lead_context(lead: Lead, project_info) -> str:
+    parts = [
+        lead.post_text.strip(),
+        f"Kwork title: {project_info.title}" if project_info.title else "",
+        f"Kwork description: {project_info.description}" if project_info.description else "",
+        "Kwork facts:\n" + "\n".join(project_info.facts) if project_info.facts else "",
+        f"Kwork page text: {project_info.page_text}" if project_info.page_text else "",
+        "Kwork attachments:\n" + "\n".join(project_info.attachments) if project_info.attachments else "",
+    ]
+    return "\n\n".join(part for part in parts if part)
+
+
+def _format_live_kwork_facts(facts: tuple[str, ...]) -> str:
+    return "KWORK-ДАННЫЕ:\n" + "\n".join(f"- {fact}" for fact in facts)
+
+
 def _preserved_assessment_context(summary: str) -> str:
     positions = [summary.find(marker) for marker in PRESERVED_ASSESSMENT_CONTEXT_MARKERS]
     positions = [position for position in positions if position >= 0]
     if not positions:
         return ""
     return summary[min(positions) :].strip()
+
+
+def _preserved_assessment_context_for_marker(summary: str, marker: str) -> str:
+    position = summary.find(marker)
+    return summary[position:].strip() if position >= 0 else ""
 
 
 def build_lead_row_values(lead: Lead) -> tuple:

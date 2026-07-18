@@ -11,6 +11,7 @@ from app.gui import (
     _attachment_row_values,
     _assessment_source_from_lead,
     _rejudge_existing_lead,
+    _refresh_and_rejudge_existing_lead,
     _copy_widget_selection_to_clipboard,
     _fallback_attachments_from_summary,
     _extract_days,
@@ -40,6 +41,8 @@ from app.gui import (
     update_env_values,
 )
 from app.ai_lead_judge import LeadJudgeResult
+from app.attachments import AttachmentProcessingResult, AttachmentReport
+from app.kwork_client import KworkProjectInfo
 from app.storage import Lead, LeadAttachment, PostRejection, Storage
 
 
@@ -363,6 +366,202 @@ def test_rejudge_existing_lead_keeps_kwork_facts_and_attachment_report_in_summar
     assert captured["summary"].startswith("Новая AI-оценка")
     assert "KWORK-ДАННЫЕ:" in captured["summary"]
     assert "ФАЙЛЫ/ТЗ:" in captured["summary"]
+
+
+def test_refresh_and_rejudge_reads_live_kwork_data_and_files_without_sending():
+    lead = Lead(
+        id=32,
+        post_id=18,
+        score=65,
+        summary="Старая AI-оценка",
+        draft_reply="Вручную исправленный отклик",
+        contact="https://kwork.ru/projects/32/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/32/view",
+        post_text="Старая карточка заказа",
+        proposal_price_rub=9000,
+        proposal_days=3,
+    )
+    calls = []
+
+    class Client:
+        def inspect(self, contact):
+            calls.append(("inspect", contact))
+            return KworkProjectInfo(
+                url=contact,
+                response_count=2,
+                title="Свежая правка формы",
+                description="Нужно исправить форму заявки на WordPress",
+                page_text="Осталось: 2 д. Предложений: 2. Форма не отправляет заявку.",
+                attachments=("brief.pdf: https://kwork.ru/files/brief.pdf",),
+                facts=("Осталось: 2 д.", "Предложений: 2"),
+            )
+
+    class Storage:
+        def update_lead_live_status(self, lead_id, response_count, reason):
+            calls.append(("live", lead_id, response_count, reason))
+
+        def update_lead_assessment(self, lead_id, **values):
+            calls.append(("assessment", lead_id, values))
+
+        def replace_lead_attachments(self, lead_id, attachments):
+            calls.append(("attachments", lead_id, attachments))
+
+    def attachment_builder(attachments, **kwargs):
+        calls.append(("attachment_builder", attachments, kwargs))
+        return AttachmentProcessingResult(
+            context="ФАЙЛЫ/ТЗ:\n- brief.pdf\n  Статус: скачан, текст прочитан\n  Кратко: Проверить форму заявки.",
+            reports=(
+                AttachmentReport(
+                    label="brief.pdf",
+                    url="https://kwork.ru/files/brief.pdf",
+                    local_path="C:/tmp/brief.pdf",
+                    status="скачан, текст прочитан",
+                    summary="Проверить форму заявки.",
+                    kind="pdf",
+                    opened_archive=False,
+                    ocr_scanned=False,
+                ),
+            ),
+        )
+
+    result = LeadJudgeResult(
+        accepted=True,
+        decision="accept",
+        score=90,
+        complexity="simple",
+        estimated_days=3,
+        price_rub=12000,
+        summary="Исправить форму заявки",
+        reasons=["объем понятен"],
+        risks=[],
+        questions=[],
+        draft_reply="Здравствуйте!",
+    )
+    config = SimpleNamespace(
+        kwork_cookie="",
+        kwork_use_browser=True,
+        kwork_cdp_url="http://127.0.0.1:9222",
+        kwork_browser_profile_dir="",
+        deepseek_api_key="sk-test",
+        deepseek_model="deepseek-chat",
+        openrouter_api_key="",
+        openrouter_base_url="https://openrouter.ai/api/v1",
+        openrouter_vision_model="",
+        openrouter_vision_mode="smart",
+        lead_min_score=60,
+        lead_max_days=7,
+        lead_accept_decisions=("accept", "maybe"),
+        lead_blocked_keywords=("bitrix",),
+        lead_hard_reject_keywords=(),
+    )
+
+    outcome = _refresh_and_rejudge_existing_lead(
+        Storage(),
+        lead,
+        client=Client(),
+        attachment_builder=attachment_builder,
+        config=config,
+        output_dir=Path("C:/tmp/attachments/post_18"),
+        judge=lambda *_args, **_kwargs: result,
+        summary_builder=lambda _result: "Новая AI-оценка",
+    )
+
+    assert outcome.result.score == 90
+    assert calls[0] == ("inspect", "https://kwork.ru/projects/32/view")
+    assert ("live", 32, 2, "") in calls
+    source = next(item[2]["lead_context"] for item in calls if item[0] == "attachment_builder")
+    assert "Свежая правка формы" in source
+    assessment = next(item[2] for item in calls if item[0] == "assessment")
+    assert "KWORK-ДАННЫЕ:" in assessment["summary"]
+    assert "ФАЙЛЫ/ТЗ:" in assessment["summary"]
+    assert assessment["price_rub"] == 9000
+    assert assessment["days"] == 3
+    assert any(item[0] == "attachments" for item in calls)
+    assert not any(item[0] == "send" for item in calls)
+
+
+def test_refresh_and_rejudge_keeps_prior_file_report_when_kwork_hides_attachments():
+    lead = Lead(
+        id=33,
+        post_id=19,
+        score=65,
+        summary=(
+            "AI: accept\nЗадача: Старая оценка\n\n"
+            "ФАЙЛЫ/ТЗ:\n- old-brief.pdf\n  Статус: скачан, текст прочитан"
+        ),
+        draft_reply="Старый отклик",
+        contact="https://kwork.ru/projects/33/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/33/view",
+        post_text="Нужно исправить форму",
+    )
+    captured = {}
+
+    class Client:
+        def inspect(self, contact):
+            return KworkProjectInfo(
+                url=contact,
+                response_count=2,
+                title="Правки формы",
+                description="Исправить форму заявки",
+                facts=("Предложений: 2",),
+            )
+
+    class Storage:
+        def update_lead_live_status(self, *_args, **_kwargs):
+            pass
+
+        def update_lead_assessment(self, _lead_id, **values):
+            captured.update(values)
+
+        def replace_lead_attachments(self, *_args, **_kwargs):
+            pytest.fail("Нет новых файлов - предыдущие вложения не нужно заменять")
+
+    config = SimpleNamespace(
+        kwork_cookie="",
+        kwork_use_browser=True,
+        kwork_cdp_url="http://127.0.0.1:9222",
+        kwork_browser_profile_dir="",
+        deepseek_api_key="sk-test",
+        deepseek_model="deepseek-chat",
+        openrouter_api_key="",
+        openrouter_base_url="https://openrouter.ai/api/v1",
+        openrouter_vision_model="",
+        openrouter_vision_mode="smart",
+        lead_min_score=60,
+        lead_max_days=7,
+        lead_accept_decisions=("accept",),
+        lead_blocked_keywords=(),
+        lead_hard_reject_keywords=(),
+    )
+    result = LeadJudgeResult(
+        accepted=True,
+        decision="accept",
+        score=85,
+        complexity="simple",
+        estimated_days=2,
+        price_rub=0,
+        summary="Исправить форму",
+        reasons=[],
+        risks=[],
+        questions=[],
+        draft_reply="Здравствуйте!",
+    )
+
+    _refresh_and_rejudge_existing_lead(
+        Storage(),
+        lead,
+        client=Client(),
+        attachment_builder=lambda *_args, **_kwargs: pytest.fail("Нет новых вложений"),
+        config=config,
+        output_dir=Path("C:/tmp/attachments/post_19"),
+        judge=lambda *_args, **_kwargs: result,
+        summary_builder=lambda _result: "Новая AI-оценка",
+    )
+
+    assert "KWORK-ДАННЫЕ:" in captured["summary"]
+    assert "old-brief.pdf" in captured["summary"]
 
 
 def test_gui_rejudge_confirmation_starts_background_analysis_without_kwork_send(monkeypatch):
