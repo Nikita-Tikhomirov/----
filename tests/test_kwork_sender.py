@@ -154,6 +154,18 @@ def test_kwork_reply_sender_rejects_non_kwork_project_url():
         sender.send_message("https://example.com/project/1", "Здравствуйте!")
 
 
+def test_kwork_reply_sender_requires_price_and_deadline_before_opening_chrome():
+    sender = KworkReplySender()
+
+    with pytest.raises(ValueError, match="price and execution days"):
+        sender.send_reply(
+            "https://kwork.ru/projects/123/view",
+            "Здравствуйте! Готов разобраться.",
+            price_rub=None,
+            days=None,
+        )
+
+
 def test_kwork_reply_sender_preflights_live_count_before_opening_reply_form(monkeypatch):
     from app import kwork_client, kwork_source
 
@@ -181,7 +193,12 @@ def test_kwork_reply_sender_preflights_live_count_before_opening_reply_form(monk
     sender = KworkReplySender(max_responses=5)
 
     with pytest.raises(KworkProjectReplyabilityError, match=r"7.*5"):
-        sender.send_message("https://kwork.ru/projects/123/view", "Здравствуйте! Готов разобраться.")
+        sender.send_message(
+            "https://kwork.ru/projects/123/view",
+            "Здравствуйте! Готов разобраться.",
+            price_rub=3000,
+            days=3,
+        )
 
     assert chrome_actions == []
 
@@ -373,6 +390,8 @@ def test_kwork_reply_sender_confirms_submit_and_waits_for_success(monkeypatch):
     result = KworkReplySender().send_message(
         "https://kwork.ru/projects/3190074/view",
         "Здравствуйте! Сделаю аккуратно.",
+        price_rub=5000,
+        days=3,
     )
 
     assert result == "kwork-project-3190074"

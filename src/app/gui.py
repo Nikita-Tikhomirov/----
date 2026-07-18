@@ -1076,6 +1076,7 @@ class LeadFunnelGui:
             return
         try:
             payload = self._lead_payload(lead)
+            validate_kwork_form_terms(payload)
             self._save_lead_payload(lead, payload)
         except ValueError as exc:
             messagebox.showerror("Ошибка", str(exc))
@@ -1106,6 +1107,7 @@ class LeadFunnelGui:
             return
         try:
             payload = self._lead_payload(lead)
+            validate_kwork_form_terms(payload)
         except ValueError as exc:
             messagebox.showerror("Ошибка", str(exc))
             return
@@ -2403,6 +2405,17 @@ def _parse_optional_int(value: str, label: str) -> int | None:
     if number <= 0:
         raise ValueError(f"{label}: число должно быть больше 0")
     return number
+
+
+def validate_kwork_form_terms(payload: dict) -> None:
+    """Stop before opening Kwork when mandatory reply form values are missing."""
+    missing: list[str] = []
+    if not isinstance(payload.get("price"), int) or payload["price"] <= 0:
+        missing.append("цену")
+    if not isinstance(payload.get("days"), int) or payload["days"] <= 0:
+        missing.append("срок")
+    if missing:
+        raise ValueError("Перед Kwork укажи " + " и ".join(missing) + ".")
 
 
 def _kwork_price_limit(error: str) -> int | None:

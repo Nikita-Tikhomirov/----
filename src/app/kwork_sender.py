@@ -94,6 +94,12 @@ class KworkReplySender:
         clean_text = text.strip()
         if not clean_text:
             raise ValueError("Kwork reply text must not be empty")
+        extracted_terms = _extract_reply_terms(clean_text)
+        terms = ReplyTerms(
+            price_rub=price_rub if price_rub is not None else extracted_terms.price_rub,
+            days=days if days is not None else extracted_terms.days,
+        )
+        _validate_required_terms(terms)
         if self.max_responses is not None:
             self._ensure_project_is_replyable(contact)
         offer_url = _offer_url(contact)
@@ -130,11 +136,6 @@ class KworkReplySender:
                 login_message = _login_required_message(page_text, has_reply_field=has_field)
                 if login_message:
                     raise RuntimeError(login_message)
-            extracted_terms = _extract_reply_terms(clean_text)
-            terms = ReplyTerms(
-                price_rub=price_rub if price_rub is not None else extracted_terms.price_rub,
-                days=days if days is not None else extracted_terms.days,
-            )
             project_title = (title or self._project_title(ws)).strip()
             submit_result = self._fill_and_submit(ws, clean_text, terms, project_title, submit=submit)
             if not submit_result.get("ok"):
@@ -386,6 +387,12 @@ def _form_fill_errors(result: dict, terms: ReplyTerms, title: str) -> list[str]:
         ("daysFilled", "срок выполнения", terms.days is not None),
     )
     return [label for key, label, required in checks if required and key in result and not result[key]]
+
+
+def _validate_required_terms(terms: ReplyTerms) -> None:
+    """Avoid opening Chrome when Kwork's required price or deadline is missing."""
+    if terms.price_rub is None or terms.days is None:
+        raise ValueError("Kwork reply requires price and execution days")
 
 
 def _first_int(pattern: re.Pattern[str], text: str) -> int | None:

@@ -46,6 +46,7 @@ from app.gui import (
     normalize_filter_settings,
     read_env_values,
     update_env_values,
+    validate_kwork_form_terms,
 )
 from app.ai_lead_judge import LeadJudgeResult
 from app.attachments import AttachmentProcessingResult, AttachmentReport
@@ -1220,6 +1221,13 @@ def test_lead_status_labels_explain_email_approval_and_submission_state():
     assert lead_status_label("approved") == "Готов к отправке"
     assert lead_status_label("sent") == "Отклик отправлен"
     assert lead_status_label("unknown") == "unknown"
+
+
+def test_kwork_form_validation_requires_price_and_deadline_before_opening_form():
+    with pytest.raises(ValueError, match="укажи цену и срок"):
+        validate_kwork_form_terms({"title": "Доработать форму", "price": None, "days": None})
+
+    validate_kwork_form_terms({"title": "Доработать форму", "price": 5000, "days": 3})
 
 
 def test_action_queue_separates_live_over_limit_leads_from_available_work():
