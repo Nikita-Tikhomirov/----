@@ -30,6 +30,8 @@ MOSCOW_TZ = timezone(timedelta(hours=3), "МСК")
 WATCH_REFRESH_MS = 5000
 REFRESH_AFTER_LABELS = {"Сканирование", "Проверка почты"}
 BATCH_LIVE_CHECK_LIMIT = 30
+AI_DECISION_PATTERN = re.compile(r"^\s*AI:\s*(accept|maybe|reject)\b", re.IGNORECASE | re.MULTILINE)
+PRESERVED_ASSESSMENT_CONTEXT_MARKERS = ("KWORK-ДАННЫЕ:", "ФАЙЛЫ/ТЗ:")
 
 FILTER_SETTINGS = (
     ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
@@ -1802,14 +1804,26 @@ def _rejudge_existing_lead(
         blocked_keywords=blocked_keywords,
         hard_reject_keywords=hard_reject_keywords,
     )
+    summary = summary_builder(result)
+    preserved_context = _preserved_assessment_context(lead.summary)
+    if preserved_context:
+        summary = f"{summary}\n\n{preserved_context}"
     storage.update_lead_assessment(
         lead.id,
         score=result.score,
-        summary=summary_builder(result),
+        summary=summary,
         price_rub=lead.proposal_price_rub,
         days=lead.proposal_days,
     )
     return result
+
+
+def _preserved_assessment_context(summary: str) -> str:
+    positions = [summary.find(marker) for marker in PRESERVED_ASSESSMENT_CONTEXT_MARKERS]
+    positions = [position for position in positions if position >= 0]
+    if not positions:
+        return ""
+    return summary[min(positions) :].strip()
 
 
 def build_lead_row_values(lead: Lead) -> tuple:
@@ -1919,12 +1933,19 @@ def lead_send_block_reason(lead: Lead, in_flight_lead_ids: set[int], max_respons
         return "Отклик по этому лиду уже отправлен."
     if lead.id in in_flight_lead_ids:
         return "Отправка этого лида уже выполняется."
+    if _lead_ai_decision(lead) == "reject":
+        return "AI считает, что этот заказ не подходит. Переоцени лид или исправь условия отбора перед отправкой."
     if max_responses is not None and lead.live_response_count is not None and lead.live_response_count > max_responses:
         return (
             f"Kwork сейчас показывает {lead.live_response_count} откликов при лимите {max_responses}. "
             "Не отправляю отклик; сначала обнови заказ, если считаешь данные устаревшими."
         )
     return ""
+
+
+def _lead_ai_decision(lead: Lead) -> str:
+    match = AI_DECISION_PATTERN.search(lead.summary)
+    return match.group(1).lower() if match else ""
 
 
 def direct_send_confirmation(lead: Lead, payload: dict) -> str:

@@ -309,6 +309,62 @@ def test_rejudge_existing_lead_updates_assessment_without_overwriting_manual_pro
     assert "draft_reply" not in captured
 
 
+def test_rejudge_existing_lead_keeps_kwork_facts_and_attachment_report_in_summary():
+    lead = Lead(
+        id=30,
+        post_id=16,
+        score=65,
+        summary=(
+            "AI: accept\nЗадача: Старая оценка\n\n"
+            "KWORK-ДАННЫЕ:\n- Предложений: 3\n\n"
+            "ФАЙЛЫ/ТЗ:\n- brief.pdf\n  Статус: скачан, текст прочитан"
+        ),
+        draft_reply="Старый отклик",
+        contact="https://kwork.ru/projects/30/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/30/view",
+        post_text="Нужно исправить форму",
+    )
+    captured = {}
+
+    class Storage:
+        def update_lead_assessment(self, _lead_id, **values):
+            captured.update(values)
+
+    result = LeadJudgeResult(
+        accepted=True,
+        decision="accept",
+        score=88,
+        complexity="simple",
+        estimated_days=3,
+        price_rub=0,
+        summary="Исправить форму",
+        reasons=[],
+        risks=[],
+        questions=[],
+        draft_reply="Здравствуйте!",
+    )
+
+    _rejudge_existing_lead(
+        Storage(),
+        lead,
+        [],
+        api_key="sk-test",
+        model="deepseek-chat",
+        min_score=60,
+        max_days=7,
+        accept_decisions=("accept", "maybe"),
+        blocked_keywords=(),
+        hard_reject_keywords=(),
+        judge=lambda *_args, **_kwargs: result,
+        summary_builder=lambda _result: "Новая AI-оценка",
+    )
+
+    assert captured["summary"].startswith("Новая AI-оценка")
+    assert "KWORK-ДАННЫЕ:" in captured["summary"]
+    assert "ФАЙЛЫ/ТЗ:" in captured["summary"]
+
+
 def test_gui_rejudge_confirmation_starts_background_analysis_without_kwork_send(monkeypatch):
     import app.gui as gui_module
 
@@ -1070,6 +1126,24 @@ def test_direct_send_blocks_already_sent_lead():
     )
 
     assert lead_send_block_reason(lead, in_flight_lead_ids=set()) == "Отклик по этому лиду уже отправлен."
+
+
+def test_direct_send_blocks_lead_rejected_by_ai_reassessment():
+    lead = Lead(
+        id=31,
+        post_id=17,
+        score=35,
+        summary="AI: reject, сложность: too_complex\nСрок: 14 дн.",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/31/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/31/view",
+    )
+
+    reason = lead_send_block_reason(lead, in_flight_lead_ids=set())
+
+    assert "AI" in reason
+    assert "не подходит" in reason
 
 
 def test_direct_send_blocks_second_click_while_first_send_is_running():
