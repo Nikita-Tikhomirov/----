@@ -9,7 +9,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from tkinter import BOTH, DISABLED, END, NORMAL, BooleanVar, StringVar, TclError, Tk, messagebox, scrolledtext
+from tkinter import BOTH, DISABLED, END, NORMAL, StringVar, TclError, Tk, messagebox, scrolledtext
 from tkinter import ttk
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -37,6 +37,10 @@ REFRESH_AFTER_LABELS = {"Сканирование", "Проверка почты
 BATCH_LIVE_CHECK_LIMIT = 30
 AI_DECISION_PATTERN = re.compile(r"^\s*AI:\s*(accept|maybe|reject)\b", re.IGNORECASE | re.MULTILINE)
 PRESERVED_ASSESSMENT_CONTEXT_MARKERS = ("KWORK-ДАННЫЕ:", "ФАЙЛЫ/ТЗ:")
+QUEUE_VIEW_ACTIONABLE = "Доступно сейчас"
+QUEUE_VIEW_STOPPED = "Стоп-лиды"
+QUEUE_VIEW_ARCHIVE = "Архив"
+QUEUE_VIEW_OPTIONS = (QUEUE_VIEW_ACTIONABLE, QUEUE_VIEW_STOPPED, QUEUE_VIEW_ARCHIVE)
 
 
 @dataclass(frozen=True)
@@ -222,8 +226,8 @@ class LeadFunnelGui:
         self.reply_regeneration_in_flight = False
         self.rejudge_in_flight = False
         self.component_check_in_flight = False
-        self.show_archive_var = BooleanVar(value=False)
-        self.lead_queue_var = StringVar(value="Активная очередь: загрузка")
+        self.queue_view_var = StringVar(value=QUEUE_VIEW_ACTIONABLE)
+        self.lead_queue_var = StringVar(value="Доступно сейчас: загрузка")
         self.batch_live_check_in_flight = False
         self.status_var = StringVar(value=monitoring_status_text())
 
@@ -376,12 +380,15 @@ class LeadFunnelGui:
         lead_header = ttk.Frame(frame)
         lead_header.pack(fill="x")
         ttk.Label(lead_header, text="Лиды", style="Panel.TLabel", font=("Segoe UI Semibold", 14)).pack(side="left")
-        ttk.Checkbutton(
+        queue_view = ttk.Combobox(
             lead_header,
-            text="Показать архив",
-            variable=self.show_archive_var,
-            command=self.refresh_leads,
-        ).pack(side="right")
+            textvariable=self.queue_view_var,
+            values=QUEUE_VIEW_OPTIONS,
+            state="readonly",
+            width=18,
+        )
+        queue_view.pack(side="right")
+        queue_view.bind("<<ComboboxSelected>>", lambda _event: self.refresh_leads())
         ttk.Label(lead_header, textvariable=self.lead_queue_var, style="Muted.TLabel").pack(side="right", padx=(0, 14))
         ttk.Label(frame, text="Выбери лид, поправь цену, срок и текст, затем заполни или отправь отклик.", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
 
@@ -604,13 +611,30 @@ class LeadFunnelGui:
             self.write_log(f"Не удалось загрузить лиды: {exc}\n")
             return
         max_responses = self._kwork_max_responses()
-        show_archive = self.show_archive_var.get()
-        leads = all_leads if show_archive else filter_active_leads(all_leads, self._queue_max_age_hours())
+        queue_view = self.queue_view_var.get()
+        max_age_hours = self._queue_max_age_hours()
+        max_responses = self._kwork_max_responses()
+        stopped_leads = filter_stopped_leads(
+            all_leads,
+            max_age_hours=max_age_hours,
+            max_responses=max_responses,
+        )
+        if queue_view == QUEUE_VIEW_ARCHIVE:
+            leads = all_leads
+        elif queue_view == QUEUE_VIEW_STOPPED:
+            leads = stopped_leads
+        else:
+            leads = filter_actionable_leads(
+                all_leads,
+                max_age_hours=max_age_hours,
+                max_responses=max_responses,
+            )
         self.lead_queue_var.set(
             lead_queue_caption(
                 total_count=len(all_leads),
                 visible_count=len(leads),
-                show_archive=show_archive,
+                queue_view=queue_view,
+                stopped_count=len(stopped_leads),
             )
         )
         leads = rank_leads_for_action(leads, max_responses=max_responses)
@@ -2189,10 +2213,49 @@ def filter_active_leads(
     return active_leads
 
 
-def lead_queue_caption(total_count: int, visible_count: int, show_archive: bool) -> str:
-    """Explain which part of the persistent lead history is currently visible."""
-    if show_archive:
+def filter_actionable_leads(
+    leads: list[Lead],
+    max_age_hours: int,
+    max_responses: int,
+    now: datetime | None = None,
+) -> list[Lead]:
+    """Return only recent leads that can still receive a Kwork reply."""
+    return [
+        lead
+        for lead in filter_active_leads(leads, max_age_hours=max_age_hours, now=now)
+        if lead_action_priority(lead, max_responses=max_responses, now=now) != "Стоп"
+    ]
+
+
+def filter_stopped_leads(
+    leads: list[Lead],
+    max_age_hours: int,
+    max_responses: int,
+    now: datetime | None = None,
+) -> list[Lead]:
+    """Keep recently blocked leads visible without mixing them into the action queue."""
+    return [
+        lead
+        for lead in filter_active_leads(leads, max_age_hours=max_age_hours, now=now)
+        if lead_action_priority(lead, max_responses=max_responses, now=now) == "Стоп"
+    ]
+
+
+def lead_queue_caption(
+    total_count: int,
+    visible_count: int,
+    show_archive: bool | None = None,
+    *,
+    queue_view: str | None = None,
+    stopped_count: int = 0,
+) -> str:
+    """Explain which practical slice of the persistent lead history is visible."""
+    if queue_view == QUEUE_VIEW_ARCHIVE or show_archive:
         return f"Все лиды: {total_count}"
+    if queue_view == QUEUE_VIEW_STOPPED:
+        return f"Стоп-лиды: {visible_count}; всего: {total_count}"
+    if queue_view == QUEUE_VIEW_ACTIONABLE:
+        return f"Доступно сейчас: {visible_count}; стоп-лиды: {stopped_count}; всего: {total_count}"
     return f"Активная очередь: {visible_count} из {total_count}"
 
 
@@ -2259,8 +2322,12 @@ def select_leads_for_live_check(
     """Choose the current queue for a bounded, read-only Kwork status refresh."""
     if limit <= 0:
         return []
-    active_leads = filter_active_leads(leads, max_age_hours=max_age_hours, now=now)
-    actionable_leads = [lead for lead in active_leads if lead.status != "sent" and not lead.sent_at]
+    actionable_leads = filter_actionable_leads(
+        leads,
+        max_age_hours=max_age_hours,
+        max_responses=max_responses,
+        now=now,
+    )
     return rank_leads_for_action(actionable_leads, max_responses=max_responses, now=now)[:limit]
 
 

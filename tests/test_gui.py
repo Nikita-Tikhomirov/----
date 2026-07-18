@@ -36,6 +36,8 @@ from app.gui import (
     build_app_command,
     build_component_check_report,
     filter_active_leads,
+    filter_actionable_leads,
+    filter_stopped_leads,
     lead_queue_caption,
     monitoring_status_text,
     select_leads_for_live_check,
@@ -1210,6 +1212,50 @@ def test_active_queue_keeps_recent_kwork_and_sqlite_leads_but_hides_archive():
 def test_lead_queue_caption_explains_active_and_archive_views():
     assert lead_queue_caption(total_count=81, visible_count=2, show_archive=False) == "Активная очередь: 2 из 81"
     assert lead_queue_caption(total_count=81, visible_count=81, show_archive=True) == "Все лиды: 81"
+
+
+def test_action_queue_separates_live_over_limit_leads_from_available_work():
+    now = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
+    available = Lead(
+        id=1,
+        post_id=1,
+        score=76,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/1/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/1/view",
+        posted_at="2026-07-18 14:00:00",
+        live_response_count=2,
+    )
+    over_limit = Lead(
+        id=2,
+        post_id=2,
+        score=84,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/2/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/2/view",
+        posted_at="2026-07-18 14:30:00",
+        live_response_count=6,
+    )
+
+    actionable = filter_actionable_leads(
+        [available, over_limit],
+        max_age_hours=24,
+        max_responses=5,
+        now=now,
+    )
+    stopped = filter_stopped_leads(
+        [available, over_limit],
+        max_age_hours=24,
+        max_responses=5,
+        now=now,
+    )
+
+    assert [lead.id for lead in actionable] == [1]
+    assert [lead.id for lead in stopped] == [2]
 
 
 def test_action_priority_prefers_fresh_orders_with_fewer_live_responses():
