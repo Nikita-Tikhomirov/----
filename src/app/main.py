@@ -667,66 +667,115 @@ def _process_mobile_approvals_from_runtime(
         return 0
 
 
+def _scan_runtime_once(
+    storage: Storage,
+    telegram_client: PostSource,
+    lead_hub: LeadHubClient,
+    kwork_project_client: ProjectInspector,
+    config: AppConfig,
+) -> None:
+    """Run one Kwork pass and then execute any mobile-approved replies."""
+    cookie = _resolve_kwork_cookie(config)
+    scan_once(
+        storage, telegram_client, lead_hub,
+        deepseek_api_key=config.deepseek_api_key,
+        deepseek_model=config.deepseek_model,
+        openrouter_api_key=config.openrouter_api_key,
+        openrouter_base_url=config.openrouter_base_url,
+        openrouter_vision_model=config.openrouter_vision_model,
+        openrouter_vision_mode=config.openrouter_vision_mode,
+        kwork_project_client=kwork_project_client,
+        kwork_max_responses=config.kwork_max_responses,
+        kwork_cookie=cookie,
+        kwork_use_browser=config.kwork_use_browser,
+        kwork_cdp_url=config.kwork_cdp_url,
+        kwork_browser_profile_dir=config.kwork_browser_profile_dir,
+        lead_min_score=config.lead_min_score,
+        lead_max_days=config.lead_max_days,
+        lead_accept_decisions=config.lead_accept_decisions,
+        lead_blocked_keywords=config.lead_blocked_keywords,
+        lead_hard_reject_keywords=config.lead_hard_reject_keywords,
+        lead_required_keywords=config.lead_required_keywords,
+    )
+    _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
+
+
+def run_mobile_control_loop(
+    storage: Storage,
+    telegram_client: PostSource,
+    lead_hub: LeadHubClient,
+    kwork_project_client: ProjectInspector,
+    config: AppConfig,
+) -> None:
+    """Keep the local Kwork session responsive to commands from the mobile app."""
+    next_scheduled_scan = 0.0
+    poll_seconds = min(15, max(3, config.scan_interval_seconds // 12))
+    while True:
+        try:
+            monitor = lead_hub.fetch_monitor_control()
+            lead_hub.report_monitor_heartbeat(config.lead_hub_executor_id)
+            _process_mobile_approvals_from_runtime(
+                storage,
+                lead_hub,
+                config,
+                _resolve_kwork_cookie(config),
+            )
+            requested = bool(monitor.get("scan_requested"))
+            scheduled = (
+                monitor.get("desired_state") == "running"
+                and time.monotonic() >= next_scheduled_scan
+            )
+            if requested or scheduled:
+                lead_hub.report_monitor_heartbeat(
+                    config.lead_hub_executor_id,
+                    scan_event="started",
+                )
+                try:
+                    _scan_runtime_once(
+                        storage,
+                        telegram_client,
+                        lead_hub,
+                        kwork_project_client,
+                        config,
+                    )
+                except Exception as exc:
+                    logger.exception("Mobile-requested Kwork scan failed")
+                    lead_hub.report_monitor_heartbeat(
+                        config.lead_hub_executor_id,
+                        scan_event="finished",
+                        error=str(exc),
+                    )
+                else:
+                    lead_hub.report_monitor_heartbeat(
+                        config.lead_hub_executor_id,
+                        scan_event="finished",
+                    )
+                next_scheduled_scan = time.monotonic() + config.scan_interval_seconds
+        except Exception:
+            logger.exception("Mobile Kwork control poll failed")
+        time.sleep(poll_seconds)
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Telegram lead funnel")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("scan")
     subparsers.add_parser("watch")
+    subparsers.add_parser("mobile-control")
     args = parser.parse_args()
 
     config = load_config()
     storage, telegram_client, lead_hub, kwork_project_client = build_runtime(config)
 
     if args.command == "scan":
-        cookie = _resolve_kwork_cookie(config)
-        scan_once(
-            storage, telegram_client, lead_hub,
-            deepseek_api_key=config.deepseek_api_key,
-            deepseek_model=config.deepseek_model,
-            openrouter_api_key=config.openrouter_api_key,
-            openrouter_base_url=config.openrouter_base_url,
-            openrouter_vision_model=config.openrouter_vision_model,
-            openrouter_vision_mode=config.openrouter_vision_mode,
-            kwork_project_client=kwork_project_client,
-            kwork_max_responses=config.kwork_max_responses,
-            kwork_cookie=cookie,
-            kwork_use_browser=config.kwork_use_browser,
-            kwork_cdp_url=config.kwork_cdp_url,
-            kwork_browser_profile_dir=config.kwork_browser_profile_dir,
-            lead_min_score=config.lead_min_score,
-            lead_max_days=config.lead_max_days,
-            lead_accept_decisions=config.lead_accept_decisions,
-            lead_blocked_keywords=config.lead_blocked_keywords,
-            lead_hard_reject_keywords=config.lead_hard_reject_keywords,
-            lead_required_keywords=config.lead_required_keywords,
-        )
-        _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
+        _scan_runtime_once(storage, telegram_client, lead_hub, kwork_project_client, config)
+        return 0
+    if args.command == "mobile-control":
+        run_mobile_control_loop(storage, telegram_client, lead_hub, kwork_project_client, config)
         return 0
     while True:
-        cookie = _resolve_kwork_cookie(config)
-        scan_once(
-            storage, telegram_client, lead_hub,
-            deepseek_api_key=config.deepseek_api_key,
-            deepseek_model=config.deepseek_model,
-            openrouter_api_key=config.openrouter_api_key,
-            openrouter_base_url=config.openrouter_base_url,
-            openrouter_vision_model=config.openrouter_vision_model,
-            openrouter_vision_mode=config.openrouter_vision_mode,
-            kwork_project_client=kwork_project_client,
-            kwork_max_responses=config.kwork_max_responses,
-            kwork_cookie=cookie,
-            kwork_use_browser=config.kwork_use_browser,
-            kwork_cdp_url=config.kwork_cdp_url,
-            kwork_browser_profile_dir=config.kwork_browser_profile_dir,
-            lead_min_score=config.lead_min_score,
-            lead_max_days=config.lead_max_days,
-            lead_accept_decisions=config.lead_accept_decisions,
-            lead_blocked_keywords=config.lead_blocked_keywords,
-            lead_hard_reject_keywords=config.lead_hard_reject_keywords,
-            lead_required_keywords=config.lead_required_keywords,
-        )
-        _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
+        _scan_runtime_once(storage, telegram_client, lead_hub, kwork_project_client, config)
         time.sleep(config.scan_interval_seconds)
 
 

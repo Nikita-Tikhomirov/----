@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import Iterable
+from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -94,6 +95,37 @@ class LeadHubClient:
             raise RuntimeError("Lead hub returned invalid approved commands")
         return [command for command in commands if isinstance(command, dict)]
 
+    def fetch_monitor_control(self) -> dict[str, object]:
+        payload = self._request(
+            "/leads/monitor/executor",
+            query={"owner_phone": self.owner_phone},
+        )
+        monitor = payload.get("monitor")
+        if not isinstance(monitor, dict):
+            raise RuntimeError("Lead hub returned invalid monitor control")
+        return monitor
+
+    def report_monitor_heartbeat(
+        self,
+        executor_id: str,
+        *,
+        scan_event: str = "",
+        error: str = "",
+    ) -> dict[str, object]:
+        payload = self._request(
+            "/leads/monitor/heartbeat",
+            {
+                "owner_phone": self.owner_phone,
+                "executor_id": executor_id,
+                "scan_event": scan_event,
+                "error": error,
+            },
+        )
+        monitor = payload.get("monitor")
+        if not isinstance(monitor, dict):
+            raise RuntimeError("Lead hub returned invalid monitor heartbeat")
+        return monitor
+
     def claim_command(self, lead_id: int, executor_id: str) -> dict[str, object] | None:
         payload = self._request(
             "/leads/claim",
@@ -120,7 +152,13 @@ class LeadHubClient:
             },
         )
 
-    def _request(self, path: str, body: dict[str, object] | None = None) -> dict[str, object]:
+    def _request(
+        self,
+        path: str,
+        body: dict[str, object] | None = None,
+        *,
+        query: dict[str, str] | None = None,
+    ) -> dict[str, object]:
         data = None
         method = "GET"
         headers = {"X-Api-Key": self.api_key}
@@ -128,8 +166,11 @@ class LeadHubClient:
             data = json.dumps(body, ensure_ascii=False).encode("utf-8")
             method = "POST"
             headers["Content-Type"] = "application/json; charset=utf-8"
+        suffix = ""
+        if query:
+            suffix = "?" + urlencode(query)
         request = Request(
-            self.base_url.rstrip("/") + path,
+            self.base_url.rstrip("/") + path + suffix,
             data=data,
             method=method,
             headers=headers,

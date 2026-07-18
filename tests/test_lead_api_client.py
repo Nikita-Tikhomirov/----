@@ -85,3 +85,46 @@ def test_lead_hub_claims_mobile_approval_and_reports_result(monkeypatch):
         ("http://hub.test/leads/claim", "POST"),
         ("http://hub.test/leads/result", "POST"),
     ]
+
+
+def test_lead_hub_reads_mobile_monitor_command_and_reports_heartbeat(monkeypatch):
+    requests = []
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def read(self):
+            return json.dumps(self.payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    responses = [
+        {"ok": True, "monitor": {"desired_state": "running", "scan_requested": True}},
+        {"ok": True, "monitor": {"desired_state": "running", "last_seen_at": "2026-07-18T18:00:00+03:00"}},
+    ]
+
+    def fake_urlopen(request, timeout):
+        requests.append((request.full_url, request.method, request.data, timeout))
+        return Response(responses.pop(0))
+
+    monkeypatch.setattr("app.lead_api_client.urlopen", fake_urlopen)
+    client = LeadHubClient("http://hub.test", "test-key", "79679812438")
+
+    assert client.fetch_monitor_control()["scan_requested"] is True
+    client.report_monitor_heartbeat("desktop-main", scan_event="started")
+
+    assert [(url, method) for url, method, _data, _timeout in requests] == [
+        ("http://hub.test/leads/monitor/executor?owner_phone=79679812438", "GET"),
+        ("http://hub.test/leads/monitor/heartbeat", "POST"),
+    ]
+    assert json.loads(requests[1][2].decode("utf-8")) == {
+        "owner_phone": "79679812438",
+        "executor_id": "desktop-main",
+        "scan_event": "started",
+        "error": "",
+    }
