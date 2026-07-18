@@ -22,6 +22,8 @@ from app.gui import (
     _format_storage_datetime,
     _lead_title,
     _lead_row_tags,
+    lead_action_priority,
+    rank_leads_for_action,
     _kwork_price_limit,
     _parse_optional_int,
     _post_title,
@@ -1203,6 +1205,64 @@ def test_active_queue_keeps_recent_kwork_and_sqlite_leads_but_hides_archive():
     assert [lead.id for lead in visible] == [1, 2]
 
 
+def test_action_priority_prefers_fresh_orders_with_fewer_live_responses():
+    now = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
+
+    urgent = Lead(
+        id=1,
+        post_id=1,
+        score=70,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/1/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/1/view",
+        posted_at="2026-07-18 14:30:00",
+        live_response_count=1,
+    )
+    high = Lead(
+        id=2,
+        post_id=2,
+        score=80,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/2/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/2/view",
+        posted_at="2026-07-18 11:00:00",
+        live_response_count=4,
+    )
+    unknown = Lead(
+        id=3,
+        post_id=3,
+        score=90,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/3/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/3/view",
+        posted_at="2026-07-18 14:00:00",
+    )
+    blocked = Lead(
+        id=4,
+        post_id=4,
+        score=90,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/4/view",
+        status="emailed",
+        post_url="https://kwork.ru/projects/4/view",
+        posted_at="2026-07-18 14:00:00",
+        live_response_count=8,
+    )
+
+    assert lead_action_priority(urgent, max_responses=5, now=now) == "Срочно"
+    assert lead_action_priority(high, max_responses=5, now=now) == "Высокий"
+    assert lead_action_priority(unknown, max_responses=5, now=now) == "Проверить"
+    assert lead_action_priority(blocked, max_responses=5, now=now) == "Стоп"
+    assert [lead.id for lead in rank_leads_for_action([unknown, blocked, high, urgent], 5, now=now)] == [1, 2, 3, 4]
+
+
 def test_batch_live_check_uses_only_active_unsent_leads():
     fresh = Lead(
         id=1,
@@ -1784,6 +1844,7 @@ def test_lead_table_row_uses_kwork_card_title_and_operational_metadata():
     assert build_lead_row_values(lead) == (
         18,
         "04.05 10:30 МСК",
+        "Стоп",
         4,
         "отправлен 04.05 13:45 МСК",
         "sent",
@@ -1818,7 +1879,7 @@ def test_lead_table_prefers_live_kwork_offer_count_and_shows_check_time():
         live_reason="выше установленного лимита",
     )
 
-    assert build_lead_row_values(lead)[2] == 8
+    assert build_lead_row_values(lead)[3] == 8
     details = _lead_details_text(lead)
     assert "Проверка Kwork: 8 предложений, 18.07 05:45 МСК" in details
     assert "выше установленного лимита" in details

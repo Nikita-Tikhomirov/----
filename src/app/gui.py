@@ -374,11 +374,12 @@ class LeadFunnelGui:
 
         table_frame = ttk.Frame(frame)
         table_frame.pack(fill="x", pady=(0, 8))
-        columns = ("id", "posted", "offers", "sent", "status", "score", "price", "days", "title")
+        columns = ("id", "posted", "priority", "offers", "sent", "status", "score", "price", "days", "title")
         self.leads_table = ttk.Treeview(table_frame, columns=columns, show="headings", height=9)
         headings = {
             "id": "ID",
             "posted": "Дата",
+            "priority": "Срочность",
             "offers": "Откл.",
             "sent": "Наш отклик",
             "status": "Статус",
@@ -390,13 +391,14 @@ class LeadFunnelGui:
         widths = {
             "id": 48,
             "posted": 92,
+            "priority": 78,
             "offers": 58,
-            "sent": 132,
+            "sent": 116,
             "status": 82,
             "score": 58,
-            "price": 76,
-            "days": 48,
-            "title": 520,
+            "price": 70,
+            "days": 44,
+            "title": 420,
         }
         for column in columns:
             self.leads_table.heading(column, text=headings[column])
@@ -589,8 +591,9 @@ class LeadFunnelGui:
         except Exception as exc:
             self.write_log(f"Не удалось загрузить лиды: {exc}\n")
             return
-        leads = all_leads if self.show_archive_var.get() else filter_active_leads(all_leads, self._queue_max_age_hours())
         max_responses = self._kwork_max_responses()
+        leads = all_leads if self.show_archive_var.get() else filter_active_leads(all_leads, self._queue_max_age_hours())
+        leads = rank_leads_for_action(leads, max_responses=max_responses)
         self.lead_rows.clear()
         self.leads_table.delete(*self.leads_table.get_children())
         target_item = None
@@ -599,7 +602,7 @@ class LeadFunnelGui:
             item_id = self.leads_table.insert(
                 "",
                 END,
-                values=build_lead_row_values(lead),
+                values=build_lead_row_values(lead, max_responses=max_responses),
                 tags=_lead_row_tags(lead, max_responses=max_responses),
             )
             self.lead_rows[item_id] = lead.id
@@ -1940,11 +1943,12 @@ def _preserved_assessment_context_for_marker(summary: str, marker: str) -> str:
     return summary[position:].strip() if position >= 0 else ""
 
 
-def build_lead_row_values(lead: Lead) -> tuple:
+def build_lead_row_values(lead: Lead, max_responses: int = 5) -> tuple:
     offer_count = _extract_offer_count(lead)
     return (
         lead.id,
         _format_lead_posted_at(lead),
+        lead_action_priority(lead, max_responses=max_responses),
         offer_count if offer_count is not None else "",
         _reply_state(lead),
         lead.status,
@@ -2138,6 +2142,54 @@ def filter_active_leads(
         if activity_at is not None and activity_at >= cutoff:
             active_leads.append(lead)
     return active_leads
+
+
+def lead_action_priority(
+    lead: Lead,
+    max_responses: int,
+    now: datetime | None = None,
+) -> str:
+    """Classify how quickly an unsent lead should be handled from observable facts."""
+    if lead.status == "sent" or lead.sent_at or _lead_ai_decision(lead) == "reject":
+        return "Стоп"
+    response_count = _extract_offer_count(lead)
+    if response_count is not None and response_count > max_responses:
+        return "Стоп"
+    if response_count is None:
+        return "Проверить"
+
+    activity_at = _lead_activity_datetime(lead)
+    current_time = now or datetime.now(timezone.utc)
+    age = current_time - activity_at if activity_at is not None else None
+    if response_count <= 2 and age is not None and age <= timedelta(hours=3):
+        return "Срочно"
+    if age is None or age <= timedelta(hours=12):
+        return "Высокий"
+    return "Обычный"
+
+
+def rank_leads_for_action(
+    leads: list[Lead],
+    max_responses: int,
+    now: datetime | None = None,
+) -> list[Lead]:
+    """Put the lowest-competition, freshest actionable work at the top of the GUI queue."""
+    priority_weight = {"Срочно": 4, "Высокий": 3, "Обычный": 2, "Проверить": 1, "Стоп": 0}
+
+    def sort_key(lead: Lead) -> tuple[float, float, float, float, int]:
+        priority = lead_action_priority(lead, max_responses=max_responses, now=now)
+        response_count = _extract_offer_count(lead)
+        activity_at = _lead_activity_datetime(lead)
+        activity_timestamp = activity_at.timestamp() if activity_at is not None else float("-inf")
+        return (
+            -priority_weight[priority],
+            float(response_count) if response_count is not None else float("inf"),
+            -activity_timestamp,
+            -float(lead.score),
+            -lead.id,
+        )
+
+    return sorted(leads, key=sort_key)
 
 
 def select_leads_for_live_check(
