@@ -212,6 +212,7 @@ class LeadFunnelGui:
         self.rejudge_in_flight = False
         self.component_check_in_flight = False
         self.show_archive_var = BooleanVar(value=False)
+        self.lead_queue_var = StringVar(value="Активная очередь: загрузка")
         self.batch_live_check_in_flight = False
         self.status_var = StringVar(value="Готово")
 
@@ -370,6 +371,7 @@ class LeadFunnelGui:
             variable=self.show_archive_var,
             command=self.refresh_leads,
         ).pack(side="right")
+        ttk.Label(lead_header, textvariable=self.lead_queue_var, style="Muted.TLabel").pack(side="right", padx=(0, 14))
         ttk.Label(frame, text="Выбери лид, поправь цену, срок и текст, затем заполни или отправь отклик.", style="Muted.TLabel").pack(anchor="w", pady=(2, 10))
 
         table_frame = ttk.Frame(frame)
@@ -591,7 +593,15 @@ class LeadFunnelGui:
             self.write_log(f"Не удалось загрузить лиды: {exc}\n")
             return
         max_responses = self._kwork_max_responses()
-        leads = all_leads if self.show_archive_var.get() else filter_active_leads(all_leads, self._queue_max_age_hours())
+        show_archive = self.show_archive_var.get()
+        leads = all_leads if show_archive else filter_active_leads(all_leads, self._queue_max_age_hours())
+        self.lead_queue_var.set(
+            lead_queue_caption(
+                total_count=len(all_leads),
+                visible_count=len(leads),
+                show_archive=show_archive,
+            )
+        )
         leads = rank_leads_for_action(leads, max_responses=max_responses)
         self.lead_rows.clear()
         self.leads_table.delete(*self.leads_table.get_children())
@@ -2148,6 +2158,13 @@ def filter_active_leads(
         if activity_at is not None and activity_at >= cutoff:
             active_leads.append(lead)
     return active_leads
+
+
+def lead_queue_caption(total_count: int, visible_count: int, show_archive: bool) -> str:
+    """Explain which part of the persistent lead history is currently visible."""
+    if show_archive:
+        return f"Все лиды: {total_count}"
+    return f"Активная очередь: {visible_count} из {total_count}"
 
 
 def lead_action_priority(

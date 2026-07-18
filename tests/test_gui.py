@@ -36,6 +36,7 @@ from app.gui import (
     build_app_command,
     build_component_check_report,
     filter_active_leads,
+    lead_queue_caption,
     select_leads_for_live_check,
     build_script_command,
     normalize_filter_settings,
@@ -1203,6 +1204,11 @@ def test_active_queue_keeps_recent_kwork_and_sqlite_leads_but_hides_archive():
     )
 
     assert [lead.id for lead in visible] == [1, 2]
+
+
+def test_lead_queue_caption_explains_active_and_archive_views():
+    assert lead_queue_caption(total_count=81, visible_count=2, show_archive=False) == "Активная очередь: 2 из 81"
+    assert lead_queue_caption(total_count=81, visible_count=81, show_archive=True) == "Все лиды: 81"
 
 
 def test_action_priority_prefers_fresh_orders_with_fewer_live_responses():
