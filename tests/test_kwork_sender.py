@@ -394,6 +394,27 @@ def test_wait_after_submit_raises_when_kwork_keeps_form_open(monkeypatch):
         sender._wait_after_submit(object())
 
 
+def test_wait_after_submit_does_not_treat_project_page_with_open_form_as_sent(monkeypatch):
+    from app import kwork_source
+    from app.kwork_sender import _HAS_REPLY_FIELD_SCRIPT
+
+    project_url = "https://kwork.ru/projects/3190074/view"
+
+    def fake_evaluate(_ws, script):
+        if script == "location.href":
+            return project_url
+        if script == _HAS_REPLY_FIELD_SCRIPT:
+            return True
+        if "document.body" in script:
+            return "Описание\nСтоимость\nНазвание заказа\nСрок выполнения"
+        raise AssertionError(f"Unexpected script: {script}")
+
+    monkeypatch.setattr(kwork_source, "_evaluate", fake_evaluate)
+
+    with pytest.raises(RuntimeError, match="not confirmed as sent"):
+        KworkReplySender(timeout_seconds=0.1)._wait_after_submit(object())
+
+
 def test_confirmation_script_clicks_kwork_modal_confirmation():
     from app.kwork_sender import _CONFIRM_SUBMIT_SCRIPT
 

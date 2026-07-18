@@ -344,7 +344,7 @@ class KworkReplySender:
         deadline = time.monotonic() + min(self.timeout_seconds, 10)
         while time.monotonic() < deadline:
             current_url = str(kwork_source._evaluate(ws, "location.href") or "")
-            if _is_kwork_reply_destination(current_url):
+            if _is_kwork_inbox_url(current_url):
                 return
             text = str(kwork_source._evaluate(ws, "document.body && document.body.innerText") or "")
             lowered = text.lower()
@@ -359,6 +359,9 @@ class KworkReplySender:
                 raise RuntimeError("Kwork requires manual confirmation before sending the reply")
             if any(marker in lowered for marker in ("обязательное поле", "заполните", "ошибка")):
                 raise RuntimeError("Kwork did not accept the reply; check required fields in the opened project tab")
+            has_reply_field = bool(kwork_source._evaluate(ws, _HAS_REPLY_FIELD_SCRIPT))
+            if _is_kwork_reply_destination(current_url) and not has_reply_field:
+                return
             time.sleep(0.5)
         raise RuntimeError("Kwork reply was not confirmed as sent; check the opened tab for confirmation or errors")
 
