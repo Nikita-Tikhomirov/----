@@ -23,6 +23,8 @@ def test_lead_hub_builds_structured_kwork_payload():
         proposal_title="Верстка лендинга",
         proposal_price_rub=5000,
         proposal_days=3,
+        buyer_desired_budget_rub=2000,
+        kwork_max_price_rub=6000,
         live_response_count=2,
     )
     attachment = LeadAttachment(
@@ -44,6 +46,8 @@ def test_lead_hub_builds_structured_kwork_payload():
     assert payload["owner_phone"] == "79679812438"
     assert payload["title"] == "Верстка лендинга"
     assert payload["offer_count"] == 2
+    assert payload["buyer_desired_budget_rub"] == 2000
+    assert payload["kwork_max_price_rub"] == 6000
     assert "ТЗ.pdf" in payload["attachment_report"]
 
 

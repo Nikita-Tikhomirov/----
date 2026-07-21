@@ -52,6 +52,8 @@ class LeadHubClient:
             "proposal_title": lead.proposal_title,
             "proposal_price_rub": lead.proposal_price_rub,
             "proposal_days": lead.proposal_days,
+            "buyer_desired_budget_rub": lead.buyer_desired_budget_rub,
+            "kwork_max_price_rub": lead.kwork_max_price_rub,
             "offer_count": lead.live_response_count,
         }
 
