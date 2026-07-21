@@ -32,6 +32,8 @@ class Lead:
     proposal_title: str = ""
     proposal_price_rub: int | None = None
     proposal_days: int | None = None
+    buyer_desired_budget_rub: int | None = None
+    kwork_max_price_rub: int | None = None
     live_response_count: int | None = None
     live_checked_at: str = ""
     live_reason: str = ""
@@ -110,6 +112,8 @@ class Storage:
                     proposal_title TEXT NOT NULL DEFAULT '',
                     proposal_price_rub INTEGER,
                     proposal_days INTEGER,
+                    buyer_desired_budget_rub INTEGER,
+                    kwork_max_price_rub INTEGER,
                     live_response_count INTEGER,
                     live_checked_at TEXT NOT NULL DEFAULT '',
                     live_reason TEXT NOT NULL DEFAULT '',
@@ -187,6 +191,8 @@ class Storage:
             _ensure_column(conn, "leads", "proposal_title", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "proposal_price_rub", "INTEGER")
             _ensure_column(conn, "leads", "proposal_days", "INTEGER")
+            _ensure_column(conn, "leads", "buyer_desired_budget_rub", "INTEGER")
+            _ensure_column(conn, "leads", "kwork_max_price_rub", "INTEGER")
             _ensure_column(conn, "leads", "live_response_count", "INTEGER")
             _ensure_column(conn, "leads", "live_checked_at", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "live_reason", "TEXT NOT NULL DEFAULT ''")
@@ -295,6 +301,8 @@ class Storage:
         proposal_title: str = "",
         proposal_price_rub: int | None = None,
         proposal_days: int | None = None,
+        buyer_desired_budget_rub: int | None = None,
+        kwork_max_price_rub: int | None = None,
     ) -> int:
         with self._connect() as conn:
             existing = conn.execute(
@@ -307,9 +315,10 @@ class Storage:
                 """
                 INSERT INTO leads (
                     post_id, score, summary, draft_reply, contact,
-                    proposal_title, proposal_price_rub, proposal_days, status
+                    proposal_title, proposal_price_rub, proposal_days,
+                    buyer_desired_budget_rub, kwork_max_price_rub, status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
                 """,
                 (
                     post_id,
@@ -320,6 +329,8 @@ class Storage:
                     proposal_title.strip()[:70],
                     _optional_positive_int(proposal_price_rub, "Lead proposal price"),
                     _optional_positive_int(proposal_days, "Lead proposal days"),
+                    _optional_positive_int(buyer_desired_budget_rub, "Buyer desired budget"),
+                    _optional_positive_int(kwork_max_price_rub, "Kwork maximum price"),
                 ),
             )
             return int(cursor.lastrowid)
@@ -943,6 +954,16 @@ def _lead_from_row(row: sqlite3.Row) -> Lead:
         proposal_days=(
             int(row["proposal_days"])
             if "proposal_days" in keys and row["proposal_days"] is not None
+            else None
+        ),
+        buyer_desired_budget_rub=(
+            int(row["buyer_desired_budget_rub"])
+            if "buyer_desired_budget_rub" in keys and row["buyer_desired_budget_rub"] is not None
+            else None
+        ),
+        kwork_max_price_rub=(
+            int(row["kwork_max_price_rub"])
+            if "kwork_max_price_rub" in keys and row["kwork_max_price_rub"] is not None
             else None
         ),
         live_response_count=(

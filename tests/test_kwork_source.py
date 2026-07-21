@@ -114,6 +114,7 @@ def test_parse_kwork_project_cards_uses_embedded_wants_without_treating_kwork_co
 def test_kwork_web_source_uses_embedded_direct_html_without_waiting_for_browser_cards(monkeypatch):
     import app.kwork_source as source
 
+    fresh_created = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S")
     html = """
     <script>
       window.pageState = {
@@ -124,7 +125,7 @@ def test_kwork_web_source_uses_embedded_direct_html_without_waiting_for_browser_
                 "id": 3219004,
                 "name": "Правки лендинга",
                 "description": "Нужно поправить адаптив",
-                "date_create": "2026-07-17 23:58:00",
+                "date_create": "__FRESH_CREATED__",
                 "timeLeft": "2 д. 23 ч.",
                 "status": "active",
                 "isWantActive": true
@@ -134,7 +135,7 @@ def test_kwork_web_source_uses_embedded_direct_html_without_waiting_for_browser_
         }
       };
     </script>
-    """
+    """.replace("__FRESH_CREATED__", fresh_created)
     monkeypatch.setattr(source, "_fetch_html", lambda *args, **kwargs: html)
     monkeypatch.setattr(
         source,

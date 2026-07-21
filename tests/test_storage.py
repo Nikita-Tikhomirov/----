@@ -232,6 +232,32 @@ def test_lead_assessment_update_preserves_manual_reply_title_and_status(tmp_path
     assert lead.status == "emailed"
 
 
+def test_lead_persists_kwork_desired_budget_and_maximum(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=146,
+        post_url="https://kwork.ru/projects/146/view",
+        text="Нужно сверстать лендинг",
+        posted_at="2026-07-21T10:00:00+03:00",
+    )
+
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=80,
+        summary="Лендинг",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/146/view",
+        buyer_desired_budget_rub=2000,
+        kwork_max_price_rub=6000,
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert lead.buyer_desired_budget_rub == 2000
+    assert lead.kwork_max_price_rub == 6000
+
+
 def test_mark_failed_keeps_a_diagnostic_message_when_exception_text_is_empty(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()

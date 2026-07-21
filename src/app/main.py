@@ -271,6 +271,14 @@ def scan_once(
         if attachment_context:
             summary = "\n\n".join([summary, _shorten_attachment_report(attachment_context)])
 
+        buyer_desired_budget_rub = (
+            getattr(project_info, "buyer_desired_budget_rub", None) if project_info is not None else None
+        )
+        kwork_max_price_rub = (
+            getattr(project_info, "kwork_max_price_rub", None) if project_info is not None else None
+        )
+        proposal_price_rub = _proposal_price_from_kwork_max(kwork_max_price_rub) or judge_result.price_rub or None
+
         lead_id = storage.create_lead(
             post_id=post_id,
             score=judge_result.score,
@@ -278,8 +286,10 @@ def scan_once(
             draft_reply=draft_reply,
             contact=evaluation.contact,
             proposal_title=_proposal_title_from_text(post.text),
-            proposal_price_rub=judge_result.price_rub or None,
+            proposal_price_rub=proposal_price_rub,
             proposal_days=judge_result.estimated_days or None,
+            buyer_desired_budget_rub=buyer_desired_budget_rub,
+            kwork_max_price_rub=kwork_max_price_rub,
         )
         if project_info is not None:
             storage.update_lead_live_status(
@@ -295,6 +305,14 @@ def scan_once(
         if _deliver_new_lead(storage, lead_hub, email_client, lead):
             created += 1
     return created
+
+
+def _proposal_price_from_kwork_max(maximum_rub: int | None) -> int | None:
+    """Price a proposal 15% below Kwork's current permitted ceiling."""
+    if maximum_rub is None or maximum_rub <= 0:
+        return None
+    discounted = maximum_rub * 0.85
+    return int((discounted + 50) // 100) * 100
 
 
 def _refresh_existing_lead_live_status(

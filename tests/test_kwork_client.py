@@ -218,3 +218,22 @@ def test_parse_kwork_project_html_extracts_actionable_facts():
     assert "Предложений: 4" in result.facts
     assert "Покупатель: nikita_dev" in result.facts
     assert "Наймов: 73%" in result.facts
+
+
+def test_parse_kwork_project_html_extracts_desired_and_maximum_budget():
+    html = """
+    <html>
+      <head><title>Лендинг - Kwork</title></head>
+      <body>
+        <h1>Лендинг</h1>
+        <div>Желаемый бюджет покупателя: до 2 000 ₽</div>
+        <div>Допустимый: до 6 000 ₽</div>
+        <div>Предложений: 2</div>
+      </body>
+    </html>
+    """
+
+    result = parse_kwork_project_html("https://kwork.ru/projects/1", html)
+
+    assert result.buyer_desired_budget_rub == 2000
+    assert result.kwork_max_price_rub == 6000

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from app.main import (
+    _proposal_price_from_kwork_max,
     _proposal_title_from_text,
     _summary_from_judge,
     create_order_handoff,
@@ -23,6 +24,12 @@ class FakePost:
     url: str
     text: str
     posted_at: str
+
+
+def test_proposal_price_uses_fifteen_percent_below_kwork_maximum():
+    assert _proposal_price_from_kwork_max(6000) == 5100
+    assert _proposal_price_from_kwork_max(6150) == 5200
+    assert _proposal_price_from_kwork_max(None) is None
 
 
 class FakeTelegramClient:
@@ -107,12 +114,23 @@ class FlakyEmailClient(FakeEmailClient):
 
 
 class FakeKworkProjectClient:
-    def __init__(self, response_count=3, reason="", page_text="", attachments=(), facts=()):
+    def __init__(
+        self,
+        response_count=3,
+        reason="",
+        page_text="",
+        attachments=(),
+        facts=(),
+        buyer_desired_budget_rub=None,
+        kwork_max_price_rub=None,
+    ):
         self.response_count = response_count
         self.reason = reason
         self.page_text = page_text
         self.attachments = attachments
         self.facts = facts
+        self.buyer_desired_budget_rub = buyer_desired_budget_rub
+        self.kwork_max_price_rub = kwork_max_price_rub
         self.inspected = []
 
     def inspect(self, contact):
@@ -125,6 +143,8 @@ class FakeKworkProjectClient:
             page_text=self.page_text,
             attachments=tuple(self.attachments),
             facts=tuple(self.facts),
+            buyer_desired_budget_rub=self.buyer_desired_budget_rub,
+            kwork_max_price_rub=self.kwork_max_price_rub,
             reason=self.reason,
         )
 
@@ -531,6 +551,43 @@ def test_scan_once_persists_composed_price_free_reply(tmp_path):
     assert seen_contexts[0][0].task_summary == "Kwork project"
     assert seen_contexts[0][0].blocking_question == ""
     assert seen_contexts[0][2:] == ("sk-test", "deepseek-chat")
+
+
+def test_scan_once_prices_lead_fifteen_percent_below_kwork_maximum(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=FakeKworkProjectClient(
+            response_count=1,
+            buyer_desired_budget_rub=2000,
+            kwork_max_price_rub=6000,
+        ),
+        lead_judge=lambda *_args, **_kwargs: LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=86,
+            complexity="simple",
+            estimated_days=2,
+            price_rub=5000,
+            summary="Исправить форму",
+            reasons=["задача понятна"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте!",
+        ),
+        reply_composer=lambda _context, reply, **_kwargs: reply,
+        deepseek_api_key="sk-test",
+    )
+
+    lead = storage.list_leads(status="emailed")[0]
+    assert created == 1
+    assert lead.buyer_desired_budget_rub == 2000
+    assert lead.kwork_max_price_rub == 6000
+    assert lead.proposal_price_rub == 5100
 
 
 def test_scan_once_passes_kwork_page_details_and_attachments_to_ai_judge(tmp_path):

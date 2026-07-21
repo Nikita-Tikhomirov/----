@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 
 TAG_PATTERN = re.compile(r"<[^>]+>")
 OFFER_COUNT_PATTERN = re.compile(r"\bПредложений\s*:\s*(\d+)\b", re.IGNORECASE)
+BUDGET_AMOUNT_PATTERN = r"(?P<amount>\d[\d\s]{0,11})\s*(?:₽|руб\.?|р\b)"
+BUYER_BUDGET_PATTERN = re.compile(
+    rf"\b(?:желаем\w*\s+)?бюджет(?:\s+покупател\w*)?\s*:\s*(?:до\s*)?{BUDGET_AMOUNT_PATTERN}",
+    re.IGNORECASE,
+)
+KWORK_MAX_PRICE_PATTERN = re.compile(
+    rf"\b(?:допустим\w*|максимум|максимальн\w*(?:\s+бюджет)?)\s*(?:бюджет\w*)?\s*:\s*(?:до\s*)?{BUDGET_AMOUNT_PATTERN}",
+    re.IGNORECASE,
+)
 TITLE_PATTERN = re.compile(r"<title>(?P<title>[\s\S]*?)</title>", re.IGNORECASE)
 DESCRIPTION_PATTERN = re.compile(
     r'<meta\s+name=["\']description["\']\s+content=["\'](?P<description>[\s\S]*?)["\']',
@@ -43,6 +52,8 @@ class KworkProjectInfo:
     page_text: str = ""
     attachments: tuple[str, ...] = ()
     facts: tuple[str, ...] = ()
+    buyer_desired_budget_rub: int | None = None
+    kwork_max_price_rub: int | None = None
     reason: str = ""
 
     @property
@@ -254,6 +265,8 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
     description = _clean_text(_first_group(DESCRIPTION_PATTERN, html_text, "description"))
     attachments = tuple(_extract_attachments(url, html_text))
     facts = tuple(_extract_facts(visible_text, response_count=count_match.group(1) if count_match else ""))
+    buyer_desired_budget_rub = _extract_budget_amount(BUYER_BUDGET_PATTERN, visible_text)
+    kwork_max_price_rub = _extract_budget_amount(KWORK_MAX_PRICE_PATTERN, visible_text)
     page_text = _shorten(visible_text, 4000)
 
     if unavailable_project_message(visible_text):
@@ -265,6 +278,8 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
             page_text=page_text,
             attachments=attachments,
             facts=facts,
+            buyer_desired_budget_rub=buyer_desired_budget_rub,
+            kwork_max_price_rub=kwork_max_price_rub,
             reason=UNAVAILABLE_PROJECT_REASON,
         )
 
@@ -277,6 +292,8 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
             page_text=page_text,
             attachments=attachments,
             facts=facts,
+            buyer_desired_budget_rub=buyer_desired_budget_rub,
+            kwork_max_price_rub=kwork_max_price_rub,
             reason="на странице не найдено поле 'Предложений'",
         )
 
@@ -288,6 +305,8 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
         page_text=page_text,
         attachments=attachments,
         facts=facts,
+        buyer_desired_budget_rub=buyer_desired_budget_rub,
+        kwork_max_price_rub=kwork_max_price_rub,
     )
 
 
@@ -416,9 +435,26 @@ def _extract_facts(visible_text: str, response_count: str = "") -> list[str]:
         match = re.search(pattern, visible_text, re.IGNORECASE)
         if match:
             facts.append(_clean_text(match.group(0)))
+    buyer_budget = _extract_budget_amount(BUYER_BUDGET_PATTERN, visible_text)
+    max_price = _extract_budget_amount(KWORK_MAX_PRICE_PATTERN, visible_text)
+    if buyer_budget is not None:
+        facts.append(f"Желаемый бюджет: до {buyer_budget:,} ₽".replace(",", " "))
+    if max_price is not None:
+        facts.append(f"Допустимый максимум: до {max_price:,} ₽".replace(",", " "))
     if response_count:
         facts.append(f"Предложений: {int(response_count)}")
     return _dedupe(facts)[:8]
+
+
+def _extract_budget_amount(pattern: re.Pattern[str], text: str) -> int | None:
+    match = pattern.search(text)
+    if not match:
+        return None
+    try:
+        amount = int(match.group("amount").replace(" ", ""))
+    except ValueError:
+        return None
+    return amount if amount > 0 else None
 
 
 def _dedupe(items: list[str]) -> list[str]:
