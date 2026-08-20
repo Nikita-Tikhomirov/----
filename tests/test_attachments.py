@@ -661,20 +661,35 @@ def test_build_attachment_report_uses_ai_to_choose_zip_entries(monkeypatch, tmp_
         lambda url, cookie="", max_bytes=2_000_000: buffer.getvalue(),
     )
 
-    def fake_select_archive_entries(ref, entries, lead_context="", api_key="", model="deepseek-chat", max_entries=8):
+    def fake_select_archive_entries(
+        ref,
+        entries,
+        lead_context="",
+        api_key="",
+        model="openai/gpt-5.1",
+        base_url="https://openrouter.ai/api/v1",
+        fallback_models=(),
+        max_entries=8,
+    ):
         assert ref.label == "ТЗ.zip"
         assert [entry.name for entry in entries] == ["random-notes.txt", "brief.txt"]
         assert "форма заявки" in lead_context
-        assert api_key == "sk-test"
+        assert api_key == "sk-or-test"
+        assert model == "openai/gpt-5.1"
+        assert base_url == "https://openrouter.example/v1"
+        assert fallback_models == ("openai/gpt-4.1",)
         return ArchiveSelection(names=("brief.txt",), used_ai=True, reason="это похоже на ТЗ")
 
-    monkeypatch.setattr("app.attachments.select_archive_entries_with_deepseek", fake_select_archive_entries)
+    monkeypatch.setattr("app.attachments.select_archive_entries_with_ai", fake_select_archive_entries)
 
     result = build_attachment_report(
         ("ТЗ.zip: https://kwork.ru/files/tz.zip",),
         output_dir=tmp_path / "attachments",
         lead_context="Заказ: форма заявки на сайте",
-        deepseek_api_key="sk-test",
+        openrouter_api_key="sk-or-test",
+        openrouter_base_url="https://openrouter.example/v1",
+        openrouter_analysis_model="openai/gpt-5.1",
+        openrouter_fallback_models=("openai/gpt-4.1",),
     )
 
     report = result.reports[0]

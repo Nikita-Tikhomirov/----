@@ -45,6 +45,9 @@ class AppConfig:
     deepseek_model: str = "deepseek-chat"
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_analysis_model: str = "openai/gpt-5.1"
+    openrouter_reply_model: str = "anthropic/claude-sonnet-4.5"
+    openrouter_fallback_models: tuple[str, ...] = ("openai/gpt-4.1",)
     openrouter_vision_model: str = ""
     openrouter_vision_mode: str = "smart"
 
@@ -88,6 +91,18 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", ""),
         openrouter_base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+        openrouter_analysis_model=(
+            os.getenv("OPENROUTER_ANALYSIS_MODEL", "openai/gpt-5.1").strip()
+            or "openai/gpt-5.1"
+        ),
+        openrouter_reply_model=(
+            os.getenv("OPENROUTER_REPLY_MODEL", "anthropic/claude-sonnet-4.5").strip()
+            or "anthropic/claude-sonnet-4.5"
+        ),
+        openrouter_fallback_models=_csv_env(
+            "OPENROUTER_FALLBACK_MODELS",
+            ("openai/gpt-4.1",),
+        ),
         openrouter_vision_model=os.getenv("OPENROUTER_VISION_MODEL", ""),
         openrouter_vision_mode=_vision_mode(os.getenv("OPENROUTER_VISION_MODE", "smart")),
     )

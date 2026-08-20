@@ -2,6 +2,7 @@ import re
 from unittest.mock import MagicMock, patch
 
 from app.ai_lead_judge import _build_prompt, judge_lead, parse_judge_response, sanitize_customer_reply
+from app.llm_client import OpenRouterResult
 
 
 def test_parse_judge_response_accepts_medium_week_task():
@@ -34,8 +35,9 @@ def test_parse_judge_response_accepts_medium_week_task():
 def test_judge_prompt_keeps_questions_internal_and_out_of_customer_draft():
     prompt = _build_prompt("Нужно исправить форму заявки на сайте.").lower()
 
-    assert "вопросы нужны только как внутренняя заметка" in prompt
-    assert "в draft_reply вопросов быть не должно" in prompt
+    assert "blocking_question обычно оставляй пустой строкой" in prompt
+    assert "только если без ответа невозможно" in prompt
+    assert "никаких других вопросов" in prompt
 
 
 def test_parse_judge_response_keeps_customer_goal_and_fact_grounded_work_plan():
@@ -56,6 +58,7 @@ def test_parse_judge_response_keeps_customer_goal_and_fact_grounded_work_plan():
       "reasons": ["понятный результат", "реально сделать за неделю с AI"],
       "risks": ["нужно проверить доступы"],
       "questions": ["Есть ли доступ к админке WordPress?"],
+      "blocking_question": "Куда должны поступать заявки?",
       "draft_reply": "Здравствуйте! Посмотрел задачу, могу взяться."
     }
     """
@@ -68,6 +71,32 @@ def test_parse_judge_response_keeps_customer_goal_and_fact_grounded_work_plan():
         "Внести правки в шаблон и стили WordPress",
         "Протестировать сценарий заявки на мобильном и десктопе",
     ]
+    assert result.blocking_question == "Куда должны поступать заявки?"
+
+
+def test_parse_judge_response_leaves_non_blocking_question_out_of_customer_reply_context():
+    raw = """
+    {
+      "decision": "accept",
+      "score": 90,
+      "complexity": "simple",
+      "estimated_days": 2,
+      "price_rub": 7000,
+      "summary": "Исправить форму заявки",
+      "customer_goal": "Получать заявки с лендинга",
+      "work_plan": ["Проверить форму", "Исправить отправку", "Протестировать"],
+      "reasons": ["задача ясна"],
+      "risks": [],
+      "questions": ["Можно узнать цвет кнопки?"],
+      "blocking_question": "",
+      "draft_reply": "Здравствуйте! Исправлю форму и проверю отправку."
+    }
+    """
+
+    result = parse_judge_response(raw)
+
+    assert result.questions == ["Можно узнать цвет кнопки?"]
+    assert result.blocking_question == ""
 
 
 def test_parse_judge_response_rejects_scope_longer_than_one_week():
@@ -134,6 +163,47 @@ def test_judge_lead_uses_deepseek_json_verdict():
     assert result.score == 72
     assert result.price_rub == 22000
     assert "калькулятор" in result.draft_reply.lower()
+
+
+def test_judge_lead_routes_analysis_through_openrouter_with_fallbacks():
+    raw = """
+    {
+      "decision": "accept",
+      "score": 88,
+      "complexity": "simple",
+      "estimated_days": 2,
+      "price_rub": 9000,
+      "summary": "Исправить форму заявки",
+      "customer_goal": "Получать заявки без потерь",
+      "work_plan": ["Проверить обработчик", "Исправить отправку", "Протестировать"],
+      "reasons": ["понятный результат"],
+      "risks": [],
+      "questions": [],
+      "blocking_question": "",
+      "draft_reply": "Здравствуйте! Исправлю форму и проверю отправку заявок."
+    }
+    """
+    with patch(
+        "app.ai_lead_judge.openrouter_chat",
+        return_value=OpenRouterResult(content=raw, model="openai/gpt-5.1"),
+    ) as chat:
+        result = judge_lead(
+            "Нужно исправить форму заявки.",
+            api_key="or-test",
+            base_url="https://openrouter.example/v1",
+            model="openai/gpt-5.1",
+            fallback_models=("anthropic/claude-sonnet-4.5", "openai/gpt-4.1"),
+        )
+
+    assert result.customer_goal == "Получать заявки без потерь"
+    assert result.blocking_question == ""
+    call = chat.call_args.kwargs
+    assert call["base_url"] == "https://openrouter.example/v1"
+    assert call["primary_model"] == "openai/gpt-5.1"
+    assert call["fallback_models"] == (
+        "anthropic/claude-sonnet-4.5",
+        "openai/gpt-4.1",
+    )
 
 
 def test_judge_lead_applies_configurable_thresholds_to_ai_result():
@@ -308,6 +378,8 @@ def test_build_prompt_demands_specific_human_kwork_reply():
     assert "конкретный следующий шаг" in prompt
     assert "не указывай цену" in prompt.lower()
     assert "не начинай с «я правильно понимаю»" in prompt.lower()
+    assert '"blocking_question"' in prompt
+    assert "обычно оставляй пустой строкой" in prompt.lower()
 
 
 def test_build_prompt_allows_explicit_technical_payment_scope():

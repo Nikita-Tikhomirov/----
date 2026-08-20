@@ -1,7 +1,8 @@
 import re
 from dataclasses import replace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
+from app.llm_client import OpenRouterResult
 from app.reply_composer import (
     ReplyDraftContext,
     _redacted_facts,
@@ -21,6 +22,13 @@ def _form_context() -> ReplyDraftContext:
         ),
         attachment_context="ТЗ: на скрине показана форма и кнопка отправки.",
         estimated_days=2,
+        customer_goal="Получать заявки с мобильной версии лендинга без потерь",
+        work_plan=(
+            "Проверить валидацию и обработчик отправки формы",
+            "Исправить логику формы и адаптив блока",
+            "Протестировать отправку на мобильном и в основных браузерах",
+        ),
+        risks=("В ТЗ не указан конечный получатель заявки",),
     )
 
 
@@ -42,31 +50,40 @@ def test_composer_replaces_commercial_generic_seed_with_task_focused_fallback():
     assert len(reply) >= 260
 
 
-def test_composer_redacts_budget_before_calling_deepseek_and_keeps_good_reply():
+def test_composer_redacts_budget_before_calling_openrouter_and_keeps_good_reply():
     good_reply = (
         "Здравствуйте! По задаче вижу, что форма заявки на лендинге не отправляется на мобильных. "
         "Проверю текущую валидацию и обработку отправки, затем внесу правки и приведу блок к адаптивному виду. "
         "После этого протестирую сценарий на телефоне и в основных браузерах, чтобы заявки доходили стабильно. "
         "На работу ориентируюсь на 2 дня и могу приступить сразу."
     )
-    mock_client = MagicMock()
-    writer_choice = MagicMock()
-    writer_choice.message.content = good_reply
-    reviewer_choice = MagicMock()
-    reviewer_choice.message.content = '{"approved": true, "issues": []}'
-    mock_client.chat.completions.create.side_effect = [
-        MagicMock(choices=[writer_choice]),
-        MagicMock(choices=[reviewer_choice]),
-    ]
+    with patch(
+        "app.reply_composer.openrouter_chat",
+        side_effect=[
+            OpenRouterResult(content=good_reply, model="anthropic/claude-sonnet-4.5"),
+            OpenRouterResult(
+                content='{"approved": true, "issues": []}',
+                model="anthropic/claude-sonnet-4.5",
+            ),
+        ],
+    ) as gateway:
+        reply = compose_customer_reply(
+            _form_context(),
+            "",
+            api_key="sk-test",
+            model="anthropic/claude-sonnet-4.5",
+            base_url="https://openrouter.example/v1",
+            fallback_models=("openai/gpt-4.1",),
+        )
 
-    with patch("openai.OpenAI", return_value=mock_client):
-        reply = compose_customer_reply(_form_context(), "", api_key="sk-test")
-
-    writer_prompt = mock_client.chat.completions.create.call_args_list[0].kwargs["messages"][1]["content"].lower()
+    writer_prompt = gateway.call_args_list[0].kwargs["messages"][1]["content"].lower()
     assert "5000" not in writer_prompt
     assert "бюджет" not in writer_prompt
     assert "руб" not in writer_prompt
     assert reply == good_reply
+    assert gateway.call_args_list[0].kwargs["primary_model"] == "anthropic/claude-sonnet-4.5"
+    assert gateway.call_args_list[0].kwargs["fallback_models"] == ("openai/gpt-4.1",)
+    assert gateway.call_args_list[0].kwargs["base_url"] == "https://openrouter.example/v1"
 
 
 def test_composer_repairs_reply_rejected_by_ai_reviewer():
@@ -76,24 +93,24 @@ def test_composer_repairs_reply_rejected_by_ai_reviewer():
         "После изменений протестирую отправку в основных браузерах и покажу готовый работающий сценарий. "
         "На работу потребуется до 2 дней, могу приступить сразу."
     )
-    mock_client = MagicMock()
-    writer_choice = MagicMock()
-    writer_choice.message.content = "Здравствуйте! Готов помочь, обсудим детали."
-    reviewer_choice = MagicMock()
-    reviewer_choice.message.content = '{"approved": false, "issues": ["нет конкретных действий"]}'
-    repair_choice = MagicMock()
-    repair_choice.message.content = repaired_reply
-    mock_client.chat.completions.create.side_effect = [
-        MagicMock(choices=[writer_choice]),
-        MagicMock(choices=[reviewer_choice]),
-        MagicMock(choices=[repair_choice]),
-    ]
-
-    with patch("openai.OpenAI", return_value=mock_client):
+    with patch(
+        "app.reply_composer.openrouter_chat",
+        side_effect=[
+            OpenRouterResult(
+                content="Здравствуйте! Готов помочь, обсудим детали.",
+                model="anthropic/claude-sonnet-4.5",
+            ),
+            OpenRouterResult(
+                content='{"approved": false, "issues": ["нет конкретных действий"]}',
+                model="anthropic/claude-sonnet-4.5",
+            ),
+            OpenRouterResult(content=repaired_reply, model="anthropic/claude-sonnet-4.5"),
+        ],
+    ) as gateway:
         reply = compose_customer_reply(_form_context(), "", api_key="sk-test")
 
     assert reply == repaired_reply
-    assert mock_client.chat.completions.create.call_count == 3
+    assert gateway.call_count == 3
 
 
 def test_quality_gate_marks_ai_and_multiple_questions_as_unsafe():
@@ -243,6 +260,15 @@ def test_writer_prompt_forbids_questions_without_blocking_question():
     assert "не оценивай навыки заказчика" in prompt
 
 
+def test_writer_prompt_uses_customer_goal_and_fact_grounded_plan():
+    prompt = _writer_prompt(_form_context()).lower()
+
+    assert "цель клиента: получать заявки" in prompt
+    assert "проверить валидацию и обработчик" in prompt
+    assert "исправить логику формы" in prompt
+    assert "риски: в тз не указан" in prompt
+
+
 def test_composer_falls_back_when_provider_keeps_prohibited_clarification():
     unsafe_reply = (
         "Здравствуйте! Вижу проблему с отправкой формы заявки на мобильных и адаптивом лендинга. "
@@ -251,20 +277,17 @@ def test_composer_falls_back_when_provider_keeps_prohibited_clarification():
         "После этого протестирую сценарий на телефоне и в основных браузерах. "
         "Готов приступить сразу."
     )
-    mock_client = MagicMock()
-    writer_choice = MagicMock()
-    writer_choice.message.content = unsafe_reply
-    reviewer_choice = MagicMock()
-    reviewer_choice.message.content = '{"approved": true, "issues": []}'
-    repair_choice = MagicMock()
-    repair_choice.message.content = unsafe_reply
-    mock_client.chat.completions.create.side_effect = [
-        MagicMock(choices=[writer_choice]),
-        MagicMock(choices=[reviewer_choice]),
-        MagicMock(choices=[repair_choice]),
-    ]
-
-    with patch("openai.OpenAI", return_value=mock_client):
+    with patch(
+        "app.reply_composer.openrouter_chat",
+        side_effect=[
+            OpenRouterResult(content=unsafe_reply, model="anthropic/claude-sonnet-4.5"),
+            OpenRouterResult(
+                content='{"approved": true, "issues": []}',
+                model="anthropic/claude-sonnet-4.5",
+            ),
+            OpenRouterResult(content=unsafe_reply, model="anthropic/claude-sonnet-4.5"),
+        ],
+    ):
         reply = compose_customer_reply(_form_context(), "", api_key="sk-test")
 
     assert "напишите, куда" not in reply.lower()
@@ -513,6 +536,16 @@ def test_quality_gate_rejects_robotic_intro_and_unfounded_guarantee():
 
     assert "robotic phrasing" in issues
     assert "unfounded guarantee" in issues
+
+
+def test_quality_gate_rejects_absolute_device_coverage_promise():
+    reply = (
+        "Здравствуйте! Проверю обработчик формы и воспроизведу ошибку отправки на мобильном. "
+        "Исправлю причину сбоя и протестирую форму на основных разрешениях. "
+        "После этого форма будет стабильно отправлять заявки с любых устройств."
+    )
+
+    assert "unfounded guarantee" in reply_quality_issues(reply, _form_context())
 
 
 def test_writer_prompt_requires_a_human_specific_opening():

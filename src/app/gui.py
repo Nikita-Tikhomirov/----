@@ -79,6 +79,9 @@ FILTER_SETTINGS = (
         "",
     ),
     ("LEAD_REQUIRED_KEYWORDS", "Обязательные слова (можно пусто)", ""),
+    ("OPENROUTER_ANALYSIS_MODEL", "Модель анализа заказа", "openai/gpt-5.1"),
+    ("OPENROUTER_REPLY_MODEL", "Модель текста отклика", "anthropic/claude-sonnet-4.5"),
+    ("OPENROUTER_FALLBACK_MODELS", "Резервные модели", "openai/gpt-4.1"),
     ("KWORK_PROJECTS_URL", "Страница Kwork", "https://kwork.ru/projects?c=11"),
 )
 
@@ -155,13 +158,17 @@ def build_component_check_report(
                 else:
                     lines.append("Tesseract OCR: готов (rus, eng)")
 
-    deepseek_model = values.get("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
-    if values.get("DEEPSEEK_API_KEY", "").strip():
-        lines.append(f"DeepSeek: настроен ({deepseek_model})")
+    text_key = values.get("OPENROUTER_API_KEY", "").strip()
+    analysis_model = values.get("OPENROUTER_ANALYSIS_MODEL", "openai/gpt-5.1").strip()
+    reply_model = values.get("OPENROUTER_REPLY_MODEL", "anthropic/claude-sonnet-4.5").strip()
+    if text_key and analysis_model and reply_model:
+        lines.append(f"OpenRouter text: настроен ({analysis_model} -> {reply_model})")
+    elif not text_key:
+        lines.append("OpenRouter text: ключ не настроен")
     else:
-        lines.append("DeepSeek: ключ не настроен")
+        lines.append("OpenRouter text: модели не настроены")
 
-    vision_key = values.get("OPENROUTER_API_KEY", "").strip()
+    vision_key = text_key
     vision_model = values.get("OPENROUTER_VISION_MODEL", "").strip()
     vision_mode = values.get("OPENROUTER_VISION_MODE", "smart").strip().lower() or "smart"
     if vision_key and vision_model and vision_mode != "off":
@@ -188,7 +195,7 @@ def component_readiness_summary(report: str) -> tuple[str, str]:
 
     required_errors = any(
         line.startswith("tesseract ocr:") and any(marker in line for marker in ("ошибка", "не найден", "не хватает"))
-        or line.startswith("deepseek:") and not is_configured(line)
+        or line.startswith("openrouter text:") and not is_configured(line)
         for line in lines
     )
     if required_errors:
@@ -644,7 +651,7 @@ class LeadFunnelGui:
         command, env = build_app_command("scan")
         self._run_once(command, env, "Сканирование")
 
-    def refresh_leads(self) -> None:
+    def refresh_leads(self, force_details: bool = False) -> None:
         try:
             storage = self._storage()
             all_leads = storage.list_leads()
@@ -697,10 +704,15 @@ class LeadFunnelGui:
         if target_item is None and children:
             target_item = children[0]
         if target_item is not None:
+            target_lead_id = self.lead_rows.get(target_item)
+            should_reload_details = force_details or target_lead_id != self.current_lead_id
+            if force_details:
+                self.current_lead_id = None
             self.leads_table.selection_set(target_item)
             self.leads_table.focus(target_item)
             self.leads_table.see(target_item)
-            self.on_lead_select()
+            if should_reload_details:
+                self.on_lead_select()
         else:
             self._clear_lead_details()
         self.refresh_rejections()
@@ -772,6 +784,8 @@ class LeadFunnelGui:
             return
         lead_id = self.lead_rows.get(selected[0])
         if lead_id is None:
+            return
+        if lead_id == self.current_lead_id:
             return
         try:
             lead = self._storage().get_lead(lead_id)
@@ -929,8 +943,8 @@ class LeadFunnelGui:
             )
             return
         config = load_config()
-        if not config.deepseek_api_key:
-            messagebox.showwarning("Переоценка AI", "Для переоценки нужен настроенный ключ DeepSeek.")
+        if not getattr(config, "openrouter_api_key", "") and not config.deepseek_api_key:
+            messagebox.showwarning("Переоценка AI", "Для переоценки нужен настроенный ключ OpenRouter.")
             return
         if not messagebox.askyesno(
             "Переоценить AI",
@@ -977,7 +991,7 @@ class LeadFunnelGui:
     def _finish_rejudge(self) -> None:
         self.rejudge_in_flight = False
         self.rejudge_button.config(state=NORMAL)
-        self.refresh_leads()
+        self.refresh_leads(force_details=True)
 
     def _kwork_project_client(self):
         from app.kwork_client import KworkProjectClient
@@ -1018,7 +1032,15 @@ class LeadFunnelGui:
         self.write_log(f"=== Пересборка отклика #{lead.id}: старт ===\n")
         threading.Thread(
             target=self._regenerate_reply_thread,
-            args=(lead.id, context, seed_reply, config.deepseek_api_key, config.deepseek_model),
+            args=(
+                lead.id,
+                context,
+                seed_reply,
+                config.openrouter_api_key or config.deepseek_api_key,
+                config.openrouter_reply_model if config.openrouter_api_key else config.deepseek_model,
+                config.openrouter_base_url if config.openrouter_api_key else "https://api.deepseek.com/v1",
+                config.openrouter_fallback_models if config.openrouter_api_key else (),
+            ),
             daemon=True,
         ).start()
 
@@ -1029,9 +1051,18 @@ class LeadFunnelGui:
         seed_reply: str,
         api_key: str,
         model: str,
+        base_url: str = "https://openrouter.ai/api/v1",
+        fallback_models: tuple[str, ...] = (),
     ) -> None:
         try:
-            reply = compose_customer_reply(context, seed_reply, api_key=api_key, model=model)
+            reply = compose_customer_reply(
+                context,
+                seed_reply,
+                api_key=api_key,
+                model=model,
+                base_url=base_url,
+                fallback_models=fallback_models,
+            )
         except Exception as exc:
             self.write_log(f"=== Пересборка отклика #{lead_id}: ошибка: {exc} ===\n")
             self.root.after(0, lambda: self.status_var.set(f"Пересборка отклика #{lead_id}: ошибка"))
@@ -1890,14 +1921,28 @@ def _reply_context_from_lead(
         for attachment in attachments
         if attachment.label.strip() and (attachment.summary or attachment.status).strip()
     )
-    task_summary = title.strip() or _lead_title(lead) or "вашу задачу"
+    task_summary = _assessment_value(lead.summary, "Задача") or title.strip() or _lead_title(lead) or "вашу задачу"
     return ReplyDraftContext(
         title=title,
         task_summary=task_summary,
         source_text=lead.post_text.strip(),
         attachment_context=attachment_context,
         estimated_days=max(1, days),
+        blocking_question=_assessment_value(lead.summary, "Вопрос перед стартом"),
+        customer_goal=_assessment_value(lead.summary, "Боль клиента"),
+        work_plan=_assessment_items(lead.summary, "План работ"),
+        risks=_assessment_items(lead.summary, "Риски"),
     )
+
+
+def _assessment_value(summary: str, label: str) -> str:
+    match = re.search(rf"^{re.escape(label)}:\s*(.+)$", summary, re.IGNORECASE | re.MULTILINE)
+    return " ".join(match.group(1).split()).strip() if match else ""
+
+
+def _assessment_items(summary: str, label: str) -> tuple[str, ...]:
+    value = _assessment_value(summary, label)
+    return tuple(item.strip() for item in value.split(";") if item.strip())[:5]
 
 
 def _assessment_source_from_lead(lead: Lead, attachments: list[LeadAttachment]) -> str:
@@ -1923,6 +1968,8 @@ def _rejudge_existing_lead(
     *,
     api_key: str,
     model: str,
+    base_url: str = "https://openrouter.ai/api/v1",
+    fallback_models: tuple[str, ...] = (),
     min_score: int,
     max_days: int,
     accept_decisions: tuple[str, ...],
@@ -1945,6 +1992,8 @@ def _rejudge_existing_lead(
         _assessment_source_from_lead(lead, attachments),
         api_key=api_key,
         model=model,
+        base_url=base_url,
+        fallback_models=fallback_models,
         min_score=min_score,
         max_estimated_days=max_days,
         accept_decisions=accept_decisions,
@@ -2003,6 +2052,8 @@ def _refresh_and_rejudge_existing_lead(
             deepseek_model=config.deepseek_model,
             openrouter_api_key=config.openrouter_api_key,
             openrouter_base_url=config.openrouter_base_url,
+            openrouter_analysis_model=getattr(config, "openrouter_analysis_model", "openai/gpt-5.1"),
+            openrouter_fallback_models=getattr(config, "openrouter_fallback_models", ()),
             openrouter_vision_model=config.openrouter_vision_model,
             openrouter_vision_mode=config.openrouter_vision_mode,
         )
@@ -2019,10 +2070,17 @@ def _refresh_and_rejudge_existing_lead(
         from app.main import _summary_from_judge
 
         summary_builder = _summary_from_judge
+    openrouter_key = config.openrouter_api_key.strip()
     result = judge(
         source,
-        api_key=config.deepseek_api_key,
-        model=config.deepseek_model,
+        api_key=openrouter_key or config.deepseek_api_key,
+        model=(
+            getattr(config, "openrouter_analysis_model", "openai/gpt-5.1")
+            if openrouter_key
+            else config.deepseek_model
+        ),
+        base_url=(config.openrouter_base_url if openrouter_key else "https://api.deepseek.com/v1"),
+        fallback_models=(getattr(config, "openrouter_fallback_models", ()) if openrouter_key else ()),
         min_score=config.lead_min_score,
         max_estimated_days=config.lead_max_days,
         accept_decisions=config.lead_accept_decisions,

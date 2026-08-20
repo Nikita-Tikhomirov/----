@@ -20,6 +20,8 @@ from typing import Callable
 from urllib.parse import urlparse
 from urllib.request import Request
 
+from app.llm_client import openrouter_chat
+
 logger = logging.getLogger(__name__)
 
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".html", ".htm", ".json", ".xml"}
@@ -108,6 +110,8 @@ def build_attachment_context(
     deepseek_model: str = "deepseek-chat",
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_analysis_model: str = "openai/gpt-5.1",
+    openrouter_fallback_models: tuple[str, ...] = (),
     openrouter_vision_model: str = "",
     openrouter_vision_mode: str = "fallback",
 ) -> str:
@@ -125,6 +129,8 @@ def build_attachment_context(
         deepseek_model=deepseek_model,
         openrouter_api_key=openrouter_api_key,
         openrouter_base_url=openrouter_base_url,
+        openrouter_analysis_model=openrouter_analysis_model,
+        openrouter_fallback_models=openrouter_fallback_models,
         openrouter_vision_model=openrouter_vision_model,
         openrouter_vision_mode=openrouter_vision_mode,
     ).context
@@ -144,6 +150,8 @@ def build_attachment_report(
     deepseek_model: str = "deepseek-chat",
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_analysis_model: str = "openai/gpt-5.1",
+    openrouter_fallback_models: tuple[str, ...] = (),
     openrouter_vision_model: str = "",
     openrouter_vision_mode: str = "fallback",
 ) -> AttachmentProcessingResult:
@@ -183,6 +191,8 @@ def build_attachment_report(
                 deepseek_model=deepseek_model,
                 openrouter_api_key=openrouter_api_key,
                 openrouter_base_url=openrouter_base_url,
+                openrouter_analysis_model=openrouter_analysis_model,
+                openrouter_fallback_models=openrouter_fallback_models,
                 openrouter_vision_model=openrouter_vision_model,
                 openrouter_vision_mode=openrouter_vision_mode,
             )
@@ -391,6 +401,8 @@ def inspect_attachment(
     deepseek_model: str = "deepseek-chat",
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_analysis_model: str = "openai/gpt-5.1",
+    openrouter_fallback_models: tuple[str, ...] = (),
     openrouter_vision_model: str = "",
     openrouter_vision_mode: str = "fallback",
 ) -> tuple[str, str]:
@@ -432,13 +444,21 @@ def inspect_attachment(
             vision_mode=vision_mode,
         )
     if ext in ARCHIVE_EXTENSIONS:
+        analysis_api_key = openrouter_api_key.strip() or deepseek_api_key.strip()
+        analysis_model = openrouter_analysis_model if openrouter_api_key.strip() else deepseek_model
+        analysis_base_url = (
+            openrouter_base_url if openrouter_api_key.strip() else "https://api.deepseek.com/v1"
+        )
+        analysis_fallback_models = openrouter_fallback_models if openrouter_api_key.strip() else ()
         return _extract_archive(
             ref,
             content,
             max_bytes=max_bytes,
             lead_context=lead_context,
-            deepseek_api_key=deepseek_api_key,
-            deepseek_model=deepseek_model,
+            analysis_api_key=analysis_api_key,
+            analysis_model=analysis_model,
+            analysis_base_url=analysis_base_url,
+            analysis_fallback_models=analysis_fallback_models,
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
             openrouter_vision_model=openrouter_vision_model,
@@ -750,8 +770,10 @@ def _extract_archive(
     content: bytes,
     max_bytes: int,
     lead_context: str,
-    deepseek_api_key: str,
-    deepseek_model: str,
+    analysis_api_key: str,
+    analysis_model: str,
+    analysis_base_url: str,
+    analysis_fallback_models: tuple[str, ...],
     openrouter_api_key: str,
     openrouter_base_url: str,
     openrouter_vision_model: str,
@@ -765,8 +787,10 @@ def _extract_archive(
                 content,
                 max_bytes=max_bytes,
                 lead_context=lead_context,
-                deepseek_api_key=deepseek_api_key,
-                deepseek_model=deepseek_model,
+                analysis_api_key=analysis_api_key,
+                analysis_model=analysis_model,
+                analysis_base_url=analysis_base_url,
+                analysis_fallback_models=analysis_fallback_models,
                 openrouter_api_key=openrouter_api_key,
                 openrouter_base_url=openrouter_base_url,
                 openrouter_vision_model=openrouter_vision_model,
@@ -778,8 +802,10 @@ def _extract_archive(
                 content,
                 max_bytes=max_bytes,
                 lead_context=lead_context,
-                deepseek_api_key=deepseek_api_key,
-                deepseek_model=deepseek_model,
+                analysis_api_key=analysis_api_key,
+                analysis_model=analysis_model,
+                analysis_base_url=analysis_base_url,
+                analysis_fallback_models=analysis_fallback_models,
                 openrouter_api_key=openrouter_api_key,
                 openrouter_base_url=openrouter_base_url,
                 openrouter_vision_model=openrouter_vision_model,
@@ -807,8 +833,10 @@ def _read_zip_archive(
     content: bytes,
     max_bytes: int,
     lead_context: str,
-    deepseek_api_key: str,
-    deepseek_model: str,
+    analysis_api_key: str,
+    analysis_model: str,
+    analysis_base_url: str,
+    analysis_fallback_models: tuple[str, ...],
     openrouter_api_key: str,
     openrouter_base_url: str,
     openrouter_vision_model: str,
@@ -825,8 +853,10 @@ def _read_zip_archive(
             lambda entry, limit: _read_zip_entry(archive, info_by_name[entry.name], limit),
             max_bytes=max_bytes,
             lead_context=lead_context,
-            deepseek_api_key=deepseek_api_key,
-            deepseek_model=deepseek_model,
+            analysis_api_key=analysis_api_key,
+            analysis_model=analysis_model,
+            analysis_base_url=analysis_base_url,
+            analysis_fallback_models=analysis_fallback_models,
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
             openrouter_vision_model=openrouter_vision_model,
@@ -845,8 +875,10 @@ def _read_external_archive(
     content: bytes,
     max_bytes: int,
     lead_context: str,
-    deepseek_api_key: str,
-    deepseek_model: str,
+    analysis_api_key: str,
+    analysis_model: str,
+    analysis_base_url: str,
+    analysis_fallback_models: tuple[str, ...],
     openrouter_api_key: str,
     openrouter_base_url: str,
     openrouter_vision_model: str,
@@ -885,8 +917,10 @@ def _read_external_archive(
             lambda entry, limit: read_entry(executable, archive_path, entry.name, limit),
             max_bytes=max_bytes,
             lead_context=lead_context,
-            deepseek_api_key=deepseek_api_key,
-            deepseek_model=deepseek_model,
+            analysis_api_key=analysis_api_key,
+            analysis_model=analysis_model,
+            analysis_base_url=analysis_base_url,
+            analysis_fallback_models=analysis_fallback_models,
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
             openrouter_vision_model=openrouter_vision_model,
@@ -904,8 +938,10 @@ def _read_archive_entries(
     *,
     max_bytes: int,
     lead_context: str,
-    deepseek_api_key: str,
-    deepseek_model: str,
+    analysis_api_key: str,
+    analysis_model: str,
+    analysis_base_url: str,
+    analysis_fallback_models: tuple[str, ...],
     openrouter_api_key: str,
     openrouter_base_url: str,
     openrouter_vision_model: str,
@@ -915,12 +951,14 @@ def _read_archive_entries(
     lines: list[str] = []
     password_protected = False
     has_read_content = False
-    selection = select_archive_entries_with_deepseek(
+    selection = select_archive_entries_with_ai(
         ref,
         entries,
         lead_context=lead_context,
-        api_key=deepseek_api_key,
-        model=deepseek_model,
+        api_key=analysis_api_key,
+        model=analysis_model,
+        base_url=analysis_base_url,
+        fallback_models=analysis_fallback_models,
         max_entries=max_entries,
     )
     selected_names = set(selection.names)
@@ -1221,12 +1259,14 @@ def _archive_entry_size_text(entry: ArchiveEntryInfo) -> str:
     return f"{entry.size} B" if entry.size is not None else "размер неизвестен"
 
 
-def select_archive_entries_with_deepseek(
+def select_archive_entries_with_ai(
     ref: AttachmentRef,
     entries: tuple[ArchiveEntryInfo, ...],
     lead_context: str = "",
     api_key: str = "",
-    model: str = "deepseek-chat",
+    model: str = "openai/gpt-5.1",
+    base_url: str = "https://openrouter.ai/api/v1",
+    fallback_models: tuple[str, ...] = (),
     max_entries: int = 8,
 ) -> ArchiveSelection:
     if not entries:
@@ -1235,9 +1275,18 @@ def select_archive_entries_with_deepseek(
     if not api_key:
         return fallback
     try:
-        names, reason = _ask_deepseek_for_archive_entries(ref, entries, lead_context, api_key, model, max_entries)
+        names, reason = _ask_ai_for_archive_entries(
+            ref,
+            entries,
+            lead_context,
+            api_key,
+            model,
+            base_url,
+            fallback_models,
+            max_entries,
+        )
     except Exception as exc:
-        logger.warning("DeepSeek archive entry selection failed for %s: %s", ref.label, exc)
+        logger.warning("AI archive entry selection failed for %s: %s", ref.label, exc)
         return ArchiveSelection(names=fallback.names, used_ai=False, reason=f"AI не сработала, fallback: {fallback.reason}")
     valid_names = _valid_archive_names(names, entries, max_entries=max_entries)
     if not valid_names:
@@ -1245,16 +1294,16 @@ def select_archive_entries_with_deepseek(
     return ArchiveSelection(names=valid_names, used_ai=True, reason=_shorten(reason, 250))
 
 
-def _ask_deepseek_for_archive_entries(
+def _ask_ai_for_archive_entries(
     ref: AttachmentRef,
     entries: tuple[ArchiveEntryInfo, ...],
     lead_context: str,
     api_key: str,
     model: str,
+    base_url: str,
+    fallback_models: tuple[str, ...],
     max_entries: int,
 ) -> tuple[tuple[str, ...], str]:
-    from openai import OpenAI
-
     entry_lines = "\n".join(
         f"- {entry.name} | {entry.kind} | {_archive_entry_size_text(entry)}" for entry in entries[:60]
     )
@@ -1268,18 +1317,20 @@ def _ask_deepseek_for_archive_entries(
         f"Контекст заказа:\n{_shorten(lead_context, 2500) or 'нет контекста'}\n\n"
         f"Файлы:\n{entry_lines}"
     )
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com/v1")
-    response = client.chat.completions.create(
-        model=model,
+    result = openrouter_chat(
+        api_key=api_key,
+        base_url=base_url,
+        primary_model=model,
+        fallback_models=fallback_models,
         messages=[
             {"role": "system", "content": "Ты аккуратный помощник, выбираешь только полезные файлы ТЗ внутри архива."},
             {"role": "user", "content": prompt},
         ],
         temperature=0,
         max_tokens=500,
+        timeout_seconds=45.0,
     )
-    content = response.choices[0].message.content or ""
-    payload = _parse_json_object(content)
+    payload = _parse_json_object(result.content)
     raw_names = payload.get("read", [])
     if not isinstance(raw_names, list):
         raw_names = []
@@ -1292,10 +1343,10 @@ def _parse_json_object(raw: str) -> dict:
     start = raw.find("{")
     end = raw.rfind("}")
     if start == -1 or end == -1 or end < start:
-        raise ValueError("DeepSeek response does not contain JSON object")
+        raise ValueError("AI response does not contain JSON object")
     payload = json.loads(raw[start : end + 1])
     if not isinstance(payload, dict):
-        raise ValueError("DeepSeek response JSON must be an object")
+        raise ValueError("AI response JSON must be an object")
     return payload
 
 

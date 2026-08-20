@@ -185,12 +185,14 @@ def test_summary_from_judge_shows_customer_goal_and_work_plan():
         draft_reply="Здравствуйте!",
         customer_goal="Чтобы заявки стабильно приходили с сайта",
         work_plan=["Проверить форму", "Исправить обработку", "Протестировать отправку"],
+        blocking_question="Куда должны поступать заявки?",
     )
 
     summary = _summary_from_judge(result)
 
     assert "Боль клиента: Чтобы заявки стабильно приходили с сайта" in summary
     assert "План работ: Проверить форму; Исправить обработку; Протестировать отправку" in summary
+    assert "Вопрос перед стартом: Куда должны поступать заявки?" in summary
 
 
 def test_scan_once_creates_lead_and_sends_email(tmp_path):
@@ -515,10 +517,13 @@ def test_scan_once_persists_composed_price_free_reply(tmp_path):
             risks=[],
             questions=["Куда должны приходить заявки после отправки формы?"],
             draft_reply="Здравствуйте! Цена 5000 руб. Уточните детали.",
+            customer_goal="Получать заявки с мобильной версии без потерь",
+            work_plan=["Проверить форму", "Исправить отправку", "Протестировать сценарий"],
+            blocking_question="Куда должны поступать заявки?",
         )
 
-    def fake_composer(context, seed_reply, api_key="", model="deepseek-chat"):
-        seen_contexts.append((context, seed_reply, api_key, model))
+    def fake_composer(context, seed_reply, **kwargs):
+        seen_contexts.append((context, seed_reply, kwargs))
         return (
             "Здравствуйте! Проверю отправку формы и адаптив лендинга, затем внесу нужные правки. "
             "После изменений протестирую сценарий на мобильных и покажу готовый результат."
@@ -534,7 +539,11 @@ def test_scan_once_persists_composed_price_free_reply(tmp_path):
         ),
         lead_judge=fake_judge,
         reply_composer=fake_composer,
-        deepseek_api_key="sk-test",
+        openrouter_api_key="sk-or-test",
+        openrouter_base_url="https://openrouter.example/v1",
+        openrouter_analysis_model="openai/gpt-5.1",
+        openrouter_reply_model="anthropic/claude-sonnet-4.5",
+        openrouter_fallback_models=("openai/gpt-4.1",),
     )
 
     assert created == 1
@@ -549,8 +558,19 @@ def test_scan_once_persists_composed_price_free_reply(tmp_path):
     assert "Бюджет" not in seen_contexts[0][0].source_text
     assert seen_contexts[0][0].task_summary != "Исправить отправку формы заявки и адаптив лендинга"
     assert seen_contexts[0][0].task_summary == "Kwork project"
-    assert seen_contexts[0][0].blocking_question == ""
-    assert seen_contexts[0][2:] == ("sk-test", "deepseek-chat")
+    assert seen_contexts[0][0].blocking_question == "Куда должны поступать заявки?"
+    assert seen_contexts[0][0].customer_goal == "Получать заявки с мобильной версии без потерь"
+    assert seen_contexts[0][0].work_plan == (
+        "Проверить форму",
+        "Исправить отправку",
+        "Протестировать сценарий",
+    )
+    assert seen_contexts[0][2] == {
+        "api_key": "sk-or-test",
+        "model": "anthropic/claude-sonnet-4.5",
+        "base_url": "https://openrouter.example/v1",
+        "fallback_models": ("openai/gpt-4.1",),
+    }
 
 
 def test_scan_once_prices_lead_fifteen_percent_below_kwork_maximum(tmp_path):

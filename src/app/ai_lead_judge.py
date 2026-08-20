@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.llm_client import openrouter_chat
 from app.reply_policy import COMMERCIAL_REPLY_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,15 @@ class LeadJudgeResult:
     draft_reply: str
     customer_goal: str = ""
     work_plan: list[str] = field(default_factory=list)
+    blocking_question: str = ""
 
 
 def judge_lead(
     text: str,
     api_key: str = "",
-    model: str = "deepseek-chat",
+    model: str = "openai/gpt-5.1",
+    base_url: str = "https://openrouter.ai/api/v1",
+    fallback_models: tuple[str, ...] = (),
     timeout_seconds: float = 45.0,
     min_score: int = 60,
     max_estimated_days: int = 7,
@@ -80,10 +84,12 @@ def judge_lead(
         return _reject(f"рискованный стек: {', '.join(hard_reject)}", text)
 
     if api_key:
-        ai_result = _judge_with_deepseek(
+        ai_result = _judge_with_openrouter(
             text=text,
             api_key=api_key,
             model=model,
+            base_url=base_url,
+            fallback_models=fallback_models,
             timeout_seconds=timeout_seconds,
         )
         if ai_result is not None:
@@ -117,6 +123,7 @@ def parse_judge_response(raw: str) -> LeadJudgeResult:
     reasons = _list_of_strings(payload.get("reasons"))[:5]
     risks = _list_of_strings(payload.get("risks"))[:5]
     questions = _list_of_strings(payload.get("questions"))[:1]
+    blocking_question = _clean_text(str(payload.get("blocking_question", "")))[:280]
     draft_reply = clean_customer_reply(
         str(payload.get("draft_reply", "")),
         summary=summary,
@@ -141,37 +148,37 @@ def parse_judge_response(raw: str) -> LeadJudgeResult:
         draft_reply=draft_reply,
         customer_goal=customer_goal,
         work_plan=work_plan,
+        blocking_question=blocking_question,
     )
 
 
-def _judge_with_deepseek(
+def _judge_with_openrouter(
     *,
     text: str,
     api_key: str,
     model: str,
+    base_url: str,
+    fallback_models: tuple[str, ...],
     timeout_seconds: float,
 ) -> LeadJudgeResult | None:
     try:
-        from openai import OpenAI
-
-        client = OpenAI(
+        result = openrouter_chat(
             api_key=api_key,
-            base_url="https://api.deepseek.com/v1",
-            timeout=timeout_seconds,
-        )
-        response = client.chat.completions.create(
-            model=model,
+            base_url=base_url,
+            primary_model=model,
+            fallback_models=fallback_models,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": _build_prompt(text)},
             ],
             temperature=0.25,
             max_tokens=1200,
+            timeout_seconds=timeout_seconds,
         )
-        content = response.choices[0].message.content or ""
-        return parse_judge_response(content)
-    except Exception:
-        logger.exception("DeepSeek lead judge failed, using fallback")
+        logger.info("OpenRouter analysis completed with model %s", result.model)
+        return parse_judge_response(result.content)
+    except Exception as exc:
+        logger.warning("OpenRouter analysis failed; using rule fallback: %s", exc)
         return None
 
 
@@ -198,6 +205,7 @@ def _fallback_judge(text: str) -> LeadJudgeResult:
         draft_reply=_fallback_reply(summary, estimated_days),
         customer_goal=summary,
         work_plan=_fallback_work_plan(text),
+        blocking_question="",
     )
 
 
@@ -237,6 +245,7 @@ def _apply_acceptance_settings(
         draft_reply=result.draft_reply,
         customer_goal=result.customer_goal,
         work_plan=result.work_plan,
+        blocking_question=result.blocking_question,
     )
 
 
@@ -264,6 +273,7 @@ def _reject(reason: str, text: str) -> LeadJudgeResult:
         risks=[reason],
         questions=[],
         draft_reply="",
+        blocking_question="",
     )
 
 
@@ -287,8 +297,10 @@ def _build_prompt(text: str) -> str:
         "Если в заказе есть блок Kwork attachments или Kwork attachment contents / ФАЙЛЫ/ТЗ, учитывай их как часть ТЗ. "
         "Если содержимое файла не удалось прочитать или это картинка без OCR, не выдумывай детали, а укажи риск. "
         "Не проси уточнить детали в целом и не пиши пустые фразы вроде «обсудим детали». "
-        "В draft_reply вопросов быть не должно: первый отклик должен показать решение и готовность начать. "
-        "Вопросы нужны только как внутренняя заметка в questions: максимум один, только если без ответа нельзя начать реализацию. "
+        "В questions укажи максимум одну внутреннюю заметку, которая может быть полезна позже. "
+        "blocking_question обычно оставляй пустой строкой. Заполни его одним коротким вопросом только если без ответа "
+        "невозможно разумно оценить объём или начать работу. Не считай блокирующими доступы, цвета, примеры, обычные детали "
+        "или информацию, которую можно проверить после начала. В draft_reply допустим только этот blocking_question и никаких других вопросов. "
         "Не начинай с «я правильно понимаю» и не повторяй весь текст заказа. "
         "Цена/бюджет нужны только для внутренней оценки и поля цены на Kwork: не указывай цену, "
         "вилку, бюджет, валюту, скидки или условия оплаты в draft_reply. "
@@ -312,6 +324,7 @@ def _build_prompt(text: str) -> str:
         '  "reasons": ["почему подходит или нет"],\n'
         '  "risks": ["риски"],\n'
         '  "questions": ["0-1 внутренняя заметка с действительно блокирующим вопросом"],\n'
+        '  "blocking_question": "пусто или один действительно блокирующий вопрос",\n'
         '  "draft_reply": "готовый отклик заказчику"\n'
         "}\n\n"
         f"Заказ:\n{text}"
@@ -333,10 +346,10 @@ def _extract_json(raw: str) -> dict[str, Any]:
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     if start == -1 or end == -1 or end < start:
-        raise ValueError("DeepSeek response does not contain JSON object")
+        raise ValueError("AI response does not contain JSON object")
     parsed = json.loads(cleaned[start : end + 1])
     if not isinstance(parsed, dict):
-        raise ValueError("DeepSeek response JSON must be an object")
+        raise ValueError("AI response JSON must be an object")
     return parsed
 
 

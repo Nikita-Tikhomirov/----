@@ -168,3 +168,37 @@ def test_load_config_reads_openrouter_vision_settings(tmp_path, monkeypatch):
     assert config.openrouter_base_url == "https://openrouter.example/v1"
     assert config.openrouter_vision_model == "provider/vision-model"
     assert config.openrouter_vision_mode == "smart"
+
+
+def test_load_config_reads_openrouter_text_models(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "TELEGRAM_API_ID=0",
+                "TELEGRAM_API_HASH=fill_later",
+                "TELEGRAM_CHANNELS=@unused",
+                "OPENROUTER_API_KEY=or-test-key",
+                "OPENROUTER_ANALYSIS_MODEL=openai/gpt-5.1",
+                "OPENROUTER_REPLY_MODEL=anthropic/claude-sonnet-4.5",
+                "OPENROUTER_FALLBACK_MODELS=openai/gpt-4.1, google/gemini-3.1-pro-preview",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for name in (
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_ANALYSIS_MODEL",
+        "OPENROUTER_REPLY_MODEL",
+        "OPENROUTER_FALLBACK_MODELS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    config = load_config(env_file)
+
+    assert config.openrouter_analysis_model == "openai/gpt-5.1"
+    assert config.openrouter_reply_model == "anthropic/claude-sonnet-4.5"
+    assert config.openrouter_fallback_models == (
+        "openai/gpt-4.1",
+        "google/gemini-3.1-pro-preview",
+    )

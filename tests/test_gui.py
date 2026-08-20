@@ -82,9 +82,9 @@ def test_component_check_report_shows_ready_ocr_ai_and_kwork_chrome(tmp_path):
     report = build_component_check_report(
         {
             "TESSERACT_CMD": str(tesseract),
-            "DEEPSEEK_API_KEY": "configured",
-            "DEEPSEEK_MODEL": "deepseek-chat",
             "OPENROUTER_API_KEY": "configured",
+            "OPENROUTER_ANALYSIS_MODEL": "openai/gpt-5.1",
+            "OPENROUTER_REPLY_MODEL": "anthropic/claude-sonnet-4.5",
             "OPENROUTER_VISION_MODEL": "qwen/qwen3.7-plus",
             "OPENROUTER_VISION_MODE": "smart",
             "KWORK_CDP_URL": "http://127.0.0.1:9222",
@@ -95,7 +95,7 @@ def test_component_check_report_shows_ready_ocr_ai_and_kwork_chrome(tmp_path):
     )
 
     assert "Tesseract OCR: готов (rus, eng)" in report
-    assert "DeepSeek: настроен (deepseek-chat)" in report
+    assert "OpenRouter text: настроен (openai/gpt-5.1 -> anthropic/claude-sonnet-4.5)" in report
     assert "OpenRouter vision: настроен (qwen/qwen3.7-plus, smart)" in report
     assert "Kwork Chrome: доступен" in report
 
@@ -113,7 +113,7 @@ def test_component_check_report_explains_missing_components(tmp_path):
     )
 
     assert f"Tesseract OCR: не найден ({missing_tesseract})" in report
-    assert "DeepSeek: ключ не настроен" in report
+    assert "OpenRouter text: ключ не настроен" in report
     assert "OpenRouter vision: ключ или модель не настроены" in report
     assert "Kwork Chrome: не запущен" in report
 
@@ -132,22 +132,22 @@ def test_component_check_report_explains_invalid_non_d_tesseract_path():
     ("report", "expected"),
     [
         (
-            "Tesseract OCR: готов (rus, eng)\nDeepSeek: настроен (deepseek-chat)\n"
+            "Tesseract OCR: готов (rus, eng)\nOpenRouter text: настроен (openai/gpt-5.1 -> anthropic/claude-sonnet-4.5)\n"
             "OpenRouter vision: настроен (qwen/qwen3.7-plus, smart)\nKwork Chrome: доступен",
             ("Компоненты: готово", "ComponentReady.TLabel"),
         ),
         (
-            "Tesseract OCR: готов (rus, eng)\nDeepSeek: настроен (deepseek-chat)\n"
+            "Tesseract OCR: готов (rus, eng)\nOpenRouter text: настроен (openai/gpt-5.1 -> anthropic/claude-sonnet-4.5)\n"
             "OpenRouter vision: настроен (qwen/qwen3.7-plus, smart)\nKwork Chrome: не запущен",
             ("Компоненты: открой Kwork Chrome", "ComponentWarning.TLabel"),
         ),
         (
-            "Tesseract OCR: не найден (D:\\Tesseract-OCR\\tesseract.exe)\nDeepSeek: ключ не настроен\n"
+            "Tesseract OCR: не найден (D:\\Tesseract-OCR\\tesseract.exe)\nOpenRouter text: ключ не настроен\n"
             "OpenRouter vision: ключ или модель не настроены\nKwork Chrome: доступен",
             ("Компоненты: нужна настройка", "ComponentError.TLabel"),
         ),
         (
-            "Tesseract OCR: готов (rus, eng)\nDeepSeek: настроен (deepseek-chat)\n"
+            "Tesseract OCR: готов (rus, eng)\nOpenRouter text: настроен (openai/gpt-5.1 -> anthropic/claude-sonnet-4.5)\n"
             "OpenRouter vision: ключ или модель не настроены\nKwork Chrome: доступен",
             ("Компоненты: vision не настроен", "ComponentWarning.TLabel"),
         ),
@@ -188,7 +188,14 @@ def test_reply_context_for_regeneration_uses_selected_terms_and_attachment_repor
         id=23,
         post_id=9,
         score=82,
-        summary="Задача: Исправить форму заявки\nСрок: 3 дн.",
+        summary=(
+            "Задача: Исправить форму заявки\n"
+            "Срок: 3 дн.\n"
+            "Боль клиента: Получать заявки с телефона без потерь\n"
+            "План работ: Проверить форму; Исправить обработку; Протестировать отправку\n"
+            "Риски: Не указан конечный получатель\n"
+            "Вопрос перед стартом: Куда должны поступать заявки?"
+        ),
         draft_reply="Старый черновик",
         contact="https://kwork.ru/projects/23/view",
         status="emailed",
@@ -220,6 +227,10 @@ def test_reply_context_for_regeneration_uses_selected_terms_and_attachment_repor
     assert "На мобильном не отправляется" in context.source_text
     assert "ТЗ.pdf" in context.attachment_context
     assert "iPhone" in context.attachment_context
+    assert context.customer_goal == "Получать заявки с телефона без потерь"
+    assert context.work_plan == ("Проверить форму", "Исправить обработку", "Протестировать отправку")
+    assert context.risks == ("Не указан конечный получатель",)
+    assert context.blocking_question == "Куда должны поступать заявки?"
 
 
 def test_reply_context_for_regeneration_excludes_ai_summary_from_task_facts():
@@ -733,6 +744,34 @@ def test_selected_lead_shows_reply_repair_warning_before_send():
 
     assert "требует правки" in dummy.lead_status_var.value
     assert "действие, которого нет в заказе" in dummy.lead_status_var.value
+
+
+def test_reselecting_same_lead_does_not_overwrite_visible_reply_or_scroll_state():
+    class Table:
+        def selection(self):
+            return ("lead-28",)
+
+    class Storage:
+        def get_lead(self, _lead_id):
+            raise AssertionError("same selected lead must not be reloaded during background refresh")
+
+    class Text:
+        def delete(self, *_args):
+            raise AssertionError("visible text must stay untouched")
+
+        def insert(self, *_args):
+            raise AssertionError("visible text must stay untouched")
+
+    dummy = SimpleNamespace(
+        leads_table=Table(),
+        lead_rows={"lead-28": 28},
+        current_lead_id=28,
+        _storage=lambda: Storage(),
+        summary_text=Text(),
+        reply_text=Text(),
+    )
+
+    LeadFunnelGui.on_lead_select(dummy)
 
 
 def test_apply_regenerated_reply_keeps_draft_in_memory_until_save():

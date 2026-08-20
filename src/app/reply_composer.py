@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 
+from app.llm_client import openrouter_chat
 from app.reply_policy import COMMERCIAL_REPLY_PATTERN
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,9 @@ ROBOTIC_PHRASING_PATTERN = re.compile(
     re.IGNORECASE,
 )
 UNFOUNDED_GUARANTEE_PATTERN = re.compile(
-    r"\b(?:гарантир\w*|сто\s*процент\w*|100\s*%)\b",
+    r"(?:\b(?:гарантир\w*|сто\s*процент\w*|100\s*%)\b|"
+    r"\b(?:с|на|для)\s+(?:любых|всех)\s+(?:устройств\w*|браузер\w*)\b|"
+    r"\bбез\s+(?:ошибок|сбоев|потерь)\b)",
     re.IGNORECASE,
 )
 UNSUPPORTED_TECHNICAL_COMPONENTS = ("smtp", "плагин")
@@ -154,9 +157,9 @@ DELIVERY_ISSUE_LABELS = {
     "missing task reference": "не ссылается на задачу",
     "empty reply": "пустой",
 }
-MAX_REPLY_LENGTH = 850
-MIN_REPLY_LENGTH = 260
-MAX_REPLY_SENTENCES = 6
+MAX_REPLY_LENGTH = 650
+MIN_REPLY_LENGTH = 220
+MAX_REPLY_SENTENCES = 5
 
 
 @dataclass(frozen=True)
@@ -167,6 +170,9 @@ class ReplyDraftContext:
     attachment_context: str
     estimated_days: int
     blocking_question: str = ""
+    customer_goal: str = ""
+    work_plan: tuple[str, ...] = ()
+    risks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -179,30 +185,49 @@ def compose_customer_reply(
     context: ReplyDraftContext,
     seed_reply: str,
     api_key: str = "",
-    model: str = "deepseek-chat",
+    model: str = "anthropic/claude-sonnet-4.5",
+    base_url: str = "https://openrouter.ai/api/v1",
+    fallback_models: tuple[str, ...] = (),
     timeout_seconds: float = 45.0,
 ) -> str:
     """Return a concise proposal that is safe to show in email and send to Kwork."""
     candidate = _remove_commercial_sentences(seed_reply)
     if api_key.strip():
-        generated = _compose_with_deepseek(context, api_key, model, timeout_seconds)
+        generated = _compose_with_openrouter(
+            context,
+            api_key,
+            model,
+            base_url,
+            fallback_models,
+            timeout_seconds,
+        )
         if generated:
             candidate = _remove_commercial_sentences(generated)
 
     deterministic_issues = reply_quality_issues(candidate, context)
     ai_review: ReplyQualityResult | None = None
     if api_key.strip() and candidate:
-        ai_review = _review_with_deepseek(candidate, context, api_key, model, timeout_seconds)
+        ai_review = _review_with_openrouter(
+            candidate,
+            context,
+            api_key,
+            model,
+            base_url,
+            fallback_models,
+            timeout_seconds,
+        )
 
     review_issues = ai_review.issues if ai_review is not None else ()
     if deterministic_issues or (ai_review is not None and not ai_review.approved):
         if api_key.strip():
-            repaired = _repair_with_deepseek(
+            repaired = _repair_with_openrouter(
                 candidate,
                 tuple(dict.fromkeys((*deterministic_issues, *review_issues))),
                 context,
                 api_key,
                 model,
+                base_url,
+                fallback_models,
                 timeout_seconds,
             )
             if not reply_quality_issues(repaired, context):
@@ -284,93 +309,93 @@ def reply_delivery_issue_summary(reply: str, context: ReplyDraftContext) -> str:
     return "отклик требует правки: " + "; ".join(labels[:2])
 
 
-def _compose_with_deepseek(
+def _compose_with_openrouter(
     context: ReplyDraftContext,
     api_key: str,
     model: str,
+    base_url: str,
+    fallback_models: tuple[str, ...],
     timeout_seconds: float,
 ) -> str:
     try:
-        from openai import OpenAI
-
-        client = OpenAI(
+        result = openrouter_chat(
             api_key=api_key,
-            base_url="https://api.deepseek.com/v1",
-            timeout=timeout_seconds,
-        )
-        response = client.chat.completions.create(
-            model=model,
+            base_url=base_url,
+            primary_model=model,
+            fallback_models=fallback_models,
             messages=[
                 {"role": "system", "content": _WRITER_SYSTEM_PROMPT},
                 {"role": "user", "content": _writer_prompt(context)},
             ],
             temperature=0.35,
             max_tokens=800,
+            timeout_seconds=timeout_seconds,
         )
-        return str(response.choices[0].message.content or "").strip()
-    except Exception:
-        logger.exception("DeepSeek reply composition failed; using safe fallback")
+        logger.info("OpenRouter reply composed with model %s", result.model)
+        return result.content.strip()
+    except Exception as exc:
+        logger.warning("OpenRouter reply composition failed; using safe fallback: %s", exc)
         return ""
 
 
-def _review_with_deepseek(
+def _review_with_openrouter(
     candidate: str,
     context: ReplyDraftContext,
     api_key: str,
     model: str,
+    base_url: str,
+    fallback_models: tuple[str, ...],
     timeout_seconds: float,
 ) -> ReplyQualityResult | None:
     try:
-        from openai import OpenAI
-
-        client = OpenAI(
+        result = openrouter_chat(
             api_key=api_key,
-            base_url="https://api.deepseek.com/v1",
-            timeout=timeout_seconds,
-        )
-        response = client.chat.completions.create(
-            model=model,
+            base_url=base_url,
+            primary_model=model,
+            fallback_models=fallback_models,
             messages=[
                 {"role": "system", "content": _REVIEWER_SYSTEM_PROMPT},
                 {"role": "user", "content": _review_prompt(candidate, context)},
             ],
             temperature=0,
             max_tokens=450,
+            timeout_seconds=timeout_seconds,
         )
-        return _parse_review_response(str(response.choices[0].message.content or ""))
-    except Exception:
-        logger.exception("DeepSeek reply review failed; using deterministic quality checks")
+        logger.info("OpenRouter reply reviewed with model %s", result.model)
+        return _parse_review_response(result.content)
+    except Exception as exc:
+        logger.warning("OpenRouter reply review failed; using deterministic checks: %s", exc)
         return None
 
 
-def _repair_with_deepseek(
+def _repair_with_openrouter(
     candidate: str,
     issues: tuple[str, ...],
     context: ReplyDraftContext,
     api_key: str,
     model: str,
+    base_url: str,
+    fallback_models: tuple[str, ...],
     timeout_seconds: float,
 ) -> str:
     try:
-        from openai import OpenAI
-
-        client = OpenAI(
+        result = openrouter_chat(
             api_key=api_key,
-            base_url="https://api.deepseek.com/v1",
-            timeout=timeout_seconds,
-        )
-        response = client.chat.completions.create(
-            model=model,
+            base_url=base_url,
+            primary_model=model,
+            fallback_models=fallback_models,
             messages=[
                 {"role": "system", "content": _REPAIR_SYSTEM_PROMPT},
                 {"role": "user", "content": _repair_prompt(candidate, issues, context)},
             ],
             temperature=0.2,
             max_tokens=800,
+            timeout_seconds=timeout_seconds,
         )
-        return _remove_commercial_sentences(str(response.choices[0].message.content or ""))
-    except Exception:
-        logger.exception("DeepSeek reply repair failed; using deterministic fallback")
+        logger.info("OpenRouter reply repaired with model %s", result.model)
+        return _remove_commercial_sentences(result.content)
+    except Exception as exc:
+        logger.warning("OpenRouter reply repair failed; using deterministic fallback: %s", exc)
         return ""
 
 
@@ -393,16 +418,16 @@ def _writer_prompt(context: ReplyDraftContext) -> str:
         for part in (
             "Факты по задаче:\n" + facts,
             (
-                "Напиши готовое сообщение заказчику: 4-5 коротких предложений, 350-850 символов. "
-                "Сначала покажи, что понял конечный результат, затем назови конкретные действия и проверку. "
+                "Напиши готовое сообщение заказчику: 3-5 коротких предложений, 250-650 символов. "
+                "Сначала своими словами назови нужный заказчику результат, затем конкретные действия и проверку. "
                 "Начни с «Здравствуйте!» и сразу назови предмет задачи или нужный клиенту результат. "
                 f"Реалистичный срок: до {max(1, context.estimated_days)} дн. "
                 "Не упоминай цену, вилку, валюту, скидки или условия оплаты, а также AI, нейросети, портфолио или опыт, которого нет. "
                 "Техническую оплату на сайте упоминай только если она прямо есть в фактах заказа. "
                 "Не повторяй всё ТЗ, не используй фразы «понял задачу», «сделаю следующее», «план такой», "
                 "«на всё уйдёт» или «если нужно, скажите». Не обещай «гарантированно», «100%» и не давай иных "
-                "безусловных гарантий. "
-                "Не делай больше пяти предложений, или шести вместе с отдельным приветствием. "
+                "безусловных гарантий вроде «с любых устройств» или «без ошибок». "
+                "Не делай больше пяти предложений. "
                 "Последним предложением от первого лица спокойно подтверди готовность начать работу; "
                 "не перекладывай на клиента поиск ответа или согласование деталей."
             ),
@@ -447,10 +472,10 @@ def _repair_prompt(candidate: str, issues: tuple[str, ...], context: ReplyDraftC
     )
     return (
         "Перепиши отклик по фактам ниже. Верни только готовый текст без markdown. "
-        "Сохрани спокойный человеческий тон, 4-5 предложений и 350-850 символов. "
+        "Сохрани спокойный человеческий тон, 3-5 предложений и 250-650 символов. "
         "Не добавляй коммерческие условия, выдуманный опыт или AI-слова. "
         "Начни с «Здравствуйте!», не используй «понял задачу», «сделаю следующее», «на всё уйдёт» "
-        "и не давай необоснованных гарантий. "
+        "и не давай необоснованных гарантий вроде «с любых устройств» или «без ошибок». "
         "Не добавляй неподтвержденные факты о текущем состоянии сайта, устройствах, доступах или технологиях, "
         "включая SMTP и плагины, если они не названы в заказе. "
         "Не описывай внутренние сомнения, условные обещания или фразы «пока исхожу» и «это уточняется». "
@@ -468,6 +493,23 @@ def _redacted_facts(context: ReplyDraftContext) -> str:
         f"Суть: {_redact_commercial_context(context.task_summary)}",
         f"Описание: {_redact_commercial_context(context.source_text)}",
     ]
+    customer_goal = _redact_commercial_context(context.customer_goal)
+    if customer_goal:
+        parts.append(f"Цель клиента: {customer_goal}")
+    safe_plan = [
+        _redact_commercial_context(item)
+        for item in context.work_plan
+        if _redact_commercial_context(item)
+    ]
+    if safe_plan:
+        parts.append("Проверенный план: " + "; ".join(safe_plan[:4]))
+    safe_risks = [
+        _redact_commercial_context(item)
+        for item in context.risks
+        if _redact_commercial_context(item)
+    ]
+    if safe_risks:
+        parts.append("Риски: " + "; ".join(safe_risks[:3]))
     attachment_text = _redact_commercial_context(context.attachment_context)
     if attachment_text:
         parts.append(f"Файлы и визуальные материалы: {attachment_text}")

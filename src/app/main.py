@@ -67,6 +67,9 @@ def scan_once(
     deepseek_model: str = "deepseek-chat",
     openrouter_api_key: str = "",
     openrouter_base_url: str = "https://openrouter.ai/api/v1",
+    openrouter_analysis_model: str = "openai/gpt-5.1",
+    openrouter_reply_model: str = "anthropic/claude-sonnet-4.5",
+    openrouter_fallback_models: tuple[str, ...] = (),
     openrouter_vision_model: str = "",
     openrouter_vision_mode: str = "smart",
     kwork_project_client: ProjectInspector | None = None,
@@ -90,6 +93,19 @@ def scan_once(
     if lead_hub is not None and not hasattr(lead_hub, "publish_lead") and email_client is None:
         email_client = lead_hub
         lead_hub = None
+    if openrouter_api_key.strip():
+        text_api_key = openrouter_api_key.strip()
+        text_base_url = openrouter_base_url
+        analysis_model = openrouter_analysis_model
+        reply_model = openrouter_reply_model
+        fallback_models = openrouter_fallback_models
+    else:
+        # Keep old installations usable while OpenRouter is being configured.
+        text_api_key = deepseek_api_key.strip()
+        text_base_url = "https://api.deepseek.com/v1"
+        analysis_model = deepseek_model
+        reply_model = deepseek_model
+        fallback_models = ()
     created = 0
     for post in telegram_client.fetch_recent_posts():
         post_id = storage.save_post(
@@ -202,6 +218,8 @@ def scan_once(
                     deepseek_model=deepseek_model,
                     openrouter_api_key=openrouter_api_key,
                     openrouter_base_url=openrouter_base_url,
+                    openrouter_analysis_model=openrouter_analysis_model,
+                    openrouter_fallback_models=openrouter_fallback_models,
                     openrouter_vision_model=openrouter_vision_model,
                     openrouter_vision_mode=openrouter_vision_mode,
                 )
@@ -224,8 +242,10 @@ def scan_once(
 
         judge_result = lead_judge(
             project_text,
-            api_key=deepseek_api_key,
-            model=deepseek_model,
+            api_key=text_api_key,
+            model=analysis_model,
+            base_url=text_base_url,
+            fallback_models=fallback_models,
             min_score=lead_min_score,
             max_estimated_days=lead_max_days,
             accept_decisions=lead_accept_decisions,
@@ -254,16 +274,18 @@ def scan_once(
             ),
             attachment_context=attachment_context,
             estimated_days=judge_result.estimated_days,
-            # The first Kwork response should sell the solution, not make the
-            # customer answer a discovery question. Keep AI questions in the
-            # internal assessment for the follow-up conversation instead.
-            blocking_question="",
+            blocking_question=judge_result.blocking_question,
+            customer_goal=judge_result.customer_goal,
+            work_plan=tuple(judge_result.work_plan),
+            risks=tuple(judge_result.risks),
         )
         draft_reply = reply_composer(
             reply_context,
             judge_result.draft_reply,
-            api_key=deepseek_api_key,
-            model=deepseek_model,
+            api_key=text_api_key,
+            model=reply_model,
+            base_url=text_base_url,
+            fallback_models=fallback_models,
         )
         summary = f"{_summary_from_judge(judge_result)}{project_summary_suffix}"
         if kwork_facts:
@@ -351,6 +373,8 @@ def _build_attachment_processing_result(builder, attachments: tuple[str, ...], *
             "deepseek_model",
             "openrouter_api_key",
             "openrouter_base_url",
+            "openrouter_analysis_model",
+            "openrouter_fallback_models",
             "openrouter_vision_model",
             "openrouter_vision_mode",
         }
@@ -510,6 +534,8 @@ def _summary_from_judge(result: LeadJudgeResult) -> str:
         lines.append("Почему подходит: " + "; ".join(result.reasons))
     if result.risks:
         lines.append("Риски: " + "; ".join(result.risks))
+    if result.blocking_question:
+        lines.append("Вопрос перед стартом: " + result.blocking_question)
     if result.questions:
         lines.append("Уточнение: " + "; ".join(result.questions))
     return "\n".join(lines)
@@ -700,6 +726,9 @@ def _scan_runtime_once(
         deepseek_model=config.deepseek_model,
         openrouter_api_key=config.openrouter_api_key,
         openrouter_base_url=config.openrouter_base_url,
+        openrouter_analysis_model=config.openrouter_analysis_model,
+        openrouter_reply_model=config.openrouter_reply_model,
+        openrouter_fallback_models=config.openrouter_fallback_models,
         openrouter_vision_model=config.openrouter_vision_model,
         openrouter_vision_mode=config.openrouter_vision_mode,
         kwork_project_client=kwork_project_client,
