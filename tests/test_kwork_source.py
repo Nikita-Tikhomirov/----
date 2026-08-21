@@ -647,9 +647,28 @@ def test_kwork_web_project_ids_deduplicate_through_storage(tmp_path, monkeypatch
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
     email = FakeEmail()
+    def fake_reply_composer(*_args, **_kwargs):
+        return (
+            "Здравствуйте! Выполню задачу по проекту и проверю результат в рабочем сценарии. "
+            "После проверки передам готовое изменение без лишних действий с вашей стороны."
+        )
 
-    assert scan_once(storage, FakeSource(), email, deepseek_api_key="sk-test", lead_judge=fake_judge) == 1
-    assert scan_once(storage, FakeSource(), email, deepseek_api_key="sk-test", lead_judge=fake_judge) == 0
+    assert scan_once(
+        storage,
+        FakeSource(),
+        email,
+        deepseek_api_key="sk-test",
+        lead_judge=fake_judge,
+        reply_composer=fake_reply_composer,
+    ) == 1
+    assert scan_once(
+        storage,
+        FakeSource(),
+        email,
+        deepseek_api_key="sk-test",
+        lead_judge=fake_judge,
+        reply_composer=fake_reply_composer,
+    ) == 0
     assert len(storage.list_leads()) == 1
     assert email.sent == [1]
     assert len(judge_calls) == 1

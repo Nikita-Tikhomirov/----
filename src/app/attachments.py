@@ -408,6 +408,9 @@ def inspect_attachment(
 ) -> tuple[str, str]:
     ext = _extension(ref.url) or _extension(ref.label)
     vision_mode = _normalize_vision_mode(openrouter_vision_mode)
+    effective_vision_model = openrouter_vision_model.strip()
+    if openrouter_api_key.strip() and not effective_vision_model:
+        effective_vision_model = openrouter_analysis_model.strip()
     if ext in TEXT_EXTENSIONS:
         return "скачан, прочитан", _decode_text(content)
     if ext == ".docx":
@@ -416,7 +419,7 @@ def inspect_attachment(
             vision_text = _vision_for_docx(
                 content,
                 openrouter_api_key,
-                openrouter_vision_model,
+                effective_vision_model,
                 openrouter_base_url,
                 vision_mode,
                 enrich=True,
@@ -431,7 +434,7 @@ def inspect_attachment(
             content,
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
-            openrouter_vision_model=openrouter_vision_model,
+            openrouter_vision_model=effective_vision_model,
             vision_mode=vision_mode,
         )
     if ext in IMAGE_EXTENSIONS:
@@ -440,7 +443,7 @@ def inspect_attachment(
             ext,
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
-            openrouter_vision_model=openrouter_vision_model,
+            openrouter_vision_model=effective_vision_model,
             vision_mode=vision_mode,
         )
     if ext in ARCHIVE_EXTENSIONS:
@@ -461,7 +464,7 @@ def inspect_attachment(
             analysis_fallback_models=analysis_fallback_models,
             openrouter_api_key=openrouter_api_key,
             openrouter_base_url=openrouter_base_url,
-            openrouter_vision_model=openrouter_vision_model,
+            openrouter_vision_model=effective_vision_model,
             openrouter_vision_mode=vision_mode,
         )
     return "скачан, тип не поддержан", "Файл найден, но тип не поддержан для автоматического чтения."

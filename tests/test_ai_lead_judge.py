@@ -1,6 +1,8 @@
 import re
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.ai_lead_judge import _build_prompt, judge_lead, parse_judge_response, sanitize_customer_reply
 from app.llm_client import OpenRouterResult
 
@@ -204,6 +206,18 @@ def test_judge_lead_routes_analysis_through_openrouter_with_fallbacks():
         "anthropic/claude-sonnet-4.5",
         "openai/gpt-4.1",
     )
+
+
+def test_judge_lead_never_publishes_rule_fallback_when_cloud_analysis_fails():
+    with patch(
+        "app.ai_lead_judge.openrouter_chat",
+        side_effect=ConnectionError("OpenRouter is temporarily unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="cloud AI analysis unavailable"):
+            judge_lead(
+                "Нужно проверить аналитику лендинга и найти расхождение с Метрикой.",
+                api_key="or-test",
+            )
 
 
 def test_judge_lead_applies_configurable_thresholds_to_ai_result():

@@ -11,6 +11,10 @@ from app.reply_policy import COMMERCIAL_REPLY_PATTERN
 
 logger = logging.getLogger(__name__)
 
+
+class LeadAnalysisUnavailable(RuntimeError):
+    """Raised when a configured cloud judge cannot return a usable verdict."""
+
 BITRIX_PATTERN = re.compile(r"битрикс|bitrix", re.IGNORECASE)
 SIMPLE_PATTERN = re.compile(
     r"верст|лендинг|landing|html|css|js|javascript|wordpress|вордпресс|wp|форма|"
@@ -178,8 +182,8 @@ def _judge_with_openrouter(
         logger.info("OpenRouter analysis completed with model %s", result.model)
         return parse_judge_response(result.content)
     except Exception as exc:
-        logger.warning("OpenRouter analysis failed; using rule fallback: %s", exc)
-        return None
+        logger.error("OpenRouter analysis failed; lead will be retried: %s", exc)
+        raise LeadAnalysisUnavailable("cloud AI analysis unavailable") from exc
 
 
 def _fallback_judge(text: str) -> LeadJudgeResult:

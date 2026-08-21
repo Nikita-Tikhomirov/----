@@ -1,9 +1,16 @@
+import logging
+import sys
 from dataclasses import dataclass
+from types import SimpleNamespace
+
+import app.main as main_module
 
 from app.main import (
     _proposal_price_from_kwork_max,
     _proposal_title_from_text,
+    _scan_execution_lock,
     _summary_from_judge,
+    _configure_runtime_logging,
     create_order_handoff,
     process_mobile_approvals,
     process_approvals,
@@ -11,9 +18,10 @@ from app.main import (
     scan_once,
     submit_order,
 )
-from app.ai_lead_judge import LeadJudgeResult
+from app.ai_lead_judge import LeadAnalysisUnavailable, LeadJudgeResult
 from app.attachments import AttachmentProcessingResult, AttachmentReport
 from app.kwork_client import KworkProjectInfo
+from app.reply_composer import ReplyGenerationUnavailable
 from app.storage import Storage
 
 
@@ -77,6 +85,11 @@ class FakeLeadHub:
         self.commands = list(commands)
         self.claimed = []
         self.results = []
+        self.published = []
+
+    def publish_lead(self, lead, attachments=()):
+        self.published.append((lead.id, lead.draft_reply, tuple(attachments)))
+        return lead.hub_lead_id or 91
 
     def fetch_approved_commands(self):
         return list(self.commands)
@@ -496,6 +509,460 @@ def test_scan_once_uses_ai_judge_for_summary_reply_and_score(tmp_path):
     assert "калькулятор" in lead.draft_reply
     assert lead.proposal_price_rub == 18000
     assert lead.proposal_days == 5
+
+
+def test_scan_once_keeps_post_retryable_when_cloud_analysis_is_unavailable(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    email_client = FakeEmailClient()
+    attempts = 0
+
+    def flaky_judge(_text, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise LeadAnalysisUnavailable("cloud AI analysis unavailable")
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=86,
+            complexity="simple",
+            estimated_days=2,
+            price_rub=5000,
+            summary="Исправить форму заявки",
+            reasons=["понятный результат"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте! Исправлю форму заявки и проверю отправку.",
+        )
+
+    first_created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        lead_judge=flaky_judge,
+        reply_composer=lambda _context, reply, **_kwargs: reply,
+        openrouter_api_key="or-test",
+    )
+
+    post = FakeTelegramClient().fetch_recent_posts()[0]
+    post_id = storage.save_post(
+        channel=post.channel,
+        message_id=post.message_id,
+        post_url=post.url,
+        text=post.text,
+        posted_at=post.posted_at,
+    )
+    assert first_created == 0
+    assert storage.list_leads() == []
+    assert storage.get_post_rejection(post_id) == ""
+
+    second_created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=email_client,
+        lead_judge=flaky_judge,
+        reply_composer=lambda _context, reply, **_kwargs: reply,
+        openrouter_api_key="or-test",
+    )
+
+    assert second_created == 1
+    assert attempts == 2
+    assert len(storage.list_leads()) == 1
+
+
+def test_scan_once_keeps_post_retryable_when_cloud_reply_is_unavailable(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    composer_attempts = 0
+
+    def accepted_judge(_text, **_kwargs):
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=86,
+            complexity="simple",
+            estimated_days=2,
+            price_rub=5000,
+            summary="Исправить форму заявки",
+            reasons=["понятный результат"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте! Исправлю форму заявки и проверю отправку.",
+        )
+
+    def flaky_composer(_context, reply, **_kwargs):
+        nonlocal composer_attempts
+        composer_attempts += 1
+        if composer_attempts == 1:
+            raise ReplyGenerationUnavailable("cloud AI reply unavailable")
+        return reply
+
+    first_created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        lead_judge=accepted_judge,
+        reply_composer=flaky_composer,
+        openrouter_api_key="or-test",
+    )
+
+    assert first_created == 0
+    assert storage.list_leads() == []
+
+    second_created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        lead_judge=accepted_judge,
+        reply_composer=flaky_composer,
+        openrouter_api_key="or-test",
+    )
+
+    assert second_created == 1
+    assert composer_attempts == 2
+    assert len(storage.list_leads()) == 1
+
+
+def test_scan_once_rebuilds_and_republishes_existing_generic_lead(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post = FakeTelegramClient().fetch_recent_posts()[0]
+    post_id = storage.save_post(
+        channel=post.channel,
+        message_id=post.message_id,
+        post_url=post.url,
+        text=post.text,
+        posted_at=post.posted_at,
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=78,
+        summary="Задача: Сверстать лендинг",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу: сверстать лендинг. "
+            "Сначала разберу текущую реализацию и требования, затем внесу нужные изменения по задаче. "
+            "После этого проверю основной сценарий и покажу готовый рабочий результат."
+        ),
+        contact="@client_dev",
+        proposal_title="Сверстать лендинг",
+        proposal_price_rub=5000,
+        proposal_days=2,
+    )
+    storage.mark_lead_hub_synced(lead_id, 91)
+    storage.mark_failed(lead_id, "старый шаблон заблокирован проверкой качества")
+    hub = FakeLeadHub()
+
+    def accepted_judge(_text, **_kwargs):
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=91,
+            complexity="simple",
+            estimated_days=2,
+            price_rub=5000,
+            summary="Сверстать адаптивный лендинг и исправить форму",
+            reasons=["понятный результат"],
+            risks=[],
+            questions=[],
+            draft_reply="Черновик AI",
+            customer_goal="Получить готовый адаптивный лендинг с рабочей формой",
+            work_plan=["Сверстать блоки", "Настроить адаптив", "Проверить форму"],
+        )
+
+    rebuilt_reply = (
+        "Здравствуйте! Сверстаю адаптивный лендинг и аккуратно подключу форму заявки. "
+        "Проверю основные разрешения, отправку формы и исправлю найденные расхождения. "
+        "После проверки покажу готовую страницу, могу приступить сразу."
+    )
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=hub,
+        lead_judge=accepted_judge,
+        reply_composer=lambda _context, _seed, **_kwargs: rebuilt_reply,
+        openrouter_api_key="or-test",
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert created == 1
+    assert lead.status == "new"
+    assert lead.score == 91
+    assert lead.draft_reply == rebuilt_reply
+    assert hub.published == [(lead_id, rebuilt_reply, ())]
+
+
+def test_scan_once_retries_mobile_sync_after_rebuilt_draft_publish_failure(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post = FakeTelegramClient().fetch_recent_posts()[0]
+    post_id = storage.save_post(
+        channel=post.channel,
+        message_id=post.message_id,
+        post_url=post.url,
+        text=post.text,
+        posted_at=post.posted_at,
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=78,
+        summary="Задача: Сверстать лендинг",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу: сверстать лендинг. "
+            "Сначала разберу текущую реализацию и требования, затем внесу нужные изменения по задаче. "
+            "После этого проверю основной сценарий и покажу готовый рабочий результат."
+        ),
+        contact="@client_dev",
+        proposal_title="Сверстать лендинг",
+        proposal_price_rub=5000,
+        proposal_days=2,
+    )
+    storage.mark_lead_hub_synced(lead_id, 91)
+    judge_calls = 0
+
+    def accepted_judge(_text, **_kwargs):
+        nonlocal judge_calls
+        judge_calls += 1
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=91,
+            complexity="simple",
+            estimated_days=2,
+            price_rub=5000,
+            summary="Сверстать адаптивный лендинг и исправить форму",
+            reasons=["понятный результат"],
+            risks=[],
+            questions=[],
+            draft_reply="Черновик AI",
+            customer_goal="Получить адаптивный лендинг с рабочей формой",
+            work_plan=["Сверстать блоки", "Настроить адаптив", "Проверить форму"],
+        )
+
+    rebuilt_reply = (
+        "Здравствуйте! Сверстаю адаптивный лендинг и подключу форму заявки. "
+        "Проверю страницу на компьютере и телефоне, затем исправлю найденные расхождения."
+    )
+
+    class FlakyHub(FakeLeadHub):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        def publish_lead(self, lead, attachments=()):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise TimeoutError("hub unavailable")
+            return super().publish_lead(lead, attachments)
+
+    hub = FlakyHub()
+
+    first_created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=hub,
+        lead_judge=accepted_judge,
+        reply_composer=lambda _context, _seed, **_kwargs: rebuilt_reply,
+        openrouter_api_key="or-test",
+    )
+    second_created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=hub,
+        lead_judge=accepted_judge,
+        reply_composer=lambda _context, _seed, **_kwargs: rebuilt_reply,
+        openrouter_api_key="or-test",
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert first_created == 0
+    assert second_created == 1
+    assert judge_calls == 1
+    assert hub.attempts == 2
+    assert lead.hub_synced_at != ""
+
+
+def test_scan_once_rejects_existing_generic_lead_after_fresh_ai_verdict(tmp_path, caplog):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post = FakeTelegramClient().fetch_recent_posts()[0]
+    post_id = storage.save_post(
+        channel=post.channel,
+        message_id=post.message_id,
+        post_url=post.url,
+        text=post.text,
+        posted_at=post.posted_at,
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=78,
+        summary="Старая статическая оценка",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу: выполнить проект. "
+            "Сначала разберу текущую реализацию и требования, затем внесу нужные изменения по задаче. "
+            "После этого проверю основной сценарий и покажу готовый рабочий результат."
+        ),
+        contact="@client_dev",
+    )
+
+    def rejected_judge(_text, **_kwargs):
+        return LeadJudgeResult(
+            accepted=False,
+            decision="reject",
+            score=25,
+            complexity="too_complex",
+            estimated_days=14,
+            price_rub=0,
+            summary="Задача требует профильного senior-опыта",
+            reasons=["не подходит под недельный лимит"],
+            risks=["высокий риск"],
+            questions=[],
+            draft_reply="",
+        )
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=FakeLeadHub(),
+        lead_judge=rejected_judge,
+        openrouter_api_key="or-test",
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert created == 0
+    assert lead.status == "rejected"
+    assert "недельный лимит" in lead.last_error
+
+    caplog.clear()
+    caplog.set_level(logging.WARNING)
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=FakeLeadHub(),
+        lead_judge=rejected_judge,
+        openrouter_api_key="or-test",
+    )
+
+    assert "Rebuilding retired generic draft" not in caplog.text
+
+
+def test_scan_once_retires_unsent_generic_lead_that_left_the_current_feed(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=77,
+        post_url="https://kwork.ru/projects/77",
+        text="Исправить форму на сайте",
+        posted_at="2026-08-20T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=78,
+        summary="Задача: Исправить форму на сайте",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу: исправить форму. "
+            "Сначала разберу текущую реализацию и требования, затем внесу нужные изменения по задаче. "
+            "После этого проверю основной сценарий и покажу готовый рабочий результат."
+        ),
+        contact="https://kwork.ru/projects/77",
+    )
+    assert storage.record_approval(lead_id, "<lead-77@example.com>") is True
+
+    class OtherPostSource:
+        def fetch_recent_posts(self):
+            return [
+                FakePost(
+                    channel="kwork-web",
+                    message_id=78,
+                    url="https://kwork.ru/projects/78",
+                    text="Нужно настроить Bitrix. Отклик: https://kwork.ru/projects/78",
+                    posted_at="2026-08-21T10:00:00+03:00",
+                )
+            ]
+
+    assert scan_once(
+        storage=storage,
+        telegram_client=OtherPostSource(),
+        lead_hub=FakeLeadHub(),
+        openrouter_api_key="or-test",
+    ) == 0
+
+    lead = storage.get_lead(lead_id)
+    assert lead.status == "rejected"
+    assert "устаревший общий шаблон" in lead.last_error
+
+
+def test_scan_once_does_not_retire_generic_leads_when_source_returns_no_posts(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=79,
+        post_url="https://kwork.ru/projects/79",
+        text="Исправить форму на сайте",
+        posted_at="2026-08-20T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=78,
+        summary="Задача: Исправить форму на сайте",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу: исправить форму. "
+            "Сначала разберу текущую реализацию и требования, затем внесу нужные изменения по задаче. "
+            "После этого проверю основной сценарий и покажу готовый рабочий результат."
+        ),
+        contact="https://kwork.ru/projects/79",
+    )
+
+    class EmptySource:
+        def fetch_recent_posts(self):
+            return []
+
+    scan_once(
+        storage=storage,
+        telegram_client=EmptySource(),
+        lead_hub=FakeLeadHub(),
+        openrouter_api_key="or-test",
+    )
+
+    assert storage.get_lead(lead_id).status == "new"
+
+
+def test_scan_once_rejects_approved_generic_lead_even_when_it_is_in_current_feed(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post = FakeTelegramClient().fetch_recent_posts()[0]
+    post_id = storage.save_post(
+        channel=post.channel,
+        message_id=post.message_id,
+        post_url=post.url,
+        text=post.text,
+        posted_at=post.posted_at,
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=78,
+        summary="Задача: Сверстать лендинг",
+        draft_reply=(
+            "Здравствуйте! Посмотрел задачу: сверстать лендинг. "
+            "Сначала разберу текущую реализацию и требования, затем внесу нужные изменения по задаче. "
+            "После этого проверю основной сценарий и покажу готовый рабочий результат."
+        ),
+        contact="@client_dev",
+    )
+    assert storage.record_approval(lead_id, "<lead-current@example.com>") is True
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=FakeLeadHub(),
+        openrouter_api_key="or-test",
+    )
+
+    lead = storage.get_lead(lead_id)
+    assert lead.status == "rejected"
+    assert "общий шаблон" in lead.last_error
 
 
 def test_scan_once_persists_composed_price_free_reply(tmp_path):
@@ -1348,7 +1815,11 @@ def test_mobile_approval_sends_one_claimed_kwork_lead_and_reports_result(tmp_pat
             {
                 "id": 91,
                 "status": "approved",
-                "draft_reply": "Сделаю адаптивный лендинг и проверю форму.",
+                "draft_reply": (
+                    "Здравствуйте! Сверстаю адаптивный лендинг и настрою корректное отображение основных блоков. "
+                    "После вёрстки проверю страницу на типовых разрешениях и исправлю найденные расхождения. "
+                    "Готов приступить к работе."
+                ),
                 "proposal_title": "Адаптивная верстка лендинга",
                 "proposal_price_rub": 6500,
                 "proposal_days": 4,
@@ -1368,7 +1839,11 @@ def test_mobile_approval_sends_one_claimed_kwork_lead_and_reports_result(tmp_pat
     assert sender.sent == [
         (
             "https://kwork.ru/projects/41",
-            "Сделаю адаптивный лендинг и проверю форму.",
+            (
+                "Здравствуйте! Сверстаю адаптивный лендинг и настрою корректное отображение основных блоков. "
+                "После вёрстки проверю страницу на типовых разрешениях и исправлю найденные расхождения. "
+                "Готов приступить к работе."
+            ),
             6500,
             4,
             "Адаптивная верстка лендинга",
@@ -1378,3 +1853,241 @@ def test_mobile_approval_sends_one_claimed_kwork_lead_and_reports_result(tmp_pat
     assert hub.claimed == [(91, "desktop-main")]
     assert hub.results == [(91, "desktop-main", True, "")]
     assert storage.get_lead(lead_id).status == "sent"
+
+
+def test_mobile_approval_does_not_retry_after_kwork_send_when_local_persistence_fails(
+    tmp_path,
+    monkeypatch,
+):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=43,
+        post_url="https://kwork.ru/projects/43",
+        text="Сверстать адаптивный лендинг",
+        posted_at="2026-07-18T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=82,
+        summary="Задача: Сверстать адаптивный лендинг",
+        draft_reply="Старый текст",
+        contact="https://kwork.ru/projects/43",
+        proposal_title="Адаптивный лендинг",
+        proposal_price_rub=6500,
+        proposal_days=4,
+    )
+    storage.mark_lead_hub_synced(lead_id, 93)
+    command = {
+        "id": 93,
+        "status": "approved",
+        "draft_reply": (
+            "Здравствуйте! Сверстаю адаптивный лендинг и настрою основные интерактивные блоки. "
+            "После вёрстки проверю страницу на компьютере и телефоне, затем исправлю расхождения."
+        ),
+        "proposal_title": "Адаптивный лендинг",
+        "proposal_price_rub": 6500,
+        "proposal_days": 4,
+    }
+    hub = FakeLeadHub(commands=[command])
+    sender = FakeKworkSender()
+
+    def fail_after_external_send(*_args, **_kwargs):
+        raise OSError("database write failed")
+
+    monkeypatch.setattr(storage, "mark_sent", fail_after_external_send)
+
+    assert process_mobile_approvals(storage, hub, sender, "desktop-main") == 1
+    assert storage.get_lead(lead_id).status == "sending"
+    assert hub.results == [(93, "desktop-main", True, "")]
+    assert process_mobile_approvals(storage, hub, sender, "desktop-main") == 0
+    assert len(sender.sent) == 1
+
+
+def test_mobile_approval_does_not_retry_when_only_hub_result_reporting_fails(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=44,
+        post_url="https://kwork.ru/projects/44",
+        text="Сверстать адаптивный лендинг",
+        posted_at="2026-07-18T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=82,
+        summary="Задача: Сверстать адаптивный лендинг",
+        draft_reply="Старый текст",
+        contact="https://kwork.ru/projects/44",
+        proposal_title="Адаптивный лендинг",
+        proposal_price_rub=6500,
+        proposal_days=4,
+    )
+    storage.mark_lead_hub_synced(lead_id, 94)
+    command = {
+        "id": 94,
+        "status": "approved",
+        "draft_reply": (
+            "Здравствуйте! Сверстаю адаптивный лендинг и настрою основные интерактивные блоки. "
+            "После вёрстки проверю страницу на компьютере и телефоне, затем исправлю расхождения."
+        ),
+        "proposal_title": "Адаптивный лендинг",
+        "proposal_price_rub": 6500,
+        "proposal_days": 4,
+    }
+
+    class FailingResultHub(FakeLeadHub):
+        def report_result(self, lead_id, executor_id, *, sent, error=""):
+            raise TimeoutError("hub result timeout")
+
+    hub = FailingResultHub(commands=[command])
+    sender = FakeKworkSender()
+
+    assert process_mobile_approvals(storage, hub, sender, "desktop-main") == 1
+    assert storage.get_lead(lead_id).status == "sent"
+    assert process_mobile_approvals(storage, hub, sender, "desktop-main") == 0
+    assert len(sender.sent) == 1
+
+
+def test_mobile_approval_blocks_old_generic_fallback_before_kwork_send(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=2,
+        post_url="https://kwork.ru/projects/42",
+        text="Нужно найти расхождение серверной аналитики с Яндекс Метрикой.",
+        posted_at="2026-08-21T08:53:40+03:00",
+    )
+    generic_reply = (
+        "Здравствуйте! Посмотрел задачу: починить аналитику. "
+        "Сначала разберу текущую реализацию и требования, затем внесу нужные изменения по задаче. "
+        "После этого проверю основной сценарий и покажу готовый рабочий результат."
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=78,
+        summary="Задача: Найти расхождение серверной аналитики с Яндекс Метрикой",
+        draft_reply=generic_reply,
+        contact="https://kwork.ru/projects/42",
+        proposal_title="Починить аналитику",
+        proposal_price_rub=1300,
+        proposal_days=2,
+    )
+    storage.mark_lead_hub_synced(lead_id, 92)
+    hub = FakeLeadHub(
+        commands=[
+            {
+                "id": 92,
+                "status": "approved",
+                "draft_reply": generic_reply,
+                "proposal_title": "Починить аналитику",
+                "proposal_price_rub": 1300,
+                "proposal_days": 2,
+            }
+        ]
+    )
+    sender = FakeKworkSender()
+
+    processed = process_mobile_approvals(
+        storage=storage,
+        lead_hub=hub,
+        sender=sender,
+        executor_id="desktop-main",
+    )
+
+    assert processed == 0
+    assert sender.sent == []
+    assert hub.results[0][0:3] == (92, "desktop-main", False)
+    assert "общий шаблон" in hub.results[0][3]
+    assert storage.get_lead(lead_id).status == "failed"
+
+
+def test_scan_command_uses_shared_runtime_pipeline(monkeypatch, tmp_path):
+    config = SimpleNamespace(database_path=tmp_path / "leads.sqlite3")
+    runtime = (object(), object(), object(), object())
+    calls = []
+
+    monkeypatch.setattr(sys, "argv", ["app.main", "scan"])
+    monkeypatch.setattr(main_module, "load_config", lambda: config)
+    monkeypatch.setattr(main_module, "build_runtime", lambda _config: runtime)
+    monkeypatch.setattr(main_module, "_configure_runtime_logging", lambda _path: None)
+    monkeypatch.setattr(
+        main_module,
+        "_scan_runtime_once",
+        lambda *args: calls.append(args),
+    )
+
+    assert main_module.main() == 0
+    assert calls == [(*runtime, config)]
+
+
+def test_mobile_control_command_uses_same_runtime_objects(monkeypatch, tmp_path):
+    config = SimpleNamespace(database_path=tmp_path / "leads.sqlite3")
+    runtime = (object(), object(), object(), object())
+    calls = []
+
+    monkeypatch.setattr(sys, "argv", ["app.main", "mobile-control"])
+    monkeypatch.setattr(main_module, "load_config", lambda: config)
+    monkeypatch.setattr(main_module, "build_runtime", lambda _config: runtime)
+    monkeypatch.setattr(main_module, "_configure_runtime_logging", lambda _path: None)
+    monkeypatch.setattr(
+        main_module,
+        "run_mobile_control_loop",
+        lambda *args: calls.append(args),
+    )
+
+    assert main_module.main() == 0
+    assert calls == [(*runtime, config)]
+
+
+def test_runtime_logging_persists_utf8_for_hidden_mobile_process(tmp_path):
+    root_logger = logging.Logger("lead-funnel-test", level=logging.INFO)
+    log_path = _configure_runtime_logging(
+        tmp_path / "leads.sqlite3",
+        root_logger=root_logger,
+        include_console=False,
+    )
+
+    root_logger.info("Мобильный запуск: проверка")
+    for handler in root_logger.handlers:
+        handler.flush()
+
+    assert log_path == tmp_path / "lead-funnel.log"
+    assert "Мобильный запуск: проверка" in log_path.read_text(encoding="utf-8")
+
+
+def test_main_logs_configuration_error_before_hidden_mobile_process_exits(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["app.main", "mobile-control"])
+
+    def fail_config():
+        raise ValueError("broken env")
+
+    monkeypatch.setattr(main_module, "load_config", fail_config)
+
+    try:
+        main_module.main()
+    except ValueError as exc:
+        assert str(exc) == "broken env"
+    else:
+        raise AssertionError("main() must propagate configuration errors")
+
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    log_text = (tmp_path / "data" / "lead-funnel.log").read_text(encoding="utf-8")
+    assert "Unable to load application configuration" in log_text
+
+
+def test_scan_execution_lock_prevents_desktop_and_mobile_overlap(tmp_path):
+    lock_path = tmp_path / "scan.lock"
+
+    with _scan_execution_lock(lock_path) as first_acquired:
+        with _scan_execution_lock(lock_path) as second_acquired:
+            assert first_acquired is True
+            assert second_acquired is False
+
+    with _scan_execution_lock(lock_path) as acquired_after_release:
+        assert acquired_after_release is True

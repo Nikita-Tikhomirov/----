@@ -245,6 +245,35 @@ def test_build_attachment_context_uses_openrouter_vision_when_ocr_has_no_text(mo
     assert "форма заявки и блок тарифов" in context
 
 
+def test_blank_vision_model_uses_configured_openrouter_analysis_model(monkeypatch):
+    seen_models = []
+    monkeypatch.setattr(
+        "app.attachments.download_attachment",
+        lambda url, cookie="", max_bytes=2_000_000: b"fake image",
+    )
+    monkeypatch.setattr(
+        "app.attachments._run_tesseract_ocr",
+        lambda content, ext: "",
+    )
+
+    def describe(content, extension, api_key, model, base_url, timeout_seconds=45.0):
+        seen_models.append(model)
+        return "На изображении показана инфографика для нового блока страницы."
+
+    monkeypatch.setattr("app.attachments.describe_image_with_openrouter", describe)
+
+    context = build_attachment_context(
+        ("screen.png: https://kwork.ru/files/screen.png",),
+        openrouter_api_key="or-test-key",
+        openrouter_analysis_model="openai/gpt-5.1",
+        openrouter_vision_model="",
+        openrouter_vision_mode="smart",
+    )
+
+    assert seen_models == ["openai/gpt-5.1"]
+    assert "Статус: скачан, vision прочитан" in context
+
+
 def test_build_attachment_context_off_mode_never_calls_openrouter_vision(monkeypatch):
     monkeypatch.setattr(
         "app.attachments.download_attachment",

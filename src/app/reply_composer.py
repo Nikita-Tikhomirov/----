@@ -12,6 +12,10 @@ from app.reply_policy import COMMERCIAL_REPLY_PATTERN
 
 logger = logging.getLogger(__name__)
 
+
+class ReplyGenerationUnavailable(RuntimeError):
+    """Raised when a configured cloud writer cannot produce a safe proposal."""
+
 GENERIC_PHRASE_PATTERN = re.compile(
     r"(?:уточните\s+детали|обсудим\s+(?:детали|всё|все)|давайте\s+обсудим|"
     r"(?:готов|можем|предлагаю)\s+обсудить\s+(?:детали|задачу|проект|всё|все)|"
@@ -49,6 +53,14 @@ CUSTOMER_SKILL_ASSUMPTION_PATTERN = re.compile(
     r"вам\s+(?:будет\s+)?(?:сложно|непонятно)|для\s+новичка)\b",
     re.IGNORECASE,
 )
+CONTRACTOR_PROFILE_CLAIM_PATTERN = re.compile(
+    r"(?:\b\d{1,2}\s*(?:год|года|лет)\b|"
+    r"\b(?:мск|utc)\s*[+-]?\s*\d{0,2}\b|"
+    r"\b(?:мой\s+)?(?:основной\s+)?стек\s*[:—-]?|"
+    r"\b(?:мой\s+)?город\s*[:—-]?|"
+    r"\b(?:живу|нахожусь)\s+в\b)",
+    re.IGNORECASE,
+)
 AI_MENTION_PATTERN = re.compile(
     r"(?:\b(?:ai|gpt|chatgpt)\b|нейросет\w*|искусственн\w*\s+интеллект\w*|"
     r"(?:ai|ии)[-\s]?агент\w*)",
@@ -57,6 +69,13 @@ AI_MENTION_PATTERN = re.compile(
 ROBOTIC_PHRASING_PATTERN = re.compile(
     r"(?:^\s*привет[!,.]?(?:\s|$)|\bпонял\s+задач\w*|\bсделаю\s+следующее\b|"
     r"\bна\s+вс[её]\s+уйд[её]т\b|\bплан\s+такой\b)",
+    re.IGNORECASE,
+)
+GENERIC_FALLBACK_PATTERN = re.compile(
+    r"(?:посмотрел\s+задачу\s*:|"
+    r"сначала\s+разберу\s+текущую\s+реализацию\s+и\s+требования|"
+    r"внесу\s+нужные\s+изменения\s+по\s+задаче|"
+    r"проверю\s+основной\s+сценарий\s+и\s+покажу\s+готовый\s+рабочий\s+результат)",
     re.IGNORECASE,
 )
 UNFOUNDED_GUARANTEE_PATTERN = re.compile(
@@ -133,7 +152,9 @@ DELIVERY_BLOCKING_ISSUES = frozenset(
         "unsupported technical detail",
         "uncertain commitment",
         "customer skill assumption",
+        "unsupported contractor profile",
         "robotic phrasing",
+        "generic fallback",
         "unfounded guarantee",
         "too many questions",
         "missing concrete action",
@@ -150,7 +171,9 @@ DELIVERY_ISSUE_LABELS = {
     "unsupported technical detail": "называет техническую деталь, которой нет в заказе",
     "uncertain commitment": "содержит неуверенное обещание",
     "customer skill assumption": "оценивает навыки заказчика",
+    "unsupported contractor profile": "выдумывает данные исполнителя",
     "robotic phrasing": "звучит шаблонно или слишком по-ботовски",
+    "generic fallback": "содержит общий шаблон вместо разбора заказа",
     "unfounded guarantee": "дает необоснованную гарантию",
     "too many questions": "задает лишние вопросы",
     "missing concrete action": "не описывает конкретное действие",
@@ -201,8 +224,9 @@ def compose_customer_reply(
             fallback_models,
             timeout_seconds,
         )
-        if generated:
-            candidate = _remove_commercial_sentences(generated)
+        if not generated:
+            raise ReplyGenerationUnavailable("cloud AI reply unavailable")
+        candidate = _remove_commercial_sentences(generated)
 
     deterministic_issues = reply_quality_issues(candidate, context)
     ai_review: ReplyQualityResult | None = None
@@ -232,10 +256,20 @@ def compose_customer_reply(
             )
             if not reply_quality_issues(repaired, context):
                 return _normalize_reply(repaired)
+            if not deterministic_issues:
+                logger.warning(
+                    "AI reviewer repair failed deterministic checks; keeping the grounded original draft"
+                )
+                return _normalize_reply(candidate)
+            raise ReplyGenerationUnavailable("cloud AI reply unavailable: quality gate rejected the draft")
+        if api_key.strip():
+            raise ReplyGenerationUnavailable("cloud AI reply unavailable: quality gate rejected the draft")
         return _fallback_reply(context)
 
     if candidate:
         return _normalize_reply(candidate)
+    if api_key.strip():
+        raise ReplyGenerationUnavailable("cloud AI reply unavailable")
     return _fallback_reply(context)
 
 
@@ -253,6 +287,8 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
         issues.append("AI mention")
     if ROBOTIC_PHRASING_PATTERN.search(clean):
         issues.append("robotic phrasing")
+    if GENERIC_FALLBACK_PATTERN.search(clean):
+        issues.append("generic fallback")
     if UNFOUNDED_GUARANTEE_PATTERN.search(clean):
         issues.append("unfounded guarantee")
     if GENERIC_PHRASE_PATTERN.search(clean):
@@ -269,6 +305,8 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
         issues.append("uncertain commitment")
     if CUSTOMER_SKILL_ASSUMPTION_PATTERN.search(clean):
         issues.append("customer skill assumption")
+    if CONTRACTOR_PROFILE_CLAIM_PATTERN.search(clean):
+        issues.append("unsupported contractor profile")
     if clean.count("?") > 1:
         issues.append("too many questions")
     if len(clean) < MIN_REPLY_LENGTH:
@@ -285,6 +323,11 @@ def reply_quality_issues(reply: str, context: ReplyDraftContext) -> tuple[str, .
     if not _mentions_task(clean, context):
         issues.append("missing task reference")
     return tuple(issues)
+
+
+def is_generic_fallback_reply(reply: str) -> bool:
+    """Return whether a stored proposal is one of the retired boilerplate drafts."""
+    return GENERIC_FALLBACK_PATTERN.search(_normalize_reply(reply)) is not None
 
 
 def reply_delivery_issues(reply: str, context: ReplyDraftContext) -> tuple[str, ...]:
@@ -334,8 +377,8 @@ def _compose_with_openrouter(
         logger.info("OpenRouter reply composed with model %s", result.model)
         return result.content.strip()
     except Exception as exc:
-        logger.warning("OpenRouter reply composition failed; using safe fallback: %s", exc)
-        return ""
+        logger.error("OpenRouter reply composition failed; lead will be retried: %s", exc)
+        raise ReplyGenerationUnavailable("cloud AI reply unavailable") from exc
 
 
 def _review_with_openrouter(
@@ -423,6 +466,7 @@ def _writer_prompt(context: ReplyDraftContext) -> str:
                 "Начни с «Здравствуйте!» и сразу назови предмет задачи или нужный клиенту результат. "
                 f"Реалистичный срок: до {max(1, context.estimated_days)} дн. "
                 "Не упоминай цену, вилку, валюту, скидки или условия оплаты, а также AI, нейросети, портфолио или опыт, которого нет. "
+                "Не придумывай возраст, город, часовой пояс, стаж, стек или другие данные исполнителя, даже если заказчик просит их указать. "
                 "Техническую оплату на сайте упоминай только если она прямо есть в фактах заказа. "
                 "Не повторяй всё ТЗ, не используй фразы «понял задачу», «сделаю следующее», «план такой», "
                 "«на всё уйдёт» или «если нужно, скажите». Не обещай «гарантированно», «100%» и не давай иных "
@@ -453,6 +497,9 @@ def _review_prompt(candidate: str, context: ReplyDraftContext) -> str:
         "Отклони непроверенные технические компоненты, например SMTP или плагины, если их нет в фактах. "
         "Отклони условные обещания и фразы про внутреннюю неопределенность, например «пока исхожу» или «это уточняется». "
         "Отклони оценку навыков заказчика, например «если вы не работали с этим раньше» или «вам будет сложно». "
+        "Отклони любые придуманные сведения об исполнителе: возраст, город, часовой пояс, стаж или стек. "
+        "Не отклоняй приветствие «Здравствуйте!» — оно обязательно. Не требуй перечислить весь внутренний план, риски, "
+        "доступы или персональные данные исполнителя: достаточно конкретного понимания задачи, действий и проверки результата. "
         "Отклони шаблонные начала «Привет», «понял задачу», фразы «сделаю следующее», «на всё уйдёт» "
         "и необоснованные гарантии вроде «гарантированно» или «100%». "
         f"{question_policy} "
@@ -480,6 +527,7 @@ def _repair_prompt(candidate: str, issues: tuple[str, ...], context: ReplyDraftC
         "включая SMTP и плагины, если они не названы в заказе. "
         "Не описывай внутренние сомнения, условные обещания или фразы «пока исхожу» и «это уточняется». "
         "Не оценивай навыки заказчика и не добавляй формулировки про его опыт или сложность для него. "
+        "Не придумывай возраст, город, часовой пояс, стаж, стек или другие данные исполнителя. "
         f"{question_policy}\n\n"
         f"Причины правки: {issue_text}\n\n"
         f"Факты:\n{_redacted_facts(context)}\n\n"

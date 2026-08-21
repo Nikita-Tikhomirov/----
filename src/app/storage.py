@@ -354,10 +354,32 @@ class Storage:
                 UPDATE leads
                 SET status = 'sending', last_error = ''
                 WHERE id = ? AND status IN ('new', 'emailed', 'approved', 'failed')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sent_messages WHERE sent_messages.lead_id = leads.id
+                  )
                 """,
                 (lead_id,),
             )
         return cursor.rowcount > 0
+
+    def was_lead_sent(self, lead_id: int) -> bool:
+        """Return whether an external send has already been persisted for this lead."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM leads
+                WHERE id = ?
+                  AND (
+                      status = 'sent'
+                      OR EXISTS (
+                          SELECT 1 FROM sent_messages WHERE sent_messages.lead_id = leads.id
+                      )
+                  )
+                """,
+                (lead_id,),
+            ).fetchone()
+        return row is not None
 
     def claim_lead_email_delivery(self, lead_id: int) -> bool:
         """Atomically reserve a new lead so concurrent scans cannot email it twice."""
@@ -415,6 +437,14 @@ class Storage:
                 WHERE id = ?
                 """,
                 (hub_lead_id, lead_id),
+            )
+
+    def prepare_lead_hub_resync(self, lead_id: int) -> None:
+        """Keep the remote id but make an updated lead eligible for idempotent upsert."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE leads SET hub_synced_at = '', hub_claimed_at = '' WHERE id = ?",
+                (lead_id,),
             )
 
     def release_lead_hub_delivery(self, lead_id: int) -> None:
@@ -612,6 +642,26 @@ class Storage:
             conn.execute(
                 "UPDATE leads SET status = 'failed', last_error = ? WHERE id = ?",
                 (clean_error, lead_id),
+            )
+
+    def mark_rejected(self, lead_id: int, reason: str = "") -> None:
+        clean_reason = reason.strip()[:2000] or MISSING_ERROR_MESSAGE
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE leads SET status = 'rejected', last_error = ? WHERE id = ?",
+                (clean_reason, lead_id),
+            )
+
+    def mark_ready(self, lead_id: int) -> None:
+        """Return a successfully rebuilt unsent lead to the actionable queue."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE leads
+                SET status = 'new', last_error = ''
+                WHERE id = ? AND status NOT IN ('approved', 'sending', 'sent')
+                """,
+                (lead_id,),
             )
 
     def replace_lead_attachments(self, lead_id: int, attachments: Iterable) -> None:

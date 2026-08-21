@@ -51,6 +51,31 @@ def test_records_and_reads_durable_post_rejection(tmp_path):
     assert storage.get_post_rejection(post_id) == ""
 
 
+def test_marks_existing_lead_rejected_with_reason(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=100,
+        post_url="https://kwork.ru/projects/100/view",
+        text="Слишком сложная задача",
+        posted_at="2026-08-21T09:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=78,
+        summary="Старая оценка",
+        draft_reply="Старый шаблонный отклик",
+        contact="https://kwork.ru/projects/100/view",
+    )
+
+    storage.mark_rejected(lead_id, "AI: задача сложнее недельного лимита")
+
+    lead = storage.get_lead(lead_id)
+    assert lead.status == "rejected"
+    assert lead.last_error == "AI: задача сложнее недельного лимита"
+
+
 def test_get_lead_for_post_returns_existing_lead(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
@@ -102,6 +127,33 @@ def test_mobile_hub_delivery_is_claimed_once_and_keeps_lead_actionable(tmp_path)
     assert lead.status == "new"
     assert lead.hub_lead_id == 9001
     assert storage.claim_lead_hub_delivery(lead_id) is False
+
+
+def test_rebuilt_lead_can_be_claimed_for_mobile_resync(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=50,
+        post_url="https://kwork.ru/projects/50/view",
+        text="Нужно сверстать страницу",
+        posted_at="2026-07-18T12:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=81,
+        summary="Верстка",
+        draft_reply="Здравствуйте!",
+        contact="https://kwork.ru/projects/50/view",
+    )
+    storage.mark_lead_hub_synced(lead_id, 9002)
+
+    storage.prepare_lead_hub_resync(lead_id)
+
+    lead = storage.get_lead(lead_id)
+    assert lead.hub_lead_id == 9002
+    assert lead.hub_synced_at == ""
+    assert storage.claim_lead_hub_delivery(lead_id) is True
 
 
 def test_only_one_storage_instance_can_claim_new_lead_email_delivery(tmp_path):
@@ -160,6 +212,30 @@ def test_begin_lead_send_blocks_repeat_submission_until_status_is_recorded(tmp_p
 
     storage.mark_sent(lead_id, "https://kwork.ru/projects/431/view", "kwork-project-431")
     assert storage.get_lead(lead_id).status == "sent"
+
+
+def test_begin_lead_send_never_retries_when_external_send_was_recorded(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="jobs",
+        message_id=432,
+        post_url="https://kwork.ru/projects/432/view",
+        text="Нужно сверстать лендинг",
+        posted_at="2026-05-04T10:00:00+03:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=81,
+        summary="HTML/CSS лендинг",
+        draft_reply="Здравствуйте! Готов помочь.",
+        contact="https://kwork.ru/projects/432/view",
+    )
+    storage.mark_sent(lead_id, "https://kwork.ru/projects/432/view", "kwork-project-432")
+    storage.mark_failed(lead_id, "Сбой синхронизации после отправки")
+
+    assert storage.was_lead_sent(lead_id) is True
+    assert storage.begin_lead_send(lead_id) is False
 
 
 def test_lead_reply_and_last_error_can_be_updated(tmp_path):

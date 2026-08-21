@@ -2,9 +2,12 @@ import re
 from dataclasses import replace
 from unittest.mock import patch
 
+import pytest
+
 from app.llm_client import OpenRouterResult
 from app.reply_composer import (
     ReplyDraftContext,
+    ReplyGenerationUnavailable,
     _redacted_facts,
     _writer_prompt,
     compose_customer_reply,
@@ -269,7 +272,7 @@ def test_writer_prompt_uses_customer_goal_and_fact_grounded_plan():
     assert "риски: в тз не указан" in prompt
 
 
-def test_composer_falls_back_when_provider_keeps_prohibited_clarification():
+def test_composer_blocks_when_provider_keeps_prohibited_clarification():
     unsafe_reply = (
         "Здравствуйте! Вижу проблему с отправкой формы заявки на мобильных и адаптивом лендинга. "
         "Проверю текущую валидацию и обработку данных, затем внесу правки в разметку и стили. "
@@ -288,10 +291,53 @@ def test_composer_falls_back_when_provider_keeps_prohibited_clarification():
             OpenRouterResult(content=unsafe_reply, model="anthropic/claude-sonnet-4.5"),
         ],
     ):
-        reply = compose_customer_reply(_form_context(), "", api_key="sk-test")
+        with pytest.raises(ReplyGenerationUnavailable, match="quality gate"):
+            compose_customer_reply(_form_context(), "", api_key="sk-test")
 
-    assert "напишите, куда" not in reply.lower()
-    assert "unapproved clarification" not in reply_quality_issues(reply, _form_context())
+
+def test_composer_never_publishes_generic_fallback_when_cloud_generation_fails():
+    with patch(
+        "app.reply_composer.openrouter_chat",
+        side_effect=ConnectionError("OpenRouter is temporarily unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="cloud AI reply unavailable"):
+            compose_customer_reply(
+                _form_context(),
+                "Здравствуйте! Посмотрел задачу. Сначала разберу текущую реализацию, затем внесу изменения.",
+                api_key="or-test",
+            )
+
+
+def test_composer_keeps_grounded_draft_when_ai_reviewer_demands_unneeded_details():
+    grounded_reply = (
+        "Здравствуйте! Разберусь, почему данные сервера и Метрики расходятся, и настрою корректный учёт событий. "
+        "Проверю код счётчика, сопоставлю серверные логи с событиями за контрольный период и найду точку расхождения. "
+        "После правок повторно сравню статистику и зафиксирую результат проверки. "
+        "Могу приступить сразу и выполнить работу за три дня."
+    )
+    invalid_repair = grounded_reply + " Для работы понадобятся доступы к серверу и Метрике."
+    context = replace(
+        _form_context(),
+        title="Починить аналитику лендинга",
+        task_summary="Найти расхождение между серверной статистикой и Яндекс Метрикой",
+        source_text="Данные о посетителях и кликах на сервере не совпадают с Яндекс Метрикой.",
+        customer_goal="Получать согласованную статистику посетителей и кликов",
+    )
+    with patch(
+        "app.reply_composer.openrouter_chat",
+        side_effect=[
+            OpenRouterResult(content=grounded_reply, model="anthropic/claude-sonnet-4.5"),
+            OpenRouterResult(
+                content='{"approved": false, "issues": ["нужно упомянуть доступы"]}',
+                model="anthropic/claude-sonnet-4.5",
+            ),
+            OpenRouterResult(content=invalid_repair, model="anthropic/claude-sonnet-4.5"),
+        ],
+    ):
+        reply = compose_customer_reply(context, "", api_key="or-test")
+
+    assert reply == grounded_reply
+    assert reply_quality_issues(reply, context) == ()
 
 
 def test_fallback_uses_title_when_task_summary_judges_customer_skill():
@@ -304,7 +350,7 @@ def test_fallback_uses_title_when_task_summary_judges_customer_skill():
 
     assert "нович" not in reply.lower()
     assert "исправить форму заявки" in reply.lower()
-    assert reply_quality_issues(reply, context) == ()
+    assert reply_quality_issues(reply, context) == ("generic fallback",)
 
 
 def test_fallback_does_not_treat_information_page_as_form_task():
@@ -325,7 +371,7 @@ def test_fallback_does_not_treat_information_page_as_form_task():
     assert "текущую отправку формы" not in lowered
     assert "валидацию на мобильных" not in lowered
     assert "wordpress" in lowered
-    assert reply_quality_issues(reply, context) == ()
+    assert reply_quality_issues(reply, context) == ("generic fallback",)
 
 
 def test_wordpress_catalog_payment_fallback_uses_explicit_order_scope():
@@ -347,7 +393,7 @@ def test_wordpress_catalog_payment_fallback_uses_explicit_order_scope():
     assert "оплат" in lowered
     assert "импорт" not in lowered
     assert "фильтр" not in lowered
-    assert reply_quality_issues(reply, context) == ()
+    assert reply_quality_issues(reply, context) == ("generic fallback",)
 
 
 def test_catalog_selection_fallback_names_the_customer_flow_from_order_facts():
@@ -368,7 +414,7 @@ def test_catalog_selection_fallback_names_the_customer_flow_from_order_facts():
     assert "карточки материалов" in lowered
     assert "сформировать нужный список" in lowered
     assert "передачу сформированного списка" in lowered
-    assert reply_quality_issues(reply, context) == ()
+    assert reply_quality_issues(reply, context) == ("generic fallback",)
 
 
 def test_writer_prompt_distinguishes_payment_feature_from_payment_terms():
@@ -470,6 +516,27 @@ def test_quality_gate_rejects_generic_discussion_closing():
     )
 
     assert "generic phrase" in reply_quality_issues(reply, _form_context())
+
+
+def test_quality_gate_rejects_the_old_generic_fallback_language():
+    reply = (
+        "Здравствуйте! Посмотрел задачу: исправить форму заявки. "
+        "Сначала разберу текущую реализацию и требования, затем внесу нужные изменения по задаче. "
+        "После этого проверю основной сценарий и покажу готовый рабочий результат. "
+        "На работу ориентируюсь на 2 дня, могу приступить сразу."
+    )
+
+    assert "generic fallback" in reply_quality_issues(reply, _form_context())
+
+
+def test_quality_gate_rejects_invented_contractor_profile_details():
+    reply = (
+        "Здравствуйте! Проверю код счётчика и сопоставлю серверные логи с событиями Метрики. "
+        "После этого найду точку расхождения, внесу правки и повторно проверю статистику. "
+        "32 года, Москва, основной стек PHP/JavaScript, МСК+0."
+    )
+
+    assert "unsupported contractor profile" in reply_quality_issues(reply, _form_context())
 
 
 def test_quality_gate_rejects_catalog_filters_and_product_filling_without_facts():

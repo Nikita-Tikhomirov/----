@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import re
 import time
+from contextlib import contextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Protocol
 
@@ -11,6 +14,7 @@ from app.ai_lead_judge import (
     DEFAULT_ACCEPT_DECISIONS,
     DEFAULT_BLOCKED_KEYWORDS,
     DEFAULT_HARD_REJECT_KEYWORDS,
+    LeadAnalysisUnavailable,
     LeadJudgeResult,
     judge_lead,
 )
@@ -26,13 +30,59 @@ from app.lead_api_client import LeadHubClient
 from app.public_telegram_client import PublicTelegramClient
 from app.reply_composer import (
     ReplyDraftContext,
+    ReplyGenerationUnavailable,
     compose_customer_reply,
+    is_generic_fallback_reply,
     reply_delivery_issue_summary,
 )
 from app.storage import Storage
 from app.telegram_client import TelegramLeadClient
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _scan_execution_lock(lock_path: Path):
+    """Prevent desktop and mobile entry points from scanning at the same time."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+b")
+    acquired = False
+    try:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            try:
+                handle.write(b"0")
+                handle.flush()
+            except OSError:
+                yield False
+                return
+        handle.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:  # pragma: no cover - Windows is the supported production runtime
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        acquired = True
+        yield True
+    finally:
+        if acquired:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:  # pragma: no cover - Windows is the supported production runtime
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 class PostSource(Protocol):
@@ -107,7 +157,10 @@ def scan_once(
         reply_model = deepseek_model
         fallback_models = ()
     created = 0
-    for post in telegram_client.fetch_recent_posts():
+    posts = tuple(telegram_client.fetch_recent_posts())
+    if posts and text_api_key.strip():
+        _retire_generic_leads_outside_feed(storage, posts)
+    for post in posts:
         post_id = storage.save_post(
             channel=post.channel,
             message_id=post.message_id,
@@ -116,7 +169,24 @@ def scan_once(
             posted_at=post.posted_at,
         )
         existing_lead = storage.get_lead_for_post(post_id)
-        if existing_lead is not None:
+        if (
+            text_api_key.strip()
+            and existing_lead is not None
+            and existing_lead.status == "approved"
+            and is_generic_fallback_reply(existing_lead.draft_reply)
+        ):
+            reason = "Лид снят: одобренный общий шаблон запрещен к отправке и требует новой оценки."
+            storage.mark_rejected(existing_lead.id, reason)
+            logger.warning("Rejected approved generic draft for lead %s", existing_lead.id)
+            continue
+        rebuild_existing = bool(
+            text_api_key.strip()
+            and
+            existing_lead is not None
+            and existing_lead.status not in {"approved", "sending", "sent", "rejected"}
+            and is_generic_fallback_reply(existing_lead.draft_reply)
+        )
+        if existing_lead is not None and not rebuild_existing:
             _refresh_existing_lead_live_status(
                 storage=storage,
                 lead=existing_lead,
@@ -128,8 +198,17 @@ def scan_once(
             else:
                 logger.info("Skipping existing lead for post %s/%s", post.channel, post.message_id)
             continue
+        if rebuild_existing:
+            logger.warning(
+                "Rebuilding retired generic draft for lead %s (%s/%s)",
+                existing_lead.id,
+                post.channel,
+                post.message_id,
+            )
         rejection_reason = storage.get_post_rejection(post_id)
         if rejection_reason:
+            if rebuild_existing and existing_lead is not None:
+                storage.mark_rejected(existing_lead.id, rejection_reason)
             logger.info(
                 "Skipping durably rejected post %s/%s: %s",
                 post.channel,
@@ -143,8 +222,11 @@ def scan_once(
             required_keywords=lead_required_keywords,
         )
         if not evaluation.accepted:
+            reason = "; ".join(evaluation.reasons)
             logger.info("Rejected post %s/%s: %s", post.channel, post.message_id, evaluation.reasons)
-            storage.record_post_rejection(post_id, "; ".join(evaluation.reasons))
+            storage.record_post_rejection(post_id, reason)
+            if rebuild_existing and existing_lead is not None:
+                storage.mark_rejected(existing_lead.id, reason)
             continue
 
         project_text = post.text
@@ -158,14 +240,23 @@ def scan_once(
         project_page_text = ""
         if kwork_project_client is not None:
             project_info = kwork_project_client.inspect(evaluation.contact)
+            if rebuild_existing and existing_lead is not None:
+                storage.update_lead_live_status(
+                    existing_lead.id,
+                    response_count=getattr(project_info, "response_count", None),
+                    reason=str(getattr(project_info, "reason", "") or ""),
+                )
             if project_info.is_unavailable:
+                reason = project_info.reason or "Kwork заказ недоступен"
                 logger.info(
                     "Rejected post %s/%s: %s",
                     post.channel,
                     post.message_id,
                     project_info.reason,
                 )
-                storage.record_post_rejection(post_id, project_info.reason or "Kwork заказ недоступен")
+                storage.record_post_rejection(post_id, reason)
+                if rebuild_existing and existing_lead is not None:
+                    storage.mark_rejected(existing_lead.id, reason)
                 continue
             kwork_facts = tuple(getattr(project_info, "facts", ()))
             project_title = project_info.title
@@ -180,6 +271,9 @@ def scan_once(
                 )
                 continue
             if project_info.has_response_count and project_info.response_count > kwork_max_responses:
+                reason = (
+                    f"Kwork откликов {project_info.response_count} больше лимита {kwork_max_responses}"
+                )
                 logger.info(
                     "Rejected post %s/%s: Kwork responses %s > %s",
                     post.channel,
@@ -189,8 +283,10 @@ def scan_once(
                 )
                 storage.record_post_rejection(
                     post_id,
-                    f"Kwork откликов {project_info.response_count} больше лимита {kwork_max_responses}",
+                    reason,
                 )
+                if rebuild_existing and existing_lead is not None:
+                    storage.mark_rejected(existing_lead.id, reason)
                 continue
             if project_info.has_response_count:
                 project_summary_suffix = f", откликов: {project_info.response_count}"
@@ -240,26 +336,38 @@ def scan_once(
                     if part
                 )
 
-        judge_result = lead_judge(
-            project_text,
-            api_key=text_api_key,
-            model=analysis_model,
-            base_url=text_base_url,
-            fallback_models=fallback_models,
-            min_score=lead_min_score,
-            max_estimated_days=lead_max_days,
-            accept_decisions=lead_accept_decisions,
-            blocked_keywords=lead_blocked_keywords,
-            hard_reject_keywords=lead_hard_reject_keywords,
-        )
+        try:
+            judge_result = lead_judge(
+                project_text,
+                api_key=text_api_key,
+                model=analysis_model,
+                base_url=text_base_url,
+                fallback_models=fallback_models,
+                min_score=lead_min_score,
+                max_estimated_days=lead_max_days,
+                accept_decisions=lead_accept_decisions,
+                blocked_keywords=lead_blocked_keywords,
+                hard_reject_keywords=lead_hard_reject_keywords,
+            )
+        except LeadAnalysisUnavailable as exc:
+            logger.error(
+                "Deferred post %s/%s until cloud analysis recovers: %s",
+                post.channel,
+                post.message_id,
+                exc,
+            )
+            continue
         if not judge_result.accepted:
+            reason = "; ".join(judge_result.reasons)
             logger.info(
                 "Rejected post %s/%s by AI judge: %s",
                 post.channel,
                 post.message_id,
-                "; ".join(judge_result.reasons),
+                reason,
             )
-            storage.record_post_rejection(post_id, "; ".join(judge_result.reasons))
+            storage.record_post_rejection(post_id, reason)
+            if rebuild_existing and existing_lead is not None:
+                storage.mark_rejected(existing_lead.id, reason)
             continue
 
         reply_title = project_title.strip() or _proposal_title_from_text(post.text, judge_result.summary)
@@ -279,14 +387,23 @@ def scan_once(
             work_plan=tuple(judge_result.work_plan),
             risks=tuple(judge_result.risks),
         )
-        draft_reply = reply_composer(
-            reply_context,
-            judge_result.draft_reply,
-            api_key=text_api_key,
-            model=reply_model,
-            base_url=text_base_url,
-            fallback_models=fallback_models,
-        )
+        try:
+            draft_reply = reply_composer(
+                reply_context,
+                judge_result.draft_reply,
+                api_key=text_api_key,
+                model=reply_model,
+                base_url=text_base_url,
+                fallback_models=fallback_models,
+            )
+        except ReplyGenerationUnavailable as exc:
+            logger.error(
+                "Deferred post %s/%s until cloud reply generation recovers: %s",
+                post.channel,
+                post.message_id,
+                exc,
+            )
+            continue
         summary = f"{_summary_from_judge(judge_result)}{project_summary_suffix}"
         if kwork_facts:
             summary = "\n\n".join([summary, _format_kwork_facts(kwork_facts)])
@@ -301,18 +418,36 @@ def scan_once(
         )
         proposal_price_rub = _proposal_price_from_kwork_max(kwork_max_price_rub) or judge_result.price_rub or None
 
-        lead_id = storage.create_lead(
-            post_id=post_id,
-            score=judge_result.score,
-            summary=summary,
-            draft_reply=draft_reply,
-            contact=evaluation.contact,
-            proposal_title=_proposal_title_from_text(post.text),
-            proposal_price_rub=proposal_price_rub,
-            proposal_days=judge_result.estimated_days or None,
-            buyer_desired_budget_rub=buyer_desired_budget_rub,
-            kwork_max_price_rub=kwork_max_price_rub,
-        )
+        if rebuild_existing and existing_lead is not None:
+            lead_id = existing_lead.id
+            storage.update_lead_assessment(
+                lead_id,
+                score=judge_result.score,
+                summary=summary,
+                price_rub=proposal_price_rub,
+                days=judge_result.estimated_days or None,
+            )
+            storage.update_lead_proposal(
+                lead_id,
+                draft_reply=draft_reply,
+                title=_proposal_title_from_text(post.text),
+                price_rub=proposal_price_rub,
+                days=judge_result.estimated_days or None,
+            )
+            storage.mark_ready(lead_id)
+        else:
+            lead_id = storage.create_lead(
+                post_id=post_id,
+                score=judge_result.score,
+                summary=summary,
+                draft_reply=draft_reply,
+                contact=evaluation.contact,
+                proposal_title=_proposal_title_from_text(post.text),
+                proposal_price_rub=proposal_price_rub,
+                proposal_days=judge_result.estimated_days or None,
+                buyer_desired_budget_rub=buyer_desired_budget_rub,
+                kwork_max_price_rub=kwork_max_price_rub,
+            )
         if project_info is not None:
             storage.update_lead_live_status(
                 lead_id,
@@ -324,9 +459,31 @@ def scan_once(
         lead = storage.get_lead(lead_id)
         if lead.status != "new":
             continue
+        if rebuild_existing and lead_hub is not None:
+            storage.prepare_lead_hub_resync(lead.id)
+            if _publish_lead(storage, lead_hub, storage.get_lead(lead.id)):
+                created += 1
+            continue
         if _deliver_new_lead(storage, lead_hub, email_client, lead):
             created += 1
     return created
+
+
+def _retire_generic_leads_outside_feed(storage: Storage, posts: tuple[object, ...]) -> None:
+    """Remove stale boilerplate from every unsent local queue, not only the latest page."""
+    current_posts = {
+        (str(getattr(post, "channel", "")), int(getattr(post, "message_id", 0)))
+        for post in posts
+    }
+    reason = "Лид снят: устаревший общий шаблон не прошел обязательную AI-пересборку."
+    for lead in storage.list_leads():
+        if lead.status in {"sent", "sending", "rejected"}:
+            continue
+        if (lead.channel, lead.message_id) in current_posts:
+            continue
+        if is_generic_fallback_reply(lead.draft_reply):
+            storage.mark_rejected(lead.id, reason)
+            logger.warning("Retired stale generic draft for lead %s outside current feed", lead.id)
 
 
 def _proposal_price_from_kwork_max(maximum_rub: int | None) -> int | None:
@@ -442,8 +599,40 @@ def process_mobile_approvals(
         if claimed is None:
             continue
 
+        if storage.was_lead_sent(local_lead.id):
+            try:
+                lead_hub.report_result(hub_lead_id, executor_id, sent=True)
+            except Exception:
+                logger.exception("Unable to reconcile already-sent mobile lead %s", hub_lead_id)
+            continue
+        if local_lead.status == "sending":
+            uncertainty = (
+                "Отправка уже начиналась, но итог не подтвержден локально. "
+                "Проверь заказ на Kwork перед любыми повторными действиями."
+            )
+            try:
+                lead_hub.report_result(
+                    hub_lead_id,
+                    executor_id,
+                    sent=False,
+                    error=uncertainty,
+                )
+            except Exception:
+                logger.exception("Unable to report uncertain mobile lead %s", hub_lead_id)
+            logger.error("Blocked uncertain repeated send for mobile lead %s", hub_lead_id)
+            continue
+
         try:
             payload = _mobile_command_payload(claimed)
+            quality_context = _mobile_reply_context(
+                storage,
+                local_lead,
+                title=str(payload["title"]),
+                days=int(payload["days"]),
+            )
+            quality_block = reply_delivery_issue_summary(str(payload["reply"]), quality_context)
+            if quality_block:
+                raise ValueError(quality_block)
             storage.update_lead_proposal(
                 local_lead.id,
                 payload["reply"],
@@ -461,8 +650,20 @@ def process_mobile_approvals(
                 title=payload["title"],
                 submit=True,
             )
-            storage.mark_sent(local_lead.id, local_lead.contact, message_id)
-            lead_hub.report_result(hub_lead_id, executor_id, sent=True)
+            try:
+                storage.mark_sent(local_lead.id, local_lead.contact, message_id)
+            except Exception:
+                logger.exception(
+                    "Kwork accepted mobile lead %s, but local sent status was not persisted",
+                    hub_lead_id,
+                )
+            try:
+                lead_hub.report_result(hub_lead_id, executor_id, sent=True)
+            except Exception:
+                logger.exception(
+                    "Kwork accepted mobile lead %s, but hub result reporting failed",
+                    hub_lead_id,
+                )
             logger.info("Sent mobile-approved lead %s as local lead %s", hub_lead_id, local_lead.id)
             processed += 1
         except Exception as exc:
@@ -496,6 +697,42 @@ def _command_int(command: dict[str, object], field: str) -> int | None:
     except (TypeError, ValueError):
         return None
     return number if number is not None and number > 0 else None
+
+
+def _mobile_reply_context(
+    storage: Storage,
+    lead,
+    *,
+    title: str,
+    days: int,
+) -> ReplyDraftContext:
+    attachments = storage.list_lead_attachments(lead.id)
+    attachment_context = "\n".join(
+        f"{attachment.label}: {(attachment.summary or attachment.status).strip()}"
+        for attachment in attachments
+        if attachment.label.strip() and (attachment.summary or attachment.status).strip()
+    )
+    return ReplyDraftContext(
+        title=title,
+        task_summary=_lead_summary_value(lead.summary, "Задача") or title,
+        source_text=lead.post_text,
+        attachment_context=attachment_context,
+        estimated_days=max(1, days),
+        blocking_question=_lead_summary_value(lead.summary, "Вопрос перед стартом"),
+        customer_goal=_lead_summary_value(lead.summary, "Боль клиента"),
+        work_plan=_lead_summary_items(lead.summary, "План работ"),
+        risks=_lead_summary_items(lead.summary, "Риски"),
+    )
+
+
+def _lead_summary_value(summary: str, label: str) -> str:
+    match = re.search(rf"^{re.escape(label)}:\s*(.+)$", summary, re.IGNORECASE | re.MULTILINE)
+    return " ".join(match.group(1).split()).strip() if match else ""
+
+
+def _lead_summary_items(summary: str, label: str) -> tuple[str, ...]:
+    value = _lead_summary_value(summary, label)
+    return tuple(item.strip() for item in value.split(";") if item.strip())[:5]
 
 
 def _deliver_new_lead(storage: Storage, lead_hub: LeadHubClient | None, email_client, lead) -> bool:
@@ -719,32 +956,36 @@ def _scan_runtime_once(
     config: AppConfig,
 ) -> None:
     """Run one Kwork pass and then execute any mobile-approved replies."""
-    cookie = _resolve_kwork_cookie(config)
-    scan_once(
-        storage, telegram_client, lead_hub,
-        deepseek_api_key=config.deepseek_api_key,
-        deepseek_model=config.deepseek_model,
-        openrouter_api_key=config.openrouter_api_key,
-        openrouter_base_url=config.openrouter_base_url,
-        openrouter_analysis_model=config.openrouter_analysis_model,
-        openrouter_reply_model=config.openrouter_reply_model,
-        openrouter_fallback_models=config.openrouter_fallback_models,
-        openrouter_vision_model=config.openrouter_vision_model,
-        openrouter_vision_mode=config.openrouter_vision_mode,
-        kwork_project_client=kwork_project_client,
-        kwork_max_responses=config.kwork_max_responses,
-        kwork_cookie=cookie,
-        kwork_use_browser=config.kwork_use_browser,
-        kwork_cdp_url=config.kwork_cdp_url,
-        kwork_browser_profile_dir=config.kwork_browser_profile_dir,
-        lead_min_score=config.lead_min_score,
-        lead_max_days=config.lead_max_days,
-        lead_accept_decisions=config.lead_accept_decisions,
-        lead_blocked_keywords=config.lead_blocked_keywords,
-        lead_hard_reject_keywords=config.lead_hard_reject_keywords,
-        lead_required_keywords=config.lead_required_keywords,
-    )
-    _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
+    with _scan_execution_lock(config.database_path.parent / "scan.lock") as acquired:
+        if not acquired:
+            logger.warning("Сканирование уже выполняется из другого окна или с мобильного приложения")
+            return
+        cookie = _resolve_kwork_cookie(config)
+        scan_once(
+            storage, telegram_client, lead_hub,
+            deepseek_api_key=config.deepseek_api_key,
+            deepseek_model=config.deepseek_model,
+            openrouter_api_key=config.openrouter_api_key,
+            openrouter_base_url=config.openrouter_base_url,
+            openrouter_analysis_model=config.openrouter_analysis_model,
+            openrouter_reply_model=config.openrouter_reply_model,
+            openrouter_fallback_models=config.openrouter_fallback_models,
+            openrouter_vision_model=config.openrouter_vision_model,
+            openrouter_vision_mode=config.openrouter_vision_mode,
+            kwork_project_client=kwork_project_client,
+            kwork_max_responses=config.kwork_max_responses,
+            kwork_cookie=cookie,
+            kwork_use_browser=config.kwork_use_browser,
+            kwork_cdp_url=config.kwork_cdp_url,
+            kwork_browser_profile_dir=config.kwork_browser_profile_dir,
+            lead_min_score=config.lead_min_score,
+            lead_max_days=config.lead_max_days,
+            lead_accept_decisions=config.lead_accept_decisions,
+            lead_blocked_keywords=config.lead_blocked_keywords,
+            lead_hard_reject_keywords=config.lead_hard_reject_keywords,
+            lead_required_keywords=config.lead_required_keywords,
+        )
+        _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
 
 
 def run_mobile_control_loop(
@@ -803,8 +1044,46 @@ def run_mobile_control_loop(
         time.sleep(poll_seconds)
 
 
+def _configure_runtime_logging(
+    database_path: Path,
+    *,
+    root_logger: logging.Logger | None = None,
+    include_console: bool = True,
+) -> Path:
+    """Persist diagnostics for both visible and hidden runtime entry points."""
+    target_logger = root_logger or logging.getLogger()
+    target_logger.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    log_path = database_path.parent / "lead-funnel.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_log_path = str(log_path.resolve())
+
+    if not any(
+        getattr(handler, "_lead_funnel_log_path", "") == resolved_log_path
+        for handler in target_logger.handlers
+    ):
+        file_handler = RotatingFileHandler(
+            log_path,
+            maxBytes=2_000_000,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        file_handler._lead_funnel_log_path = resolved_log_path
+        target_logger.addHandler(file_handler)
+
+    if include_console and not any(
+        getattr(handler, "_lead_funnel_console", False)
+        for handler in target_logger.handlers
+    ):
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        console_handler._lead_funnel_console = True
+        target_logger.addHandler(console_handler)
+    return log_path
+
+
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Telegram lead funnel")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("scan")
@@ -812,7 +1091,13 @@ def main() -> int:
     subparsers.add_parser("mobile-control")
     args = parser.parse_args()
 
-    config = load_config()
+    _configure_runtime_logging(Path("data/leads.sqlite3"))
+    try:
+        config = load_config()
+    except Exception:
+        logger.exception("Unable to load application configuration")
+        raise
+    _configure_runtime_logging(config.database_path)
     storage, telegram_client, lead_hub, kwork_project_client = build_runtime(config)
 
     if args.command == "scan":
