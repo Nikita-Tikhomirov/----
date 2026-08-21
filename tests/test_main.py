@@ -2091,3 +2091,46 @@ def test_scan_execution_lock_prevents_desktop_and_mobile_overlap(tmp_path):
 
     with _scan_execution_lock(lock_path) as acquired_after_release:
         assert acquired_after_release is True
+
+
+def test_idle_mobile_control_resolves_chrome_cookie_only_once(monkeypatch):
+    config = SimpleNamespace(scan_interval_seconds=60, lead_hub_executor_id="desktop-main")
+    cookie_calls = []
+    approval_cookies = []
+    sleep_calls = 0
+
+    class IdleHub:
+        def fetch_monitor_control(self):
+            return {"desired_state": "stopped", "scan_requested": False}
+
+        def report_monitor_heartbeat(self, *_args, **_kwargs):
+            return {}
+
+    monkeypatch.setattr(
+        main_module,
+        "_resolve_kwork_cookie",
+        lambda _config: cookie_calls.append(True) or "session-cookie",
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_process_mobile_approvals_from_runtime",
+        lambda _storage, _hub, _config, cookie: approval_cookies.append(cookie) or 0,
+    )
+
+    def stop_after_two_polls(_seconds):
+        nonlocal sleep_calls
+        sleep_calls += 1
+        if sleep_calls >= 2:
+            raise StopIteration
+
+    monkeypatch.setattr(main_module.time, "sleep", stop_after_two_polls)
+
+    try:
+        main_module.run_mobile_control_loop(object(), object(), IdleHub(), object(), config)
+    except StopIteration:
+        pass
+    else:
+        raise AssertionError("mobile control loop must be stopped by the test")
+
+    assert cookie_calls == [True]
+    assert approval_cookies == ["session-cookie", "session-cookie"]

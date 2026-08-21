@@ -998,6 +998,7 @@ def run_mobile_control_loop(
     """Keep the local Kwork session responsive to commands from the mobile app."""
     next_scheduled_scan = 0.0
     poll_seconds = min(15, max(3, config.scan_interval_seconds // 12))
+    approval_cookie = _resolve_kwork_cookie(config)
     while True:
         try:
             monitor = lead_hub.fetch_monitor_control()
@@ -1006,7 +1007,7 @@ def run_mobile_control_loop(
                 storage,
                 lead_hub,
                 config,
-                _resolve_kwork_cookie(config),
+                approval_cookie,
             )
             requested = bool(monitor.get("scan_requested"))
             scheduled = (
