@@ -1346,6 +1346,50 @@ def test_action_queue_separates_live_over_limit_leads_from_available_work():
     assert [lead.id for lead in stopped] == [2]
 
 
+def test_action_queue_keeps_rejected_leads_out_of_available_work():
+    now = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
+    available = Lead(
+        id=1,
+        post_id=1,
+        score=76,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/1/view",
+        status="new",
+        post_url="https://kwork.ru/projects/1/view",
+        posted_at="2026-07-18 14:00:00",
+        live_response_count=2,
+    )
+    rejected = Lead(
+        id=2,
+        post_id=2,
+        score=84,
+        summary="",
+        draft_reply="",
+        contact="https://kwork.ru/projects/2/view",
+        status="rejected",
+        post_url="https://kwork.ru/projects/2/view",
+        posted_at="2026-07-18 14:30:00",
+        live_response_count=1,
+    )
+
+    actionable = filter_actionable_leads(
+        [available, rejected],
+        max_age_hours=24,
+        max_responses=5,
+        now=now,
+    )
+    stopped = filter_stopped_leads(
+        [available, rejected],
+        max_age_hours=24,
+        max_responses=5,
+        now=now,
+    )
+
+    assert [lead.id for lead in actionable] == [1]
+    assert [lead.id for lead in stopped] == [2]
+
+
 def test_action_priority_prefers_fresh_orders_with_fewer_live_responses():
     now = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
 

@@ -2412,6 +2412,7 @@ def lead_action_priority(
     if (
         lead.status == "sent"
         or lead.status == "sending"
+        or lead.status == "rejected"
         or lead.sent_at
         or _lead_ai_decision(lead) == "reject"
         or lead.live_reason == UNAVAILABLE_PROJECT_REASON
