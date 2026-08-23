@@ -12,10 +12,10 @@ PROJECT_IDENTITIES = (
     ("teplodom", "teplodom-service.ru", "Лендинг ремонта котлов"),
     ("pereezd-prosto", "berezhny-pereezd.ru", "Лендинг квартирных переездов"),
     ("pravo-opora", "pravovaya-opora.ru", "Лендинг юридической компании"),
-    ("sever-market", "sever-market.ru", "Магазин туристического снаряжения"),
+    ("sever-market", "severniy-marshrut.ru", "Магазин туристического снаряжения"),
     ("modulprof", "modulprof.ru", "B2B-каталог модульных зданий"),
     ("doma-u-ozera", "doma-u-ozera.ru", "Сервис бронирования домов"),
-    ("praktika", "praktika-online.ru", "Образовательная платформа"),
+    ("praktika", "praktika-navyka.ru", "Образовательная платформа"),
     ("gruzcontrol", "gruzcontrol.ru", "Кабинет управления доставками"),
 )
 
@@ -30,7 +30,7 @@ _PROJECT_DETAILS = {
     "teplodom": ("ТеплоДом", "Лидогенерирующие лендинги", "/remont-gazovyh-kotlov", "red-green-gray"),
     "pereezd-prosto": ("Бережный переезд", "Лидогенерирующие лендинги", "/kvartirnyy-pereezd", "cobalt-green-red"),
     "pravo-opora": ("Правовая опора", "Лидогенерирующие лендинги", "/uslugi/spory-s-zastroyshchikom", "forest-gold-burgundy"),
-    "sever-market": ("Север Маркет", "Проекты посложнее", "/catalog/turisticheskoe-snaryazhenie", "pine-red-gray"),
+    "sever-market": ("Северный маршрут", "Проекты посложнее", "/catalog/turisticheskoe-snaryazhenie", "pine-red-gray"),
     "modulprof": ("МодульПроф", "Проекты посложнее", "/catalog/modulnye-zdaniya", "graphite-yellow-blue"),
     "doma-u-ozera": ("Дома у озера", "Проекты посложнее", "/booking/dom-s-saunoy", "forest-berry"),
     "praktika": ("Практика", "Проекты посложнее", "/cabinet/courses", "coral-turquoise-black"),

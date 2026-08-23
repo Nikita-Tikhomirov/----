@@ -39,3 +39,14 @@ def test_moving_and_legal_concepts_use_approved_available_brands_and_domains():
 
     assert (moving.brand, moving.domain) == ("Бережный переезд", "berezhny-pereezd.ru")
     assert (legal.brand, legal.domain) == ("Правовая опора", "pravovaya-opora.ru")
+
+
+def test_store_and_learning_concepts_use_approved_available_brands_and_domains():
+    store = get_project("sever-market")
+    learning = get_project("praktika")
+
+    assert (store.brand, store.domain) == (
+        "Северный маршрут",
+        "severniy-marshrut.ru",
+    )
+    assert learning.domain == "praktika-navyka.ru"
