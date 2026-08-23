@@ -1,7 +1,7 @@
 import csv
 import json
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 import portfolio.kwork_pack.cli as cli
 from portfolio.kwork_pack.catalog import PROJECTS
@@ -14,7 +14,21 @@ def _write_project_images(root, project):
     for number, shot in enumerate(project.shots, start=1):
         path = root / project.slug / f"{number:02d}-{shot.key}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (1920, 1280), "#d7dde2").save(path)
+        image = Image.new("RGB", (1920, 1280), (30 + number * 20, 60, 100))
+        draw = ImageDraw.Draw(image)
+        for index in range(6):
+            left = 96 + ((index + number) % 3) * 590
+            top = 170 + (index // 3) * 310
+            draw.rectangle((left, top, left + 460, top + 220), fill=(220, 230 - index * 14, 236))
+            draw.rectangle((left + 28, top + 28, left + 360, top + 52), fill=(40, 50, 64))
+        for column in range(17):
+            left = column * 1920 // 17
+            right = (column + 1) * 1920 // 17
+            tone = 30 if (number >> (column % 5)) & 1 else 220
+            draw.rectangle((left, 960, right, 1280), fill=(tone, 100, 150))
+        for row in range(960, 1280, 40):
+            draw.rectangle((0, row, 1920, row + 8), fill=(245, 245, 245))
+        image.save(path)
         paths.append(path)
     return tuple(paths)
 

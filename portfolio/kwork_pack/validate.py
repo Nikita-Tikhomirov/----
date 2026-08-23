@@ -5,18 +5,20 @@ from pathlib import Path
 from PIL import Image, UnidentifiedImageError
 
 from .models import ProjectSpec
+from .quality import (
+    ValidationIssue,
+    bottom_band_metrics,
+    validate_asset_uniqueness,
+    validate_cross_project_screenshot_uniqueness,
+)
 from .render import output_path
 
 
 _EXPECTED_SIZE = (1920, 1280)
 _MAX_BYTES = 10_000_000
-
-
-@dataclass(frozen=True)
-class ValidationIssue:
-    project_slug: str
-    file: str
-    message: str
+_MIN_LOWER_BAND_VARIANCE = 40.0
+_MIN_LOWER_BAND_EDGE_DENSITY = 0.003
+_SCREENSHOT_MIN_DISTANCE = 12
 
 
 @dataclass(frozen=True)
@@ -77,10 +79,12 @@ def validate_pack(
 ) -> ValidationReport:
     """Validate every declared render and reject undeclared project PNG files."""
     root = Path(output_root)
+    project_specs = tuple(projects)
     issues: list[ValidationIssue] = []
     files_checked = 0
+    valid_screenshots: list[tuple[ProjectSpec, Path]] = []
 
-    for project in projects:
+    for project in project_specs:
         expected_paths = tuple(
             output_path(root, project, shot) for shot in project.shots
         )
@@ -95,7 +99,25 @@ def validate_pack(
                 issues.append(ValidationIssue(project.slug, file, "missing image"))
                 continue
             files_checked += 1
-            issues.extend(_inspect_image(project, path, root))
+            image_issues = _inspect_image(project, path, root)
+            issues.extend(image_issues)
+            if image_issues:
+                continue
+            valid_screenshots.append((project, path))
+            variance, edge_density = bottom_band_metrics(path)
+            if (
+                variance < _MIN_LOWER_BAND_VARIANCE
+                or edge_density < _MIN_LOWER_BAND_EDGE_DENSITY
+            ):
+                issues.append(
+                    ValidationIssue(
+                        project.slug,
+                        file,
+                        "lower viewport lacks meaningful visual content "
+                        f"(variance {variance:.2f}, edge density {edge_density:.4f})",
+                        "sparse-lower-viewport",
+                    )
+                )
 
         if project_dir.is_dir():
             unexpected = sorted(
@@ -121,4 +143,10 @@ def validate_pack(
                 for path in unexpected
             )
 
+    issues.extend(validate_asset_uniqueness(root, project_specs))
+    issues.extend(
+        validate_cross_project_screenshot_uniqueness(
+            valid_screenshots, min_distance=_SCREENSHOT_MIN_DISTANCE
+        )
+    )
     return ValidationReport(files_checked, tuple(issues))
