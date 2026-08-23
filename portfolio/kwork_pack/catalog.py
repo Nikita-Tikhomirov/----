@@ -38,10 +38,10 @@ _PROJECT_DETAILS = {
 }
 
 _ROUTES = {
-    "tochka-hoda": (("cover", "/"), ("diagnostics", "/uslugi/diagnostika-avtomobilya"), ("services", "/uslugi"), ("case-study", "/cases/bmw-x5"), ("prices", "/ceny")),
-    "dentalea": (("cover", "/"), ("implantation", "/uslugi/implantatsiya-zubov"), ("doctors", "/vrachi"), ("case-study", "/cases/ulybka"), ("prices", "/ceny")),
+    "tochka-hoda": (("cover", "/"), ("diagnostics", "/uslugi/diagnostika-avtomobilya"), ("booking", "/zapis/diagnostika"), ("case-study", "/raboty/bmw-x5-hodovaya"), ("prices", "/ceny")),
+    "dentalea": (("cover", "/"), ("implantation", "/uslugi/implantatsiya-zubov"), ("booking", "/zapis-k-vrachu"), ("case-study", "/cases/ulybka"), ("prices", "/ceny")),
     "ventkontur": (("cover", "/"), ("catalog", "/catalog/ventilyatsionnye-ustanovki"), ("selection", "/podbor-oborudovaniya"), ("projects", "/proekty"), ("service", "/servis")),
-    "syr-hleb": (("cover", "/"), ("gift-sets", "/catalog/podarochnye-nabory"), ("cheese", "/catalog/syry"), ("bakery", "/pekarnya"), ("delivery", "/dostavka")),
+    "syr-hleb": (("cover", "/"), ("gift-sets", "/catalog/podarochnye-nabory"), ("builder", "/sobrat-podarochnyy-nabor"), ("cheese", "/catalog/syry"), ("delivery", "/dostavka")),
     "kvadrat-remonta": (("cover", "/"), ("renovation", "/uslugi/remont-kvartir"), ("portfolio", "/portfolio"), ("calculator", "/kalkulyator-smety"), ("stages", "/etapy-rabot")),
     "okna-sfera": (("cover", "/"), ("windows", "/plastikovye-okna"), ("calculator", "/raschet-okna"), ("profiles", "/profili"), ("installation", "/montazh")),
     "chistiy-metr": (("cover", "/"), ("after-renovation", "/uborka-posle-remonta"), ("calculator", "/raschet-uborki"), ("checklist", "/chto-vhodit"), ("reviews", "/otzyvy")),
@@ -75,9 +75,15 @@ _ASSET_KEYS = {
 
 _CATEGORY = ("Разработка и IT", "Создание сайта")
 
+_LEGACY_DISPATCH_VARIANTS = ("cover", "content", "function", "content", "function")
+
 
 def _shots(slug: str) -> tuple[ShotSpec, ...]:
-    return tuple(ShotSpec(key, path, "desktop", key) for key, path in _ROUTES[slug])
+    """Attach a temporary legacy variant while preserving the new route story."""
+    return tuple(
+        ShotSpec(key, path, "desktop", variant)
+        for (key, path), variant in zip(_ROUTES[slug], _LEGACY_DISPATCH_VARIANTS)
+    )
 
 
 def _assets(slug: str, brand: str) -> tuple[AssetSpec, ...]:

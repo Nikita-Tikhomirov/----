@@ -1,6 +1,27 @@
 from portfolio.kwork_pack.catalog import PROJECTS, get_project, public_url
 
 
+_LEGACY_DISPATCH_VARIANTS = {"cover", "content", "function"}
+
+_REQUIRED_WORKFLOW_ROUTES = {
+    "tochka-hoda": ("booking", "/zapis/diagnostika"),
+    "dentalea": ("booking", "/zapis-k-vrachu"),
+    "ventkontur": ("selection", "/podbor-oborudovaniya"),
+    "syr-hleb": ("builder", "/sobrat-podarochnyy-nabor"),
+    "kvadrat-remonta": ("calculator", "/kalkulyator-smety"),
+    "okna-sfera": ("calculator", "/raschet-okna"),
+    "chistiy-metr": ("calculator", "/raschet-uborki"),
+    "teplodom": ("request", "/vyzov-mastera"),
+    "pereezd-prosto": ("calculator", "/raschet-pereezda"),
+    "pravo-opora": ("assessment", "/otsenka-dela"),
+    "sever-market": ("cart", "/korzina"),
+    "modulprof": ("configurator", "/konfigurator"),
+    "doma-u-ozera": ("booking", "/bronirovanie"),
+    "praktika": ("lesson", "/courses/web-design/lesson-4"),
+    "gruzcontrol": ("dispatch", "/dashboard/dispatch"),
+}
+
+
 def test_every_project_has_five_desktop_routes_and_dedicated_renderer():
     assert len(PROJECTS) == 15
     assert len({project.slug for project in PROJECTS}) == 15
@@ -12,6 +33,29 @@ def test_every_project_has_five_desktop_routes_and_dedicated_renderer():
         assert len(project.shots) == 5
         assert all(shot.layout == "desktop" for shot in project.shots)
         assert len({shot.path for shot in project.shots}) == 5
+        assert {shot.variant for shot in project.shots} <= _LEGACY_DISPATCH_VARIANTS
+        assert tuple(shot.variant for shot in project.shots) == (
+            "cover",
+            "content",
+            "function",
+            "content",
+            "function",
+        )
+
+
+def test_catalog_declares_exact_flagship_story_and_all_required_workflows():
+    flagship = get_project("tochka-hoda")
+    assert [(shot.key, shot.path) for shot in flagship.shots] == [
+        ("cover", "/"),
+        ("diagnostics", "/uslugi/diagnostika-avtomobilya"),
+        ("booking", "/zapis/diagnostika"),
+        ("case-study", "/raboty/bmw-x5-hodovaya"),
+        ("prices", "/ceny"),
+    ]
+
+    for slug, workflow_route in _REQUIRED_WORKFLOW_ROUTES.items():
+        project_routes = {(shot.key, shot.path) for shot in get_project(slug).shots}
+        assert workflow_route in project_routes
 
 
 def test_public_urls_are_semantic_and_never_look_like_local_demos():

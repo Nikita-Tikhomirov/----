@@ -26,7 +26,7 @@ def test_manifests_contain_fifteen_upload_rows_and_five_ordered_desktop_images(t
     assert payload["works"][0]["images"] == [
         "tochka-hoda/01-cover.png",
         "tochka-hoda/02-diagnostics.png",
-        "tochka-hoda/03-services.png",
+        "tochka-hoda/03-booking.png",
         "tochka-hoda/04-case-study.png",
         "tochka-hoda/05-prices.png",
     ]
@@ -63,7 +63,7 @@ def test_manifests_are_deterministic_and_preserve_russian_metadata(tmp_path):
         "images": [
             "tochka-hoda/01-cover.png",
             "tochka-hoda/02-diagnostics.png",
-            "tochka-hoda/03-services.png",
+            "tochka-hoda/03-booking.png",
             "tochka-hoda/04-case-study.png",
             "tochka-hoda/05-prices.png",
         ],

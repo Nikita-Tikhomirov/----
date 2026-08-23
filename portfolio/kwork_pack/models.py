@@ -6,12 +6,14 @@ from typing import Literal
 class ShotSpec:
     key: str
     path: str
-    layout: Literal["desktop", "mobile"]
-    variant: str
+    layout: Literal["desktop"]
+    # TODO(Task 3): remove this temporary legacy renderer dispatch field.
+    variant: Literal["cover", "content", "function"]
 
     @property
     def public_path(self) -> str:
-        """Return the route name used by the existing browser-shell API."""
+        """Return the legacy browser-shell route alias until Task 3."""
+        # TODO(Task 3): migrate browser-shell callers to ``path`` and remove this.
         return self.path
 
 
