@@ -1,0 +1,111 @@
+body[data-palette] {
+  --accent: #2f7d57;
+  --accent-strong: #245f43;
+  --support: #cc4a4a;
+  --highlight: #f0f4f7;
+}
+
+body[data-palette="graphite-green-red"] {
+  --accent: #2d7b55;
+  --accent-strong: #1f5b3f;
+  --support: #d45151;
+  --highlight: #e8eeeb;
+}
+
+body[data-palette="mint-coral-graphite"] {
+  --accent: #5db7a7;
+  --accent-strong: #3c8377;
+  --support: #eb756c;
+  --highlight: #eff7f4;
+}
+
+body[data-palette="steel-yellow-red"] {
+  --accent: #5b6f86;
+  --accent-strong: #3f5268;
+  --support: #c64d42;
+  --highlight: #f5efd8;
+}
+
+body[data-palette="burgundy-herbal"] {
+  --accent: #8d3045;
+  --accent-strong: #672131;
+  --support: #4d8757;
+  --highlight: #f7f0ef;
+}
+
+body[data-palette="blue-brick-graphite"] {
+  --accent: #2d66d0;
+  --accent-strong: #1e4a9c;
+  --support: #c45b4e;
+  --highlight: #edf2fb;
+}
+
+body[data-palette="sky-yellow-graphite"] {
+  --accent: #2998d0;
+  --accent-strong: #1c709b;
+  --support: #edb92d;
+  --highlight: #eef8fd;
+}
+
+body[data-palette="turquoise-lemon-dark"] {
+  --accent: #26a59b;
+  --accent-strong: #16766f;
+  --support: #d6cd39;
+  --highlight: #ebf8f7;
+}
+
+body[data-palette="red-green-gray"] {
+  --accent: #c54b4b;
+  --accent-strong: #943434;
+  --support: #2b8a5d;
+  --highlight: #f8eeee;
+}
+
+body[data-palette="cobalt-green-red"] {
+  --accent: #315fd6;
+  --accent-strong: #24449b;
+  --support: #24935f;
+  --highlight: #eef2fc;
+}
+
+body[data-palette="forest-gold-burgundy"] {
+  --accent: #1f6b4e;
+  --accent-strong: #174d39;
+  --support: #b28b2f;
+  --highlight: #eef4f0;
+}
+
+body[data-palette="pine-red-gray"] {
+  --accent: #2e6a58;
+  --accent-strong: #214b3f;
+  --support: #c24f4a;
+  --highlight: #edf2ef;
+}
+
+body[data-palette="graphite-yellow-blue"] {
+  --accent: #505a67;
+  --accent-strong: #353c45;
+  --support: #d2a82d;
+  --highlight: #eff3f7;
+}
+
+body[data-palette="forest-berry"] {
+  --accent: #2d6e56;
+  --accent-strong: #214e3f;
+  --support: #b24c6d;
+  --highlight: #edf3ef;
+}
+
+body[data-palette="coral-turquoise-black"] {
+  --accent: #ea6d5f;
+  --accent-strong: #ba5146;
+  --support: #2d9ea0;
+  --highlight: #fcf1ef;
+}
+
+body[data-palette="green-red-amber"] {
+  --accent: #2f8c5d;
+  --accent-strong: #206040;
+  --support: #cb5147;
+  --highlight: #edf5f1;
+}
