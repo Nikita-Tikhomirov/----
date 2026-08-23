@@ -31,3 +31,11 @@ def test_tochka_hoda_uses_automotive_content_path():
     project = get_project("tochka-hoda")
     assert project.domain == "tochka-hoda.ru"
     assert project.shots[1].public_path == "/uslugi/diagnostika-avtomobilya"
+
+
+def test_moving_and_legal_concepts_use_approved_available_brands_and_domains():
+    moving = get_project("pereezd-prosto")
+    legal = get_project("pravo-opora")
+
+    assert (moving.brand, moving.domain) == ("Бережный переезд", "berezhny-pereezd.ru")
+    assert (legal.brand, legal.domain) == ("Правовая опора", "pravovaya-opora.ru")
