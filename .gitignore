@@ -1,5 +1,7 @@
 .env
 .deepseek/
+.superpowers/
+.worktrees/
 *.session
 *.session-journal
 *.sqlite3
