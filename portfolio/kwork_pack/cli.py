@@ -139,7 +139,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.handler(args)
-    except (OSError, RuntimeError, ValueError) as exc:
+    except Exception as exc:
         print(f"Ошибка выполнения команды {args.command}: {exc}")
         return 1
 

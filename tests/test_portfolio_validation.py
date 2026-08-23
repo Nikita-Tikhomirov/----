@@ -137,6 +137,24 @@ def test_validate_assets_and_render_cli_reuse_existing_interfaces(
     assert calls == [((project,), tmp_path)]
 
 
+def test_render_cli_reports_unexpected_handler_exception_without_traceback(
+    tmp_path, monkeypatch, capsys
+):
+    def fail_render(*_args, **_kwargs):
+        raise Exception("неожиданный сбой")
+
+    monkeypatch.setattr(cli, "render_all", fail_render)
+
+    result = cli.main(["render", "--output", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert captured.out == (
+        "Ошибка выполнения команды render: неожиданный сбой\n"
+    )
+    assert captured.err == ""
+
+
 def test_module_cli_emits_utf8_russian_diagnostics(tmp_path):
     result = subprocess.run(
         [

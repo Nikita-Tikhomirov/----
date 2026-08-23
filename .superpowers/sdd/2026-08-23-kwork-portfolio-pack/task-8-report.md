@@ -66,3 +66,27 @@ global harness smoke: ok, CLOUD_ONLY, Ollama commands skipped
 ```
 
 Первый полный pytest один раз получил внешний `TargetClosedError` при запуске установленного Chrome с Windows exit code `3221225477`. Немедленный targeted Chrome smoke прошел (`1 passed`), затем два свежих полных suite прошли полностью (`487 passed` каждый); изменения renderer для этого не выполнялись.
+
+## Исправление по результатам review
+
+Follow-up commit: `fix: handle unexpected portfolio CLI errors`.
+
+Review выявил, что `cli.main()` перехватывал только `OSError`, `RuntimeError` и `ValueError`. Обычное неожиданное `Exception` из обработчика `render` выходило с traceback вместо контролируемой CLI-ошибки.
+
+RED:
+
+```text
+python -m pytest tests/test_portfolio_validation.py::test_render_cli_reports_unexpected_handler_exception_without_traceback -q
+1 failed: Exception: неожиданный сбой вышел из cli.main()
+```
+
+GREEN после минимальной замены catch-clause на `except Exception`:
+
+```text
+targeted: 1 passed
+focused Task 8: 19 passed in 2.12s
+full pytest: 490 passed in 12.74s
+python -m compileall -q src portfolio tests: exit 0
+```
+
+Тест проверяет код возврата `1`, точную строку `Ошибка выполнения команды render: неожиданный сбой` в stdout и пустой stderr. Отдельный probe подтвердил, что `KeyboardInterrupt` и `SystemExit(7)` продолжают выходить наружу; `BaseException` не перехватывается.
