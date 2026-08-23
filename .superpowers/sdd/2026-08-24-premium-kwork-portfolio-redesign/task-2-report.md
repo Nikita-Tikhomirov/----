@@ -2,9 +2,9 @@
 
 ## Status
 
-Completed within the Task 2 scope. The focused quality and catalog contracts
-pass. The full suite has unrelated legacy renderer transition failures noted
-under Concerns.
+Review remediation is complete locally. The focused and expanded quality
+contracts pass. The full suite has unrelated legacy renderer transition
+failures noted under Concerns.
 
 ## Files Changed
 
@@ -14,6 +14,14 @@ under Concerns.
 - `tests/test_portfolio_validation.py`
 - `tests/test_portfolio_assets.py`
 - `tests/test_portfolio_manifest.py`
+
+Review remediation additionally changed:
+
+- `portfolio/kwork_pack/quality.py`
+- `portfolio/kwork_pack/validate.py`
+- `tests/test_portfolio_catalog.py`
+- `tests/test_portfolio_quality.py`
+- `tests/test_portfolio_validation.py`
 
 No generated assets, site renderers, Kwork state, or the untracked design
 inventory were modified.
@@ -50,14 +58,17 @@ Additional verification passed:
 
 ## Thresholds
 
-- dHash: 16x16 grayscale difference hash (256 bits).
+- dHash: 16x16 grayscale horizontal and vertical difference hash (512 bits).
 - Asset and cross-project screenshot similarity: reject Hamming distance below
-  12. This is under 5 percent changed hash bits, conservative enough to catch
+  12. This is under 2.5 percent changed hash bits, conservative enough to catch
   reused or minimally altered imagery without rejecting independently composed
   pages.
-- Lower viewport: variance at least 40 and edge density at least 0.003 in the
-  bottom 25 percent. Both checks must pass, so a flat white tail cannot pass on
-  a nonblank upper viewport.
+- Layout structure: a 12 by 8 tile fingerprint normalizes high-entropy photo
+  tiles while preserving UI geometry. Cross-project screenshots at layout
+  distance 8 or less are rejected.
+- Lower viewport: variance at least 40, edge density at least 0.006, and at
+  least 20 percent active detail tiles in the bottom 25 percent. All checks
+  must pass, so a flat white tail or one thin divider cannot pass.
 
 ## Self-Review
 
@@ -70,13 +81,57 @@ Additional verification passed:
 - Fixtures now contain unique structured lower-band content rather than solid
   color placeholders.
 
+## Review Remediation
+
+The independent review marked the first Task 2 commit as CHANGES_REQUIRED.
+Each finding received a regression test before implementation:
+
+- Invalid declared assets now return stable `invalid-asset` issues and never
+  abort `validate_pack`.
+- Duplicate `AssetSpec` filenames are detected before physical paths are
+  deduplicated; the catalog also requires unique declared filenames.
+- Cross-project comparison keeps SHA-256 and dual-axis dHash checks, then adds
+  a conservative UI-structure fingerprint so a swapped hero image cannot hide
+  a reused layout.
+- The lower band requires distributed active tiles as well as calibrated edge
+  density, while a table fixture verifies normal dense UI content remains valid.
+- Decodable wrong-format, wrong-size, and oversized screenshots still receive
+  lower-band and cross-project similarity checks. Only missing or unreadable
+  screenshots skip those computations.
+- Screenshot issue paths and both conflicting paths are output-root-relative.
+
+Review RED evidence:
+
+```text
+python -m pytest tests/test_portfolio_quality.py tests/test_portfolio_validation.py tests/test_portfolio_catalog.py -q
+7 failed, 26 passed
+
+python -m pytest tests/test_portfolio_validation.py -q -k "reused_layout or clearly_different"
+1 failed, 1 passed, 15 deselected
+```
+
+Review GREEN evidence:
+
+```text
+python -m pytest tests/test_portfolio_quality.py tests/test_portfolio_validation.py tests/test_portfolio_catalog.py -q
+36 passed in 15.95s
+
+python -m pytest tests/test_portfolio_quality.py tests/test_portfolio_validation.py tests/test_portfolio_assets.py tests/test_portfolio_catalog.py tests/test_portfolio_manifest.py -q
+45 passed in 16.25s
+```
+
+`git diff --check`, `python -m compileall -q portfolio/kwork_pack`, UTF-8 CLI
+diagnostic checks, and the global smoke harness also passed.
+
 ## Commit
 
 `aaa916e8c36fc8d4de307f2a54f790cd1681d7d1` - `feat: enforce portfolio visual uniqueness`
 
+`4982c79774db14d984c8c15c263cde9af41f1e6e` - `fix: harden portfolio quality gates`
+
 ## Concerns
 
-`python -m pytest` collected 500 tests and ended with 480 passed, 20 failed.
+`python -m pytest -q` collected 511 tests and ended with 491 passed, 20 failed.
 All failures are pre-existing Task 1 to Task 3 transition expectations in
 `tests/test_portfolio_render.py` and `tests/test_portfolio_sites.py`: they
 still assert four routes and three legacy render variants although the catalog
