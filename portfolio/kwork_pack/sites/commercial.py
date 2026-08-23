@@ -36,7 +36,8 @@ _COMMERCIAL_CSS = """
 .commercial-actions { display: flex; align-items: center; gap: 12px; }
 .commercial-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 48px; padding: 0 20px; border: 0; border-radius: 6px; background: var(--accent); color: white; font: inherit; font-size: 16px; font-weight: 700; }
 .commercial-button.secondary { border: 1px solid rgba(91, 105, 118, .25); background: white; color: var(--ink); }
-.commercial-hero-image { width: 100%; object-fit: cover; background: var(--highlight); }
+.commercial-image-slot { width: 100%; margin: 0; overflow: hidden; aspect-ratio: 16 / 10; background: var(--highlight); }
+.commercial-image-slot > .commercial-hero-image { width: 100%; height: 100%; object-fit: cover; }
 .commercial-label { margin-bottom: 14px; color: var(--accent-strong); font-size: 14px; font-weight: 800; text-transform: uppercase; }
 .commercial-mobile { min-height: 920px; }
 .commercial-mobile .commercial-nav { min-height: 68px; padding: 0 22px; }
@@ -54,7 +55,7 @@ _COMMERCIAL_CSS = """
 .tochka-copy { padding: 78px 48px 50px 62px; background: #fff; }
 .tochka-copy h1 { max-width: 620px; }
 .tochka-media { position: relative; padding: 34px; background: #202623; }
-.tochka-media img { height: 610px; }
+.tochka-media .commercial-image-slot { max-width: 976px; }
 .tochka-status { position: absolute; right: 56px; bottom: 62px; width: 280px; padding: 20px; border-left: 5px solid var(--support); background: #fff; }
 .tochka-status strong { display: block; margin-bottom: 6px; font-size: 20px; }
 .tochka-strip { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #d9dfdc; }
@@ -62,13 +63,13 @@ _COMMERCIAL_CSS = """
 .tochka-timeline { padding: 52px 62px; background: #f2f5f3; }
 .timeline-row { display: grid; grid-template-columns: 110px 1fr 340px; gap: 28px; align-items: center; padding: 22px 0; border-top: 1px solid #cbd4cf; }
 .timeline-index { color: var(--accent); font-size: 34px; font-weight: 800; }
-.timeline-row img { height: 170px; }
+.timeline-row .commercial-image-slot { width: min(100%, 272px); justify-self: end; }
 .tochka-booking { display: grid; grid-template-columns: 1.1fr .9fr; gap: 38px; padding: 48px 62px; background: #f3f5f4; }
 .tochka-booking-form { padding: 34px; border-top: 7px solid var(--accent); background: white; }
 .tochka-booking-form .commercial-form-row { grid-template-columns: 1fr 1fr; }
-.tochka-booking-media img { height: 325px; margin-bottom: 20px; }
+.tochka-booking-media .commercial-image-slot { max-width: 520px; margin-bottom: 20px; }
 .tochka-mobile-body { padding: 30px 22px; }
-.tochka-mobile-body img { height: 245px; margin: 22px 0; }
+.tochka-mobile-body .commercial-image-slot { margin: 22px 0; }
 
 .dentalea { background: #fbfdfc; }
 .dentalea .commercial-brand { font-family: Georgia, serif; color: #315b54; font-size: 28px; font-weight: 600; }
@@ -77,13 +78,13 @@ _COMMERCIAL_CSS = """
 .dentalea-copy h1 { max-width: 750px; font-family: Georgia, serif; font-size: 68px; font-weight: 500; }
 .dentalea-copy p { max-width: 620px; }
 .dentalea-portrait { position: relative; }
-.dentalea-portrait img { height: 520px; border-radius: 220px 220px 8px 8px; }
+.dentalea-portrait .commercial-image-slot { border-radius: 220px 220px 8px 8px; }
 .dentalea-note { position: absolute; left: -74px; bottom: 34px; width: 225px; padding: 22px; border-radius: 6px; background: #eb756c; color: #fff; font-weight: 700; }
 .dentalea-services { display: grid; grid-template-columns: repeat(3, 1fr); padding: 28px 88px; background: #eaf5f1; }
 .dentalea-services div { padding: 18px 28px; border-left: 1px solid #c6ddd5; }
 .dentalea-detail { display: grid; grid-template-columns: 430px 1fr; min-height: 820px; }
 .dentalea-detail-aside { padding: 50px 48px; background: #dff0eb; }
-.dentalea-detail-aside img { height: 270px; margin-bottom: 28px; border-radius: 6px; }
+.dentalea-detail-aside .commercial-image-slot { margin-bottom: 28px; border-radius: 6px; }
 .dentalea-detail-main { padding: 58px 76px; }
 .dentalea-step { display: grid; grid-template-columns: 70px 1fr; gap: 20px; padding: 24px 0; border-bottom: 1px solid #d8e3df; }
 .dentalea-step b { color: var(--support); font: 32px Georgia, serif; }
@@ -93,9 +94,9 @@ _COMMERCIAL_CSS = """
 .schedule-day strong { display: block; margin-bottom: 22px; }
 .schedule-time { margin-bottom: 10px; padding: 9px; border-radius: 5px; background: #e9f5f1; color: #315b54; text-align: center; }
 .dentalea-doctor { padding: 28px; background: #fff1ef; }
-.dentalea-doctor img { height: 250px; margin-bottom: 20px; border-radius: 6px; }
+.dentalea-doctor .commercial-image-slot { margin-bottom: 20px; border-radius: 6px; }
 .dentalea-mobile-body { padding: 24px; }
-.dentalea-mobile-body img { height: 300px; border-radius: 160px 160px 6px 6px; margin-bottom: 26px; }
+.dentalea-mobile-body .commercial-image-slot { border-radius: 160px 160px 6px 6px; margin-bottom: 26px; }
 
 .ventkontur { background: #f0f2f4; }
 .ventkontur .commercial-nav { background: #344250; color: white; }
@@ -106,7 +107,7 @@ _COMMERCIAL_CSS = """
 .vent-main { padding: 54px 62px; }
 .vent-main h1 { max-width: 850px; font-family: Arial, sans-serif; font-size: 60px; text-transform: uppercase; }
 .vent-hero-grid { display: grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: stretch; }
-.vent-hero-grid img { height: 370px; }
+.vent-hero-grid .commercial-image-slot { width: min(100%, 592px); }
 .vent-spec-card { padding: 26px; border-top: 8px solid #e2b92e; background: #fff; }
 .vent-spec-card dl { display: grid; grid-template-columns: 1fr auto; gap: 14px; margin: 0; }
 .vent-spec-card dd { margin: 0; font-weight: 800; }
@@ -116,16 +117,16 @@ _COMMERCIAL_CSS = """
 .vent-table th { background: #3f5268; color: white; }
 .vent-table td:first-child { font-weight: 800; }
 .vent-table-image { display: grid; grid-template-columns: 1fr 360px; gap: 28px; margin-bottom: 28px; }
-.vent-table-image img { height: 220px; }
+.vent-table-image .commercial-image-slot { align-self: start; }
 .vent-filter { display: grid; grid-template-columns: 360px 1fr; min-height: 830px; }
 .vent-filter-panel { padding: 38px; background: #fff; border-right: 1px solid #cad1d7; }
 .vent-filter-panel .commercial-field { margin-bottom: 14px; }
 .vent-results { padding: 40px 48px; }
 .equipment-row { display: grid; grid-template-columns: 120px 1fr 160px; gap: 24px; align-items: center; padding: 18px; border-top: 1px solid #cbd2d8; background: white; }
-.equipment-row img { height: 82px; }
+.equipment-row .commercial-image-slot { width: 120px; }
 .equipment-code { font-family: Consolas, monospace; font-weight: 800; }
 .vent-mobile-body { padding: 24px 20px; }
-.vent-mobile-body img { height: 240px; margin: 20px 0; }
+.vent-mobile-body .commercial-image-slot { margin: 20px 0; }
 .vent-mobile-spec { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #c8d0d7; }
 .vent-mobile-spec div { padding: 16px; background: #fff; }
 
@@ -134,7 +135,7 @@ _COMMERCIAL_CSS = """
 .syr-hleb .commercial-brand { color: #75273b; font: 700 30px Georgia, serif; }
 .food-cover { display: grid; grid-template-columns: 58% 42%; min-height: 750px; }
 .food-product { position: relative; padding: 32px 48px; background: #f4eceb; }
-.food-product img { height: 610px; }
+.food-product .commercial-image-slot { max-width: 976px; }
 .food-price { position: absolute; right: 66px; top: 58px; display: grid; place-items: center; width: 128px; height: 128px; border-radius: 50%; background: #4d8757; color: white; font-size: 24px; font-weight: 800; }
 .food-copy { display: flex; flex-direction: column; justify-content: center; padding: 62px; }
 .food-copy h1 { font-family: Georgia, serif; font-size: 66px; font-weight: 500; }
@@ -142,17 +143,17 @@ _COMMERCIAL_CSS = """
 .food-catalog { padding: 44px 58px; }
 .food-grid { display: grid; grid-template-columns: 1.35fr 1fr 1fr; gap: 22px; }
 .food-card { padding-bottom: 20px; border-bottom: 2px solid #75273b; }
-.food-card img { height: 235px; margin-bottom: 18px; }
-.food-card:first-child img { height: 340px; }
+.food-card .commercial-image-slot { width: min(100%, 376px); margin-bottom: 18px; }
+.food-card:first-child .commercial-image-slot { width: min(100%, 544px); }
 .food-card:first-child { grid-row: span 2; }
 .food-builder { display: grid; grid-template-columns: 1fr 420px; gap: 42px; padding: 48px 62px; background: #f8f4f2; }
 .gift-shelf { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
-.gift-item { display: grid; grid-template-columns: 120px 1fr; gap: 18px; padding: 14px; background: white; }
-.gift-item img { height: 105px; }
+.gift-item { display: grid; grid-template-columns: 168px 1fr; gap: 18px; padding: 14px; background: white; }
+.gift-item .commercial-image-slot { align-self: start; }
 .gift-summary { padding: 30px; border-top: 6px solid #4d8757; background: #fff; }
 .gift-total { display: flex; justify-content: space-between; margin: 28px 0; font: 700 25px Georgia, serif; }
 .food-mobile-body { padding: 24px; }
-.food-mobile-body img { height: 315px; margin-bottom: 24px; }
+.food-mobile-body .commercial-image-slot { margin-bottom: 24px; }
 .food-mobile-body h1 { color: #75273b; font-family: Georgia, serif; }
 
 .kvadrat-remonta { background: #fff; }
@@ -161,27 +162,26 @@ _COMMERCIAL_CSS = """
 .remont-cover { padding: 40px 56px; }
 .remont-cover-head { display: grid; grid-template-columns: 1fr 390px; gap: 50px; align-items: end; margin-bottom: 28px; }
 .remont-cover h1 { max-width: 980px; font-size: 74px; }
-.remont-gallery { display: grid; grid-template-columns: 1.5fr .85fr .85fr; grid-template-rows: 230px 230px; gap: 14px; }
-.remont-gallery img { width: 100%; height: 100%; object-fit: cover; }
-.remont-gallery img:first-child { grid-row: 1 / 3; }
+.remont-gallery { display: grid; grid-template-columns: 1.5fr .85fr .85fr; grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.remont-gallery .commercial-image-slot { grid-row: 1 / 3; align-self: start; }
 .remont-tile { display: flex; flex-direction: column; justify-content: flex-end; padding: 24px; background: #222a34; color: white; }
 .remont-tile.support { background: var(--support); }
 .remont-case { display: grid; grid-template-columns: 56% 44%; min-height: 830px; }
 .remont-case-media { padding: 38px; background: #242c36; }
-.remont-case-media img { height: 500px; }
+.remont-case-media .commercial-image-slot { max-width: 800px; }
 .remont-case-facts { display: grid; grid-template-columns: 1fr 1fr; margin-top: 20px; color: white; }
 .remont-case-copy { padding: 60px 58px; }
 .remont-phase { padding: 18px 0; border-bottom: 1px solid #d4d9df; }
 .remont-estimate { padding: 42px 58px; background: #f1f4f8; }
 .estimate-head { display: grid; grid-template-columns: 1fr 360px; gap: 40px; align-items: end; }
-.estimate-head img { height: 190px; }
+.estimate-head .commercial-image-slot { align-self: end; }
 .estimate-table { width: 100%; margin-top: 25px; border-collapse: collapse; background: white; }
 .estimate-table th, .estimate-table td { padding: 17px 20px; border-bottom: 1px solid #d7dde4; text-align: left; }
 .estimate-table th { background: #222a34; color: white; }
 .estimate-table td:last-child, .estimate-table th:last-child { text-align: right; }
 .estimate-total { color: var(--accent); font-size: 24px; font-weight: 800; }
 .remont-mobile-body { padding: 24px 20px; }
-.remont-mobile-body img { height: 280px; margin-bottom: 24px; }
+.remont-mobile-body .commercial-image-slot { margin-bottom: 24px; }
 .remont-mobile-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 24px 0; }
 .remont-mobile-facts div { padding: 15px; background: #edf2fb; }
 """
@@ -194,9 +194,10 @@ def _hero_image(project: ProjectSpec, assets: Mapping[str, str]) -> str:
     except KeyError as exc:
         raise KeyError(f"Missing hero asset for commercial project: {project.slug}") from exc
     return (
+        '<figure class="commercial-image-slot" style="aspect-ratio: 16 / 10;">'
         '<img class="commercial-hero-image" '
-        f'src="{escape_html(source)}" alt="{escape_html(_IMAGE_ALTS[project.slug])}" '
-        'style="aspect-ratio: 16 / 10;" />'
+        f'src="{escape_html(source)}" alt="{escape_html(_IMAGE_ALTS[project.slug])}" />'
+        "</figure>"
     )
 
 
