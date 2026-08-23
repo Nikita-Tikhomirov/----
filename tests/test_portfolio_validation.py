@@ -54,6 +54,42 @@ def complete_fake_pack(tmp_path):
     return create
 
 
+def _write_layout(path, hero, *, alternate=False):
+    image = Image.new("RGB", (1920, 1280), "#f4f5f6")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 1920, 120), fill="#1d2730")
+    draw.rectangle((90, 44, 360, 78), fill="#f4f5f6")
+    if alternate:
+        image.paste(hero.resize((670, 620)), (1080, 180))
+        for row in range(5):
+            draw.rectangle((100, 190 + row * 110, 960, 260 + row * 110), fill="#d7e0e6")
+            draw.rectangle((128, 210 + row * 110, 550, 228 + row * 110), fill="#263642")
+    else:
+        image.paste(hero.resize((1500, 420)), (210, 175))
+        for column in range(4):
+            left = 90 + column * 440
+            draw.rectangle((left, 650, left + 380, 870), fill="#d7e0e6")
+            draw.rectangle((left + 28, 685, left + 310, 705), fill="#263642")
+    for row in range(6):
+        top = 930 + row * 48
+        draw.rectangle((90, top, 1830, top + 2), fill="#56646f")
+        for column in range(5):
+            draw.rectangle((120 + column * 330, top + 16, 310 + column * 330, top + 30), fill="#263642")
+    image.save(path)
+
+
+def _hero_pattern(horizontal=False):
+    hero = Image.new("RGB", (900, 360), "#101820")
+    draw = ImageDraw.Draw(hero)
+    for index in range(15):
+        tone = "#d9e5ec" if index % 2 else "#39576b"
+        if horizontal:
+            draw.rectangle((0, index * 24, 899, index * 24 + 23), fill=tone)
+        else:
+            draw.rectangle((index * 60, 0, index * 60 + 59, 359), fill=tone)
+    return hero
+
+
 def test_empty_pack_reports_all_seventy_five_missing_images(tmp_path):
     report = validate_pack(PROJECTS, tmp_path)
     assert report.files_checked == 0
@@ -91,6 +127,20 @@ def test_pack_rejects_blank_lower_viewport(tmp_path, complete_fake_pack):
     assert any(issue.code == "sparse-lower-viewport" for issue in report.issues)
 
 
+def test_pack_rejects_lower_viewport_with_only_a_thin_divider(
+    tmp_path, complete_fake_pack
+):
+    project = PROJECTS[0]
+    paths = complete_fake_pack(projects=(project,))
+    image = Image.new("RGB", (1920, 1280), "white")
+    ImageDraw.Draw(image).line((0, 1120, 1919, 1120), fill="black", width=2)
+    image.save(paths[0])
+
+    report = validate_pack((project,), tmp_path)
+
+    assert any(issue.code == "sparse-lower-viewport" for issue in report.issues)
+
+
 def test_pack_rejects_cross_project_duplicate_screenshots(tmp_path, complete_fake_pack):
     first, second = PROJECTS[:2]
     paths = complete_fake_pack(projects=(first, second))
@@ -104,6 +154,86 @@ def test_pack_rejects_cross_project_duplicate_screenshots(tmp_path, complete_fak
     assert len(duplicate_issues) == 1
     assert first.slug in duplicate_issues[0].message
     assert second.slug in duplicate_issues[0].message
+    assert duplicate_issues[0].file in {
+        f"{first.slug}/01-cover.png",
+        f"{second.slug}/01-cover.png",
+    }
+    assert f"{first.slug}/01-cover.png" in duplicate_issues[0].message
+    assert f"{second.slug}/01-cover.png" in duplicate_issues[0].message
+    assert str(tmp_path) not in duplicate_issues[0].message
+
+
+def test_pack_rejects_reused_layout_with_a_different_hero_bitmap(
+    tmp_path,
+):
+    first, second = PROJECTS[:2]
+    first_path = tmp_path / first.slug / "01-cover.png"
+    second_path = tmp_path / second.slug / "01-cover.png"
+    first_path.parent.mkdir(parents=True)
+    second_path.parent.mkdir(parents=True)
+    _write_layout(first_path, _hero_pattern())
+    _write_layout(second_path, _hero_pattern(horizontal=True))
+
+    report = validate_pack((first, second), tmp_path)
+
+    assert any(issue.code == "near-duplicate-screenshot" for issue in report.issues)
+
+
+def test_pack_accepts_clearly_different_cross_project_layouts(tmp_path):
+    first, second = PROJECTS[:2]
+    first_path = tmp_path / first.slug / "01-cover.png"
+    second_path = tmp_path / second.slug / "01-cover.png"
+    first_path.parent.mkdir(parents=True)
+    second_path.parent.mkdir(parents=True)
+    _write_layout(first_path, _hero_pattern())
+    _write_layout(second_path, _hero_pattern(horizontal=True), alternate=True)
+
+    report = validate_pack((first, second), tmp_path)
+
+    assert not any(
+        issue.code == "near-duplicate-screenshot" for issue in report.issues
+    )
+
+
+def test_pack_reports_invalid_assets_without_crashing(tmp_path, complete_fake_pack):
+    project = PROJECTS[0]
+    complete_fake_pack(projects=(project,))
+    broken_asset = tmp_path / "assets" / project.slug / project.assets[0].filename
+    broken_asset.parent.mkdir(parents=True)
+    broken_asset.write_bytes(b"broken asset")
+
+    report = validate_pack((project,), tmp_path)
+
+    assert any(issue.code == "invalid-asset" for issue in report.issues)
+
+
+@pytest.mark.parametrize(
+    ("violation", "expected_message"),
+    (
+        ("format", "PNG format"),
+        ("dimensions", "expected 1920x1280"),
+        ("oversized", "exceeds 10000000 bytes"),
+    ),
+)
+def test_decodable_screenshots_with_legacy_issues_still_have_similarity_diagnostics(
+    tmp_path, complete_fake_pack, violation, expected_message
+):
+    first, second = PROJECTS[:2]
+    paths = complete_fake_pack(projects=(first, second))
+    source = Image.open(paths[0])
+    if violation == "format":
+        source.save(paths[5], format="JPEG")
+    elif violation == "dimensions":
+        source.resize((1600, 900)).save(paths[5])
+    else:
+        paths[5].write_bytes(paths[0].read_bytes())
+        with paths[5].open("ab") as handle:
+            handle.write(b"\0" * (10_000_001 - paths[5].stat().st_size))
+
+    report = validate_pack((first, second), tmp_path)
+
+    assert any(expected_message in issue.message for issue in report.issues)
+    assert any(issue.code == "near-duplicate-screenshot" for issue in report.issues)
 
 
 def test_pack_rejects_non_png_content_and_oversized_files(

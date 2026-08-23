@@ -7,6 +7,7 @@ from PIL import Image, UnidentifiedImageError
 from .models import ProjectSpec
 from .quality import (
     ValidationIssue,
+    bottom_band_content_coverage,
     bottom_band_metrics,
     validate_asset_uniqueness,
     validate_cross_project_screenshot_uniqueness,
@@ -17,7 +18,8 @@ from .render import output_path
 _EXPECTED_SIZE = (1920, 1280)
 _MAX_BYTES = 10_000_000
 _MIN_LOWER_BAND_VARIANCE = 40.0
-_MIN_LOWER_BAND_EDGE_DENSITY = 0.003
+_MIN_LOWER_BAND_EDGE_DENSITY = 0.006
+_MIN_LOWER_BAND_CONTENT_COVERAGE = 0.20
 _SCREENSHOT_MIN_DISTANCE = 12
 
 
@@ -33,7 +35,7 @@ def _relative_path(path: Path, root: Path) -> str:
 
 def _inspect_image(
     project: ProjectSpec, path: Path, root: Path
-) -> tuple[ValidationIssue, ...]:
+) -> tuple[tuple[ValidationIssue, ...], bool]:
     file = _relative_path(path, root)
     issues: list[ValidationIssue] = []
     if path.stat().st_size > _MAX_BYTES:
@@ -53,7 +55,7 @@ def _inspect_image(
         issues.append(
             ValidationIssue(project.slug, file, f"invalid image: {exc}")
         )
-        return tuple(issues)
+        return tuple(issues), False
 
     if image_format != "PNG":
         issues.append(
@@ -71,7 +73,7 @@ def _inspect_image(
                 f"expected 1920x1280, got {image_size[0]}x{image_size[1]}",
             )
         )
-    return tuple(issues)
+    return tuple(issues), True
 
 
 def validate_pack(
@@ -99,22 +101,25 @@ def validate_pack(
                 issues.append(ValidationIssue(project.slug, file, "missing image"))
                 continue
             files_checked += 1
-            image_issues = _inspect_image(project, path, root)
+            image_issues, is_decodable = _inspect_image(project, path, root)
             issues.extend(image_issues)
-            if image_issues:
+            if not is_decodable:
                 continue
             valid_screenshots.append((project, path))
             variance, edge_density = bottom_band_metrics(path)
+            coverage = bottom_band_content_coverage(path)
             if (
                 variance < _MIN_LOWER_BAND_VARIANCE
                 or edge_density < _MIN_LOWER_BAND_EDGE_DENSITY
+                or coverage < _MIN_LOWER_BAND_CONTENT_COVERAGE
             ):
                 issues.append(
                     ValidationIssue(
                         project.slug,
                         file,
                         "lower viewport lacks meaningful visual content "
-                        f"(variance {variance:.2f}, edge density {edge_density:.4f})",
+                        f"(variance {variance:.2f}, edge density {edge_density:.4f}, "
+                        f"coverage {coverage:.2f})",
                         "sparse-lower-viewport",
                     )
                 )
@@ -146,7 +151,9 @@ def validate_pack(
     issues.extend(validate_asset_uniqueness(root, project_specs))
     issues.extend(
         validate_cross_project_screenshot_uniqueness(
-            valid_screenshots, min_distance=_SCREENSHOT_MIN_DISTANCE
+            valid_screenshots,
+            min_distance=_SCREENSHOT_MIN_DISTANCE,
+            root=root,
         )
     )
     return ValidationReport(files_checked, tuple(issues))

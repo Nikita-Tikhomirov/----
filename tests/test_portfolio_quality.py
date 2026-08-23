@@ -1,10 +1,15 @@
 from pathlib import Path
+from dataclasses import replace
 
 from PIL import Image, ImageDraw
 
 from portfolio.kwork_pack.catalog import PROJECTS
+from portfolio.kwork_pack.models import AssetSpec
 from portfolio.kwork_pack.quality import (
+    bottom_band_content_coverage,
     bottom_band_metrics,
+    dhash,
+    hamming_distance,
     validate_asset_uniqueness,
     validate_unique_paths,
 )
@@ -55,6 +60,37 @@ def _write_hash_neighbor(path: Path, changed_cell: int | None = None) -> None:
     image.resize((340, 320), Image.Resampling.NEAREST).convert("RGB").save(path)
 
 
+def _write_vertical_gradient(path: Path) -> None:
+    image = Image.new("L", (320, 320))
+    pixels = image.load()
+    for y in range(320):
+        for x in range(320):
+            pixels[x, y] = y * 255 // 319
+    image.convert("RGB").save(path)
+
+
+def _write_horizontal_bands(path: Path) -> None:
+    image = Image.new("L", (320, 320), 0)
+    draw = ImageDraw.Draw(image)
+    for band in range(16):
+        tone = 255 if band % 2 else 0
+        draw.rectangle((0, band * 20, 319, band * 20 + 19), fill=tone)
+    image.convert("RGB").save(path)
+
+
+def _write_table_lower_band(path: Path) -> None:
+    image = Image.new("RGB", (1920, 1280), "#f5f6f7")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 0, 1919, 880), fill="#263642")
+    for row in range(6):
+        top = 960 + row * 48
+        draw.rectangle((110, top, 1810, top + 2), fill="#4a5966")
+        for column in range(5):
+            left = 130 + column * 330
+            draw.rectangle((left, top + 16, left + 210, top + 30), fill="#273744")
+    image.save(path)
+
+
 def test_exact_duplicate_assets_are_rejected_with_both_paths(tmp_path):
     first = tmp_path / "first.png"
     second = tmp_path / "second.png"
@@ -98,6 +134,39 @@ def test_declared_duplicate_assets_are_rejected_from_the_asset_root(tmp_path):
     assert second.name in issues[0].message
 
 
+def test_duplicate_asset_declarations_are_rejected_before_path_deduplication(tmp_path):
+    project = replace(
+        PROJECTS[0],
+        assets=(
+            AssetSpec("first", "shared.png", "First asset"),
+            AssetSpec("second", "shared.png", "Second asset"),
+        ),
+    )
+    path = tmp_path / "assets" / project.slug / "shared.png"
+    path.parent.mkdir(parents=True)
+    _write_hash_neighbor(path)
+
+    issues = validate_asset_uniqueness(tmp_path, (project,))
+
+    assert len(issues) == 1
+    assert issues[0].code == "duplicate-asset"
+    assert "first" in issues[0].message
+    assert "second" in issues[0].message
+
+
+def test_invalid_declared_asset_returns_a_stable_diagnostic(tmp_path):
+    project = PROJECTS[0]
+    path = tmp_path / "assets" / project.slug / project.assets[0].filename
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"not an image")
+
+    issues = validate_asset_uniqueness(tmp_path, (project,))
+
+    assert len(issues) == 1
+    assert issues[0].code == "invalid-asset"
+    assert issues[0].file == f"assets/{project.slug}/{path.name}"
+
+
 def test_empty_lower_viewport_is_rejected_by_both_metrics(tmp_path):
     path = tmp_path / "blank-bottom.png"
     image = Image.new("RGB", (1920, 1280), "white")
@@ -118,3 +187,25 @@ def test_content_bearing_lower_viewport_passes_both_metrics(tmp_path):
 
     assert variance >= 40
     assert edge_density >= 0.003
+
+
+def test_distributed_table_content_has_meaningful_lower_band_coverage(tmp_path):
+    path = tmp_path / "table-bottom.png"
+    _write_table_lower_band(path)
+
+    variance, edge_density = bottom_band_metrics(path)
+    coverage = bottom_band_content_coverage(path)
+
+    assert variance >= 40
+    assert edge_density >= 0.006
+    assert coverage >= 0.20
+
+
+def test_dhash_distinguishes_vertical_gradient_from_horizontal_bands(tmp_path):
+    gradient = tmp_path / "gradient.png"
+    bands = tmp_path / "bands.png"
+    _write_vertical_gradient(gradient)
+    _write_horizontal_bands(bands)
+
+    assert hamming_distance(dhash(gradient), dhash(bands)) >= 64
+    assert not validate_unique_paths((gradient, bands), min_distance=12)

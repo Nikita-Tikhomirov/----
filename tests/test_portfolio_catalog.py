@@ -79,6 +79,7 @@ def test_every_project_declares_a_real_asset_inventory():
     for project in PROJECTS:
         assert len(project.assets) >= 6
         assert len({asset.key for asset in project.assets}) == len(project.assets)
+        assert len({asset.filename for asset in project.assets}) == len(project.assets)
         assert all(asset.filename != "hero.png" for asset in project.assets)
 
 
