@@ -1,4 +1,5 @@
 from collections.abc import Callable, Mapping
+from typing import Literal
 
 from ..components import escape_html, panel
 from ..icons import icon
@@ -213,13 +214,24 @@ def _hero_image(project: ProjectSpec, assets: Mapping[str, str]) -> str:
     )
 
 
-def _nav(project: ProjectSpec, links: tuple[str, ...], action: str) -> str:
+def _nav(
+    project: ProjectSpec,
+    links: tuple[str, ...],
+    action: str,
+    *,
+    action_mode: Literal["primary", "hidden"] = "primary",
+) -> str:
     link_html = "".join(f'<a href="#">{escape_html(link)}</a>' for link in links)
+    action_html = (
+        f'<button class="leadgen-button">{icon("phone", size=18)}{escape_html(action)}</button>'
+        if action_mode == "primary"
+        else ""
+    )
     return (
         '<header class="leadgen-nav">'
         f'<a class="leadgen-brand" href="#">{escape_html(project.brand)}</a>'
         f'<nav class="leadgen-links" aria-label="Основная навигация">{link_html}</nav>'
-        f'<button class="leadgen-button">{icon("phone", size=18)}{escape_html(action)}</button>'
+        f"{action_html}"
         "</header>"
     )
 
@@ -285,7 +297,12 @@ def _page(project: ProjectSpec, shot: ShotSpec, layout: str, content: str) -> st
 
 def _okna_sfera(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> str:
     image = _hero_image(project, assets)
-    nav = _nav(project, ("Окна", "Балконы", "Монтаж", "Примеры"), "Заказать замер")
+    nav = _nav(
+        project,
+        ("Окна", "Балконы", "Монтаж", "Примеры"),
+        "Заказать замер",
+        action_mode="hidden" if shot.variant == "function" else "primary",
+    )
     if shot.variant == "cover":
         summary = '<div class="window-size-summary"><div><strong>1400 мм</strong>ширина</div><div><strong>1500 мм</strong>высота</div><div><strong>3 створки</strong>конфигурация</div></div>'
         body = f'{nav}<section class="window-cover"><div class="window-cover-copy"><div class="leadgen-label">Окна по вашим размерам</div><h1>Теплее дома. Точнее в расчёте.</h1><p>Подберём профиль, стеклопакет и монтаж под комнату, этаж и способ проветривания.</p>{summary}<button class="leadgen-button">Рассчитать окно{icon("arrow-right")}</button></div><div class="window-cover-media">{image}<div class="window-material"><strong>Профиль 70 мм</strong><br />Трёхкамерный стеклопакет и тёплая дистанционная рамка</div></div></section>'
@@ -305,7 +322,12 @@ def _okna_sfera(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str])
 
 def _chistiy_metr(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> str:
     image = _hero_image(project, assets)
-    nav = _nav(project, ("После ремонта", "Генеральная", "Поддерживающая", "Что входит"), "Рассчитать уборку")
+    nav = _nav(
+        project,
+        ("После ремонта", "Генеральная", "Поддерживающая", "Что входит"),
+        "Рассчитать уборку",
+        action_mode="hidden" if shot.variant == "function" else "primary",
+    )
     if shot.variant == "cover":
         proof = '<ul class="clean-proof-list"><li>Удалим строительную пыль с поверхностей</li><li>Отмоем окна, рамы и подоконники</li><li>Соберём и вынесем упаковочный мусор</li></ul>'
         body = f'{nav}<section class="clean-cover"><div class="clean-visual">{image}<div class="clean-stamp">Принимаете чистую квартиру, а не список недоделок</div></div><div class="clean-copy"><div class="leadgen-label">Уборка после ремонта</div><h1>Квартира готова к заселению</h1><p>Команда приезжает со своей техникой и последовательно очищает каждую зону.</p>{proof}<button class="leadgen-button">Узнать стоимость{icon("arrow-right")}</button></div></section>'
@@ -325,7 +347,12 @@ def _chistiy_metr(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str
 
 def _teplodom(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> str:
     image = _hero_image(project, assets)
-    nav = _nav(project, ("Ремонт котлов", "Обслуживание", "Марки", "Районы"), "Вызвать мастера")
+    nav = _nav(
+        project,
+        ("Ремонт котлов", "Обслуживание", "Марки", "Районы"),
+        "Вызвать мастера",
+        action_mode="hidden" if shot.variant == "function" else "primary",
+    )
     if shot.variant == "cover":
         status = '<aside class="boiler-status"><div class="leadgen-label">Сервисная линия</div><h2>Сегодня есть окна</h2><p>Мастер уточнит симптом по телефону и возьмёт подходящие запчасти.</p><div class="boiler-status-line"><strong>08:00–22:00</strong>принимаем заявки</div><div class="boiler-status-line"><strong>До выезда</strong>согласуем стоимость диагностики</div><div class="boiler-status-line"><strong>После проверки</strong>объясним причину неисправности</div></aside>'
         body = f'{nav}<section class="boiler-cover">{status}<div class="boiler-main"><div><div class="leadgen-label">Ремонт газовых котлов</div><h1>Вернём тепло в день обращения</h1><p>Диагностируем котёл на месте и начинаем ремонт только после согласования работ.</p><button class="leadgen-button">Описать неисправность{icon("arrow-right")}</button></div>{image}</div></section>'
@@ -345,7 +372,12 @@ def _teplodom(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -
 
 def _pereezd_prosto(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> str:
     image = _hero_image(project, assets)
-    nav = _nav(project, ("Квартирный", "С упаковкой", "Грузчики", "Как работаем"), "Рассчитать переезд")
+    nav = _nav(
+        project,
+        ("Квартирный", "С упаковкой", "Грузчики", "Как работаем"),
+        "Рассчитать переезд",
+        action_mode="hidden" if shot.variant == "function" else "primary",
+    )
     if shot.variant == "cover":
         route = f'<div class="move-route"><div class="move-point"><strong>Откуда</strong><br />Отрадное · 2 комнаты</div><div class="move-arrow">{icon("arrow-right")}</div><div class="move-point"><strong>Куда</strong><br />Сокол · есть лифт</div></div>'
         body = f'{nav}<section class="move-cover"><div class="move-copy"><div class="leadgen-label">Квартирный переезд под ключ</div><h1>Переезд без потерянных коробок</h1><p>Маркируем вещи по комнатам, фиксируем объём и заранее планируем маршрут.</p>{route}<button class="leadgen-button">Собрать план переезда{icon("arrow-right")}</button></div><div class="move-media">{image}<div class="move-tag">Каждая коробка получает комнату и номер в описи</div></div></section>'
@@ -366,7 +398,12 @@ def _pereezd_prosto(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, s
 
 def _pravo_opora(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> str:
     image = _hero_image(project, assets)
-    nav = _nav(project, ("Договорные споры", "Недвижимость", "Порядок работы", "Документы"), "Обсудить ситуацию")
+    nav = _nav(
+        project,
+        ("Договорные споры", "Недвижимость", "Порядок работы", "Документы"),
+        "Обсудить ситуацию",
+        action_mode="hidden" if shot.variant == "function" else "primary",
+    )
     if shot.variant == "cover":
         principles = '<div class="legal-principles"><div>Изучаем документы до встречи</div><div>Объясняем риски простым языком</div><div>Предлагаем несколько сценариев</div><div>Фиксируем объём работы</div></div>'
         body = f'{nav}<section class="legal-cover"><div class="legal-copy"><div class="leadgen-label">Споры с застройщиками</div><h1>Сначала — документы и факты</h1><p>Разберём договор, сроки и переписку, чтобы выбрать обоснованный следующий шаг.</p><button class="leadgen-button">Описать ситуацию{icon("arrow-right")}</button>{principles}</div><div class="legal-media">{image}</div></section>'
