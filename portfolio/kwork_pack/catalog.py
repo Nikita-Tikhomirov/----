@@ -49,10 +49,10 @@ def _shots(public_path: str) -> tuple[ShotSpec, ...]:
     )
 
 
-def _asset(slug: str, brand: str) -> AssetSpec:
+def _asset(brand: str) -> AssetSpec:
     return AssetSpec(
         key="hero",
-        filename=f"{slug}-hero.png",
+        filename="hero.png",
         prompt=f"Предметная фотография для авторского концепта сайта «{brand}», без логотипов и текста",
     )
 
@@ -70,7 +70,7 @@ def _build_project(slug: str, domain: str, title: str) -> ProjectSpec:
         description=f"Авторский концепт сайта «{brand}»: продуманная структура, интерфейс и сценарий для демонстрации проекта.",
         palette=palette,
         shots=_shots(public_path),
-        assets=(_asset(slug, brand),),
+        assets=(_asset(brand),),
     )
 
 

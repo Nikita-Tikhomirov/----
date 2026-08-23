@@ -6,7 +6,7 @@ from .models import AssetSpec, ProjectSpec
 
 def asset_path(root: Path, project: ProjectSpec, asset: AssetSpec) -> Path:
     """Return the canonical local path for a project's bitmap asset."""
-    return root / "assets" / project.slug / f"{asset.key}.png"
+    return root / "assets" / project.slug / asset.filename
 
 
 def resolve_project_assets(root: Path, project: ProjectSpec) -> dict[str, str]:

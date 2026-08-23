@@ -27,6 +27,14 @@ def test_kwork_titles_fit_form_limit_and_identify_author_concepts():
         assert "Авторский концепт" in project.description
 
 
+def test_catalog_declares_canonical_hero_filename_for_every_project():
+    assert [
+        asset.filename
+        for project in PROJECTS
+        for asset in project.assets
+    ] == ["hero.png"] * 15
+
+
 def test_tochka_hoda_uses_automotive_content_path():
     project = get_project("tochka-hoda")
     assert project.domain == "tochka-hoda.ru"

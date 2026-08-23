@@ -6,6 +6,7 @@ from portfolio.kwork_pack.assets import (
     resolve_project_assets,
 )
 from portfolio.kwork_pack.catalog import PROJECTS
+from portfolio.kwork_pack.models import AssetSpec
 
 
 def test_asset_path_uses_canonical_project_asset_location(tmp_path):
@@ -14,6 +15,19 @@ def test_asset_path_uses_canonical_project_asset_location(tmp_path):
     path = asset_path(tmp_path, project, project.assets[0])
 
     assert path == tmp_path / "assets" / "tochka-hoda" / "hero.png"
+
+
+def test_asset_path_uses_declared_asset_filename(tmp_path):
+    project = PROJECTS[0]
+    asset = AssetSpec(
+        key="hero",
+        filename="custom-hero.webp",
+        prompt="Text-free synthetic asset",
+    )
+
+    path = asset_path(tmp_path, project, asset)
+
+    assert path == tmp_path / "assets" / project.slug / "custom-hero.webp"
 
 
 def test_missing_assets_reports_every_expected_file(tmp_path):
