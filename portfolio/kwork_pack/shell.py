@@ -49,7 +49,13 @@ def render_mobile_shell(project: ProjectSpec, shot: ShotSpec, page_html: str) ->
     )
 
 
-def build_document(project: ProjectSpec, shot: ShotSpec, page_html: str, css_text: str) -> str:
+def build_document(
+    project: ProjectSpec,
+    shot: ShotSpec,
+    page_html: str,
+    css_text: str,
+    scripts: str = "",
+) -> str:
     shell_html = (
         render_mobile_shell(project, shot, page_html)
         if shot.layout == "mobile"
@@ -64,6 +70,7 @@ def build_document(project: ProjectSpec, shot: ShotSpec, page_html: str, css_tex
         f'<div class="portfolio-canvas" data-canvas="1920x1280">{shell_html}</div>'
         "</div>"
     )
+    script_tag = f"<script>{scripts}</script>" if scripts else ""
     return (
         "<!DOCTYPE html>"
         '<html lang="ru">'
@@ -76,6 +83,7 @@ def build_document(project: ProjectSpec, shot: ShotSpec, page_html: str, css_tex
         f'<body data-layout="{escape_html(shot.layout)}" '
         f'data-palette="{escape_html(project.palette)}" data-shot="{escape_html(shot.key)}">'
         f"{body}"
+        f"{script_tag}"
         "</body>"
         "</html>"
     )

@@ -107,8 +107,14 @@ def _render_page(
 ) -> None:
     page = context.new_page()
     try:
-        page_html = render_site(project, shot, dict(assets))
-        document = build_document(project, shot, page_html, "")
+        rendered_page = render_site(project, shot, dict(assets))
+        document = build_document(
+            project,
+            shot,
+            rendered_page.html,
+            rendered_page.css,
+            rendered_page.scripts,
+        )
         page.set_content(document, wait_until="load")
         page.evaluate("() => document.fonts.ready")
         page.wait_for_function(
@@ -185,7 +191,7 @@ def render_project(
     chrome_channel: str = "chrome",
     asset_resolver: AssetResolver | None = None,
 ) -> tuple[Path, ...]:
-    """Render all four declared project shots in one isolated browser context."""
+    """Render all five declared project shots in one isolated browser context."""
     root = Path(output_root)
     resolver = asset_resolver or _default_asset_resolver
     requests = _prepare_project(project, project.shots, root, resolver)

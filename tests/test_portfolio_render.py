@@ -104,8 +104,11 @@ def local_asset(tmp_path):
 
 
 def asset_resolver_for(path):
-    def resolve(_output_root, _project):
-        return {"hero": path.resolve().as_uri()}
+    def resolve(_output_root, project):
+        return {
+            asset.key: path.resolve().as_uri()
+            for asset in project.assets
+        }
 
     return resolve
 
@@ -132,7 +135,7 @@ def test_output_path_uses_stable_numbered_names(tmp_path):
     assert output_path(tmp_path, project, project.shots[0]) == (
         tmp_path / "tochka-hoda" / "01-cover.png"
     )
-    assert output_path(tmp_path, project, project.shots[3]).name == "04-mobile.png"
+    assert output_path(tmp_path, project, project.shots[4]).name == "05-prices.png"
 
 
 def test_output_path_rejects_a_shot_outside_the_project(tmp_path):
@@ -143,7 +146,7 @@ def test_output_path_rejects_a_shot_outside_the_project(tmp_path):
         output_path(tmp_path, project, unknown_shot)
 
 
-def test_render_project_writes_four_shots_with_semantic_urls_and_fixed_context(
+def test_render_project_writes_five_desktop_shots_with_semantic_urls_and_fixed_context(
     tmp_path, local_asset, recording_playwright
 ):
     project = get_project("tochka-hoda")
@@ -163,9 +166,12 @@ def test_render_project_writes_four_shots_with_semantic_urls_and_fixed_context(
     assert chromium.launch_options == {"channel": "chrome", "headless": True}
     assert context.pages[0].wait_until == "load"
     assert "https://tochka-hoda.ru/" in context.pages[0].html
-    assert "https://tochka-hoda.ru/uslugi/diagnostika-avtomobilya" in context.pages[3].html
+    assert "https://tochka-hoda.ru/uslugi/diagnostika-avtomobilya" in context.pages[1].html
+    assert "https://tochka-hoda.ru/ceny" in context.pages[4].html
     assert 'class="browser-url-bar"' in context.pages[0].html
-    assert 'class="mobile-url-bar"' in context.pages[3].html
+    assert all('class="mobile-url-bar"' not in page.html for page in context.pages)
+    assert all('data-layout="desktop"' in page.html for page in context.pages)
+    assert "data:image/png;base64," in context.pages[0].html
     assert browser.context_options["viewport"] == {"width": 1920, "height": 1280}
     assert browser.context_options["device_scale_factor"] == 1
     assert browser.context_options["reduced_motion"] == "reduce"
@@ -188,7 +194,7 @@ def test_render_project_dispatches_noncommercial_site_groups(
         asset_resolver=asset_resolver_for(local_asset),
     )
 
-    assert len(paths) == 4
+    assert len(paths) == 5
     assert f'data-project="{slug}"' in recording_playwright.chromium.browser.context.pages[0].html
 
 
@@ -208,7 +214,7 @@ def test_render_all_preserves_project_and_shot_order_in_one_browser(
         for project in projects
         for shot in project.shots
     )
-    assert len(recording_playwright.chromium.browser.context.pages) == 8
+    assert len(recording_playwright.chromium.browser.context.pages) == 10
 
 
 def test_missing_local_asset_reports_the_project_key_and_path(tmp_path):
@@ -217,7 +223,7 @@ def test_missing_local_asset_reports_the_project_key_and_path(tmp_path):
 
     with pytest.raises(
         FileNotFoundError,
-        match=r"tochka-hoda/hero.*assets.*tochka-hoda.*hero\.png",
+        match=r"tochka-hoda/workshop_hero.*assets.*tochka-hoda.*hero\.png",
     ):
         render_shot(
             project,
@@ -230,13 +236,13 @@ def test_missing_local_asset_reports_the_project_key_and_path(tmp_path):
 def test_renderer_rejects_network_assets_before_launch(tmp_path):
     project = get_project("tochka-hoda")
 
-    with pytest.raises(ValueError, match=r"tochka-hoda/hero.*local file URI"):
+    with pytest.raises(ValueError, match=r"tochka-hoda/workshop_hero.*local file URI"):
         render_shot(
             project,
             project.shots[0],
             tmp_path,
             asset_resolver=lambda _root, _project: {
-                "hero": "https://example.test/hero.png"
+                "workshop_hero": "https://example.test/hero.png"
             },
         )
 

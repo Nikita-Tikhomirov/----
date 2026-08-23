@@ -1,17 +1,27 @@
 """Code-native site renderers for the Kwork portfolio pack."""
 
 from collections.abc import Mapping
+from importlib import import_module
+from types import ModuleType
+from typing import cast
 
 from ..models import ProjectSpec, ShotSpec
-from .commercial import COMMERCIAL_LAYOUTS, render_commercial
-from .complex import COMPLEX_LAYOUTS, render_complex
-from .leadgen import LEADGEN_LAYOUTS, render_leadgen
+from .runtime import RenderedPage, SiteRenderer
 
 
-_RENDERERS = {
-    "Коммерческие сайты": render_commercial,
-    "Лидогенерирующие лендинги": render_leadgen,
-    "Проекты посложнее": render_complex,
+_LEGACY_RENDERERS = {
+    "Коммерческие сайты": (
+        "portfolio.kwork_pack.sites.commercial",
+        "render_commercial",
+    ),
+    "Лидогенерирующие лендинги": (
+        "portfolio.kwork_pack.sites.leadgen",
+        "render_leadgen",
+    ),
+    "Проекты посложнее": (
+        "portfolio.kwork_pack.sites.complex",
+        "render_complex",
+    ),
 }
 
 
@@ -27,23 +37,61 @@ def _legacy_asset_mapping(
     return legacy_assets
 
 
-def render_site(
-    project: ProjectSpec, shot: ShotSpec, assets: dict[str, str]
-) -> str:
-    """Dispatch a catalog project through the temporary legacy renderer boundary."""
+def get_renderer_module(project: ProjectSpec) -> ModuleType:
+    """Import and validate the renderer module declared by one project."""
+    module = import_module(project.renderer_module)
+    expected_name = project.slug.replace("-", "_")
+    actual_name = module.__name__.rsplit(".", 1)[-1]
+    if actual_name != expected_name:
+        raise ValueError(
+            f"Project {project.slug} declares renderer module "
+            f"{project.renderer_module}, but imported {module.__name__}; "
+            f"expected final module name {expected_name}"
+        )
+    return module
+
+
+def get_renderer(project: ProjectSpec) -> SiteRenderer:
+    """Return the callable dedicated renderer declared by one project."""
+    module = get_renderer_module(project)
+    renderer = getattr(module, "render", None)
+    if not callable(renderer):
+        raise TypeError(
+            f"Project {project.slug} renderer module {project.renderer_module} "
+            "must define a callable render"
+        )
+    return cast(SiteRenderer, renderer)
+
+
+def _render_legacy_site(
+    project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]
+) -> RenderedPage:
+    """Keep pre-migration projects renderable until Task 8 removes this path."""
     try:
-        renderer = _RENDERERS[project.group]
+        module_name, renderer_name = _LEGACY_RENDERERS[project.group]
     except KeyError as exc:
         raise KeyError(f"Unknown portfolio project group: {project.group}") from exc
-    return renderer(project, shot, _legacy_asset_mapping(project, assets))
+    renderer = getattr(import_module(module_name), renderer_name)
+    html = renderer(project, shot, _legacy_asset_mapping(project, assets))
+    return RenderedPage(html=html, css="")
+
+
+def render_site(
+    project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]
+) -> RenderedPage:
+    """Render a dedicated module or the temporary exact-module migration fallback."""
+    try:
+        return get_renderer(project)(project, shot, assets)
+    except ModuleNotFoundError as exc:
+        if exc.name != project.renderer_module:
+            raise
+        return _render_legacy_site(project, shot, assets)
 
 
 __all__ = [
-    "COMMERCIAL_LAYOUTS",
-    "COMPLEX_LAYOUTS",
-    "LEADGEN_LAYOUTS",
-    "render_commercial",
-    "render_complex",
-    "render_leadgen",
+    "RenderedPage",
+    "SiteRenderer",
+    "get_renderer",
+    "get_renderer_module",
     "render_site",
 ]

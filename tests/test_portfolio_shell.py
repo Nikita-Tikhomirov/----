@@ -25,6 +25,20 @@ def test_desktop_document_never_uses_a_mobile_browser_frame():
     assert 'class="mobile-url-bar"' not in html
 
 
+def test_build_document_includes_page_owned_css_and_trusted_scripts_after_markup():
+    project = get_project("tochka-hoda")
+    shot = project.shots[0]
+    page_html = '<main data-page="home">Контент</main>'
+    page_css = ".site-home { color: rgb(10, 20, 30); }"
+    scripts = "window.__portfolioReady = true;"
+
+    html = build_document(project, shot, page_html, page_css, scripts)
+
+    assert page_css in html
+    assert f"<script>{scripts}</script>" in html
+    assert html.index(page_html) < html.index(f"<script>{scripts}</script>")
+
+
 def test_build_document_escapes_dynamic_shell_text_values():
     shot = ShotSpec("content", "/path?<danger>", "desktop", "content")
     project = ProjectSpec(
