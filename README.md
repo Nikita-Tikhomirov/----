@@ -85,6 +85,23 @@ OpenRouter дополняет OCR и сложные скриншоты, когд
 
 Если настроенный OpenRouter временно недоступен, заказ не превращается в общий шаблон и не публикуется как готовый: сканер оставляет его для следующего прохода. Сохранённые ранее шаблонные черновики автоматически пересобираются облачной моделью; неподходящие заказы после повторной оценки переходят в `rejected`.
 
+## Портфолио Kwork
+
+В `portfolio/kwork_pack` находится воспроизводимый набор из 15 демонстрационных web-проектов. Для каждой работы генератор собирает четыре PNG-кадра размером 1920x1280: обложку, содержательную страницу, функциональный экран и мобильную версию.
+
+Полная сборка и проверка:
+
+```powershell
+python -m portfolio.kwork_pack.cli domains --check
+python -m portfolio.kwork_pack.cli validate-assets --output artifacts/kwork-portfolio
+python -m portfolio.kwork_pack.cli render --output artifacts/kwork-portfolio
+python -m portfolio.kwork_pack.cli manifest --output artifacts/kwork-portfolio
+python -m portfolio.kwork_pack.cli validate --output artifacts/kwork-portfolio
+python -m portfolio.kwork_pack.cli gallery --output artifacts/kwork-portfolio
+```
+
+Готовые изображения, `upload-manifest.json`, `upload-manifest.csv`, `gallery.html` и журнал ручной проверки сохраняются в `artifacts/kwork-portfolio`. Генератор ничего не публикует в Kwork самостоятельно: внешняя загрузка выполняется отдельно после визуального контроля.
+
 ## Проверки
 
 ```powershell
