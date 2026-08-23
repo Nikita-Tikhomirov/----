@@ -4,6 +4,7 @@
 
 Implementation is complete locally. The dedicated renderer runtime, browser
 shell handoff, and five-desktop-shot tests are committed in `e5dbdfa`.
+Publication is blocked by rejected GitHub credentials.
 
 ## Files Changed
 
@@ -88,6 +89,7 @@ their transition tests.
 
 ## Publication Concern
 
-The required publish bootstrap created `origin`, but its push attempt failed
-because the configured GitHub credential was rejected. A final push is still
-attempted after this report commit.
+The required publish bootstrap created `origin`, but both its push attempt and
+the final `git push` failed because the configured GitHub credential was
+rejected. GitHub no longer accepts password authentication for this remote;
+the branch has not been published.
