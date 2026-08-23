@@ -125,7 +125,7 @@ _COMPLEX_CSS = """
 .lake-cover { display: grid; grid-template-columns: minmax(0, 1.35fr) 500px; background: #14271f; }
 .lake-media { position: relative; padding: 32px 0 32px 36px; }
 .lake-media .complex-image-slot { max-width: 1050px; }
-.lake-caption { position: absolute; left: 64px; bottom: 58px; max-width: 410px; color: #fff; font-size: 16px; }
+.lake-media .lake-caption { position: absolute; left: 64px; bottom: 58px; max-width: 410px; margin: 0; padding: 12px 14px; background: rgba(11, 31, 24, .86); border-left: 3px solid #d56b4d; color: #fff; font-size: 16px; }
 .lake-search { display: flex; flex-direction: column; justify-content: center; padding: 42px 48px; background: #fff; }
 .lake-search h1 { font-family: Georgia, serif; font-size: 52px; }
 .lake-fields { display: grid; gap: 11px; margin: 12px 0 20px; }

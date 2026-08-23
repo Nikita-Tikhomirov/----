@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -107,6 +108,22 @@ def asset_resolver_for(path):
         return {"hero": path.resolve().as_uri()}
 
     return resolve
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file URI semantics")
+def test_file_uri_to_path_preserves_unc_authority():
+    uri = "file://server/share/path/hero.png"
+
+    assert renderer._file_uri_to_path(uri) == Path(
+        r"\\server\share\path\hero.png"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file URI semantics")
+def test_file_uri_to_path_keeps_drive_path_conversion():
+    path = Path(r"C:\Portfolio Assets\hero.png")
+
+    assert renderer._file_uri_to_path(path.as_uri()) == path
 
 
 def test_output_path_uses_stable_numbered_names(tmp_path):

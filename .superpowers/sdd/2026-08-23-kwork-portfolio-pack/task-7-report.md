@@ -83,3 +83,36 @@ global harness smoke: ok, CLOUD_ONLY, Ollama commands skipped
 ```
 
 В commit входят только Task 7 renderer, его tests/dependencies, минимальный site dispatch и этот отчёт. Manifest, validation, gallery и CLI не изменялись. Task 6 появился в worktree параллельно и был сохранён отдельным commit; его файлы не входят в Task 7 commit.
+
+## Review Fixes
+
+Исправлен Important из `task-7-review.md`: при преобразовании UNC `file://` URI renderer больше не теряет `urlsplit().netloc`. Чистый helper `_file_uri_to_path()` собирает pathname через structured stdlib `urlunsplit(("", netloc, path, "", ""))` и передаёт результат в `url2pathname()`. Поэтому `file://server/share/path/hero.png` преобразуется в `\\server\share\path\hero.png`, а обычный `file:///C:/...` продолжает преобразовываться в drive path.
+
+TDD RED:
+
+```text
+python -m pytest tests/test_portfolio_render.py -k file_uri_to_path -q
+2 failed, 10 deselected
+AttributeError: module 'portfolio.kwork_pack.render' has no attribute '_file_uri_to_path'
+```
+
+Focused GREEN:
+
+```text
+python -m pytest tests/test_portfolio_render.py -k file_uri_to_path -q
+2 passed, 10 deselected in 0.12s
+
+python -m pytest tests/test_portfolio_render.py -q
+12 passed in 2.16s
+```
+
+Review-fix verification:
+
+```text
+full pytest: 486 passed in 14.25s
+python -m compileall -q src portfolio tests: exit 0
+git diff --check: exit 0
+global harness smoke: ok, CLOUD_ONLY, Ollama commands skipped
+```
+
+Новые Task 8 файлы и параллельные визуальные правки `sites/complex.py` не изменялись и не входят в review-fix commit.

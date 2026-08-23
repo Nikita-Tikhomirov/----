@@ -3,7 +3,7 @@ import mimetypes
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import url2pathname
 
 from playwright.sync_api import BrowserContext, sync_playwright
@@ -37,6 +37,12 @@ def output_path(output_root: Path, project: ProjectSpec, shot: ShotSpec) -> Path
     return Path(output_root) / project.slug / f"{shot_number:02d}-{shot.key}.png"
 
 
+def _file_uri_to_path(uri: str) -> Path:
+    parsed = urlsplit(uri)
+    pathname = urlunsplit(("", parsed.netloc, parsed.path, "", ""))
+    return Path(url2pathname(pathname))
+
+
 def _stage_local_assets(
     project: ProjectSpec, assets: Mapping[str, str]
 ) -> dict[str, str]:
@@ -47,7 +53,7 @@ def _stage_local_assets(
             raise ValueError(
                 f"Asset {project.slug}/{key} must be a local file URI, got {uri!r}"
             )
-        asset_path = Path(url2pathname(parsed.path))
+        asset_path = _file_uri_to_path(uri)
         if not asset_path.is_file():
             raise FileNotFoundError(
                 f"Asset {project.slug}/{key} does not exist: {asset_path}"
