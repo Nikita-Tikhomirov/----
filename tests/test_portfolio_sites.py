@@ -7,6 +7,8 @@ from portfolio.kwork_pack.catalog import get_project
 from portfolio.kwork_pack.sites.commercial import COMMERCIAL_LAYOUTS, render_commercial
 from portfolio.kwork_pack.sites.complex import COMPLEX_LAYOUTS, COMPLEX_STATES, render_complex
 from portfolio.kwork_pack.sites.leadgen import LEADGEN_FLOWS, LEADGEN_LAYOUTS, render_leadgen
+from portfolio.kwork_pack.sites import render_site
+from portfolio.kwork_pack.catalog import PROJECTS
 
 
 COMMERCIAL_CASES = (
@@ -312,3 +314,18 @@ def test_complex_renderer_rejects_unsupported_projects_variants_and_missing_asse
         render_complex(project, unknown_shot, {"hero": "/asset.webp"})
     with pytest.raises(KeyError, match="Missing hero asset"):
         render_complex(project, project.shots[0], {})
+
+
+def test_render_site_adapts_semantic_assets_for_every_legacy_story_screen():
+    for project in PROJECTS:
+        assets = {
+            asset.key: f"/{asset.filename}"
+            for asset in project.assets
+        }
+        first_asset = assets[project.assets[0].key]
+
+        for shot in project.shots:
+            rendered = render_site(project, shot, assets)
+
+            assert first_asset in rendered
+            assert "hero" not in assets
