@@ -1,13 +1,17 @@
 from portfolio.kwork_pack.catalog import PROJECTS, get_project, public_url
 
 
-def test_catalog_contains_fifteen_distinct_projects_and_sixty_shots():
+def test_every_project_has_five_desktop_routes_and_dedicated_renderer():
     assert len(PROJECTS) == 15
     assert len({project.slug for project in PROJECTS}) == 15
-    assert sum(len(project.shots) for project in PROJECTS) == 60
-    assert [shot.key for project in PROJECTS for shot in project.shots] == [
-        "cover", "content", "function", "mobile"
-    ] * 15
+    assert len({project.renderer_module for project in PROJECTS}) == 15
+    for project in PROJECTS:
+        assert project.renderer_module == (
+            f"portfolio.kwork_pack.sites.{project.slug.replace('-', '_')}"
+        )
+        assert len(project.shots) == 5
+        assert all(shot.layout == "desktop" for shot in project.shots)
+        assert len({shot.path for shot in project.shots}) == 5
 
 
 def test_public_urls_are_semantic_and_never_look_like_local_demos():
@@ -27,18 +31,17 @@ def test_kwork_titles_fit_form_limit_and_identify_author_concepts():
         assert "Авторский концепт" in project.description
 
 
-def test_catalog_declares_canonical_hero_filename_for_every_project():
-    assert [
-        asset.filename
-        for project in PROJECTS
-        for asset in project.assets
-    ] == ["hero.png"] * 15
+def test_every_project_declares_a_real_asset_inventory():
+    for project in PROJECTS:
+        assert len(project.assets) >= 6
+        assert len({asset.key for asset in project.assets}) == len(project.assets)
+        assert all(asset.filename != "hero.png" for asset in project.assets)
 
 
 def test_tochka_hoda_uses_automotive_content_path():
     project = get_project("tochka-hoda")
     assert project.domain == "tochka-hoda.ru"
-    assert project.shots[1].public_path == "/uslugi/diagnostika-avtomobilya"
+    assert project.shots[1].path == "/uslugi/diagnostika-avtomobilya"
 
 
 def test_moving_and_legal_concepts_use_approved_available_brands_and_domains():

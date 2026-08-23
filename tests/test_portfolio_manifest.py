@@ -19,16 +19,21 @@ def _write_project_images(root, project):
     return tuple(paths)
 
 
-def test_manifests_contain_fifteen_upload_rows_and_four_ordered_images(tmp_path):
+def test_manifests_contain_fifteen_upload_rows_and_five_ordered_desktop_images(tmp_path):
     json_path, csv_path = write_manifests(PROJECTS, tmp_path)
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert len(payload["works"]) == 15
     assert payload["works"][0]["images"] == [
         "tochka-hoda/01-cover.png",
-        "tochka-hoda/02-content.png",
-        "tochka-hoda/03-function.png",
-        "tochka-hoda/04-mobile.png",
+        "tochka-hoda/02-diagnostics.png",
+        "tochka-hoda/03-services.png",
+        "tochka-hoda/04-case-study.png",
+        "tochka-hoda/05-prices.png",
     ]
+    assert all(
+        len(work["images"]) == 5 and all("mobile" not in image for image in work["images"])
+        for work in payload["works"]
+    )
     with csv_path.open(encoding="utf-8-sig", newline="") as handle:
         assert len(list(csv.DictReader(handle))) == 15
 
@@ -57,9 +62,10 @@ def test_manifests_are_deterministic_and_preserve_russian_metadata(tmp_path):
         "domain": "tochka-hoda.ru",
         "images": [
             "tochka-hoda/01-cover.png",
-            "tochka-hoda/02-content.png",
-            "tochka-hoda/03-function.png",
-            "tochka-hoda/04-mobile.png",
+            "tochka-hoda/02-diagnostics.png",
+            "tochka-hoda/03-services.png",
+            "tochka-hoda/04-case-study.png",
+            "tochka-hoda/05-prices.png",
         ],
     }
 
@@ -73,13 +79,13 @@ def test_gallery_has_unframed_sections_and_never_rewrites_images(tmp_path):
 
     assert gallery_path == tmp_path / "gallery.html"
     assert html.count('<section class="project-section') == 15
-    assert html.count('<img class="project-shot"') == 60
+    assert html.count('<img class="project-shot"') == 75
     assert "aspect-ratio: 3 / 2" in html
     assert PROJECTS[0].kwork_title in html
     assert PROJECTS[0].domain in html
     assert PROJECTS[0].description in html
     assert "Проверка пройдена" in html
-    assert "Есть замечания: 4" in html
+    assert "Есть замечания: 5" in html
     assert tuple(path.read_bytes() for path in source_paths) == original_bytes
 
 

@@ -15,13 +15,14 @@ def test_desktop_document_contains_realistic_browser_url_and_canvas_contract():
     assert "localhost" not in html
 
 
-def test_mobile_document_uses_mobile_browser_frame_without_changing_output_canvas():
+def test_desktop_document_never_uses_a_mobile_browser_frame():
     project = get_project("doma-u-ozera")
-    shot = next(item for item in project.shots if item.key == "mobile")
+    shot = next(item for item in project.shots if item.key == "booking")
     html = build_document(project, shot, "<main>Дом с сауной</main>", "")
-    assert 'data-layout="mobile"' in html
+    assert 'data-layout="desktop"' in html
     assert 'data-canvas="1920x1280"' in html
     assert "doma-u-ozera.ru" in html
+    assert 'class="mobile-url-bar"' not in html
 
 
 def test_build_document_escapes_dynamic_shell_text_values():
@@ -36,6 +37,7 @@ def test_build_document_escapes_dynamic_shell_text_values():
         work_type="Work",
         description="Авторский концепт",
         palette="palette",
+        renderer_module="portfolio.kwork_pack.sites.escape_check",
         shots=(shot,),
         assets=(),
     )
