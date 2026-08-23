@@ -177,6 +177,9 @@ _COMPLEX_CSS = """
 .lesson-row span:last-child { color: var(--ink-muted); text-align: right; }
 .lesson-workspace { display: grid; grid-template-columns: 270px minmax(0, 1fr) 330px; min-height: 980px; background: #f2f3f2; }
 .lesson-outline { padding: 26px 20px; background: #171918; color: #fff; }
+.lesson-menu { display: grid; gap: 2px; margin-bottom: 10px; }
+.lesson-menu a { display: block; padding: 8px 10px; color: #bcc2bf; font-size: 13px; }
+.lesson-menu a.active { color: #fff; }
 .outline-item { padding: 13px 10px; border-bottom: 1px solid #353937; color: #bcc2bf; font-size: 14px; }
 .outline-item.active { border-left: 3px solid #2d9ea0; background: #292d2b; color: #fff; }
 .lesson-stage { padding: 28px; }
