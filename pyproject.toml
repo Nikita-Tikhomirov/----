@@ -22,6 +22,10 @@ dependencies = [
 dev = [
     "pytest>=8,<10",
 ]
+portfolio = [
+    "playwright>=1.55,<2",
+    "Pillow>=10,<13",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
