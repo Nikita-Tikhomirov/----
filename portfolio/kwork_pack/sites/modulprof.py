@@ -125,6 +125,35 @@ def _cover(assets: Mapping[str, str]) -> str:
 
 
 def _catalog(assets: Mapping[str, str]) -> str:
+    models = (
+        ("office", "compact", "MP-O96", "Административный блок", "96 м²", 32),
+        ("office", "compact", "MP-O72", "Офис линейного персонала", "72 м²", 28),
+        ("office", "compact", "MP-O48", "Диспетчерский модуль", "48 м²", 26),
+        ("office", "medium", "MP-O120", "Офис проектной группы", "120 м²", 34),
+        ("office", "medium", "MP-O144", "Штаб строительства", "144 м²", 36),
+        ("office", "medium", "MP-O168", "Лабораторный корпус", "168 м²", 38),
+        ("office", "medium", "MP-O180", "Административный корпус", "180 м²", 40),
+        ("office", "large", "MP-O216", "Инженерный центр", "216 м²", 44),
+        ("office", "large", "MP-O288", "Управление площадки", "288 м²", 48),
+        ("warehouse", "medium", "MP-S180", "Тёплый склад", "180 м²", 41),
+        ("warehouse", "compact", "MP-S72", "Склад расходных материалов", "72 м²", 29),
+        ("warehouse", "compact", "MP-S96", "Инструментальный склад", "96 м²", 31),
+        ("warehouse", "medium", "MP-S144", "Склад комплектующих", "144 м²", 36),
+        ("warehouse", "large", "MP-S240", "Склад готовой продукции", "240 м²", 46),
+        ("warehouse", "large", "MP-S360", "Распределительный склад", "360 м²", 54),
+        ("warehouse", "large", "MP-S540", "Складской комплекс", "540 м²", 62),
+        ("logistics", "large", "MP-L240", "Логистический терминал", "240 м²", 44),
+        ("logistics", "large", "MP-L360", "Зона комплектации", "360 м²", 50),
+        ("logistics", "compact", "MP-L84", "Пост экспедиции", "84 м²", 30),
+        ("logistics", "medium", "MP-L144", "Терминал возвратов", "144 м²", 36),
+        ("logistics", "medium", "MP-L180", "Кросс-докинг", "180 м²", 40),
+    )
+    building_rows = "".join(
+        f'<article data-building-row data-purpose="{purpose}" data-area-group="{area_group}" '
+        f'data-base-term="{term}" data-visible="false"><span>{code}</span><b>{name}</b>'
+        f'<i>{area}</i><em data-building-row-state>С инженерией · {term} дня</em></article>'
+        for purpose, area_group, code, name, area, term in models
+    )
     return (
         '<main class="mp-route mp-catalog-route">'
         + _page_head(
@@ -146,13 +175,7 @@ def _catalog(assets: Mapping[str, str]) -> str:
         '<div class="mp-filter-note"><b>Единая ведомость</b><p>Каркас, панели, инженерия и доставка в одной спецификации.</p></div></aside>'
         '<section class="mp-catalog-ledger"><header><div><span>РЕЗУЛЬТАТ ФИЛЬТРА</span><b data-building-count>9 решений</b></div>'
         '<p data-building-summary>Офисные модули · любая площадь · с инженерией</p></header>'
-        '<div class="mp-building-rows">'
-        '<article><span>MP-O72</span><b>Офис линейного персонала</b><i>72 м²</i><em>28 дней</em></article>'
-        '<article><span>MP-O96</span><b>Административный блок</b><i>96 м²</i><em>32 дня</em></article>'
-        '<article><span>MP-S180</span><b>Тёплый склад</b><i>180 м²</i><em>41 день</em></article>'
-        '<article><span>MP-L240</span><b>Логистический терминал</b><i>240 м²</i><em>52 дня</em></article>'
-        '<article><span>MP-L360</span><b>Зона комплектации</b><i>360 м²</i><em>58 дней</em></article>'
-        '</div></section>'
+        f'<div class="mp-building-rows">{building_rows}</div></section>'
         '<aside class="mp-building-detail">'
         f'<img src="{assets["factory_assembly"]}" alt="Сборка модульного здания на производственной линии">'
         '<div class="mp-detail-body"><span>ВЫБРАННАЯ МОДЕЛЬ</span><h2 data-selected-building>MP-O96 · административный блок</h2>'
@@ -281,31 +304,33 @@ def _comparison(assets: Mapping[str, str]) -> str:
 
 def _projects(assets: Mapping[str, str]) -> str:
     rows = (
-        ("industry", "central", "MP-2381", "Цех ремонта техники", "Калуга", "864 м²"),
-        ("industry", "central", "MP-2390", "Сборочный корпус", "Тверь", "720 м²"),
-        ("industry", "central", "MP-2401", "Лабораторный блок", "Обнинск", "360 м²"),
-        ("industry", "volga", "MP-2414", "Линия упаковки", "Казань", "540 м²"),
-        ("industry", "volga", "MP-2428", "Участок контроля", "Ижевск", "288 м²"),
-        ("industry", "north", "MP-2442", "Ремонтная база", "Петрозаводск", "648 м²"),
-        ("industry", "north", "MP-2455", "Энергетический модуль", "Выборг", "216 м²"),
-        ("logistics", "central", "MP-2470", "Логистический терминал", "Тула", "1 080 м²"),
-        ("logistics", "central", "MP-2476", "Кросс-докинг", "Подольск", "864 м²"),
-        ("logistics", "central", "MP-2481", "Экспедиционный склад", "Орёл", "540 м²"),
-        ("logistics", "volga", "MP-2484", "Зона комплектации", "Самара", "720 м²"),
-        ("logistics", "volga", "MP-2488", "Терминал возвратов", "Саратов", "432 м²"),
-        ("logistics", "north", "MP-2492", "Склад снабжения", "Мурманск", "720 м²"),
-        ("logistics", "north", "MP-2498", "Арктический хаб", "Апатиты", "576 м²"),
-        ("logistics", "north", "MP-2504", "Портовый склад", "Архангельск", "648 м²"),
-        ("social", "north", "MP-2511", "Медицинский модуль", "Архангельск", "288 м²"),
-        ("social", "north", "MP-2518", "Фельдшерский пункт", "Северодвинск", "144 м²"),
-        ("social", "central", "MP-2522", "Учебный корпус", "Рязань", "432 м²"),
-        ("social", "central", "MP-2529", "Спортивный блок", "Липецк", "360 м²"),
-        ("social", "volga", "MP-2536", "Амбулатория", "Ульяновск", "216 м²"),
+        ("industry", "central", "MP-2381", "Цех ремонта техники", "Калуга", "864 м²", "14 дней", "180 км", "май 2026"),
+        ("industry", "central", "MP-2390", "Сборочный корпус", "Тверь", "720 м²", "13 дней", "220 км", "апрель 2026"),
+        ("industry", "central", "MP-2401", "Лабораторный блок", "Обнинск", "360 м²", "9 дней", "145 км", "март 2026"),
+        ("industry", "volga", "MP-2414", "Линия упаковки", "Казань", "540 м²", "12 дней", "820 км", "апрель 2026"),
+        ("industry", "volga", "MP-2428", "Участок контроля", "Ижевск", "288 м²", "10 дней", "960 км", "март 2026"),
+        ("industry", "north", "MP-2442", "Ремонтная база", "Петрозаводск", "648 м²", "16 дней", "1 050 км", "февраль 2026"),
+        ("industry", "north", "MP-2455", "Энергетический модуль", "Выборг", "216 м²", "11 дней", "690 км", "январь 2026"),
+        ("logistics", "central", "MP-2470", "Логистический терминал", "Тула", "1 080 м²", "18 дней", "420 км", "июнь 2026"),
+        ("logistics", "central", "MP-2476", "Кросс-докинг", "Подольск", "864 м²", "14 дней", "95 км", "май 2026"),
+        ("logistics", "central", "MP-2481", "Экспедиционный склад", "Орёл", "540 м²", "12 дней", "360 км", "апрель 2026"),
+        ("logistics", "volga", "MP-2484", "Зона комплектации", "Самара", "720 м²", "15 дней", "1 060 км", "март 2026"),
+        ("logistics", "volga", "MP-2488", "Терминал возвратов", "Саратов", "432 м²", "13 дней", "870 км", "февраль 2026"),
+        ("logistics", "north", "MP-2492", "Склад снабжения", "Мурманск", "720 м²", "17 дней", "1 880 км", "январь 2026"),
+        ("logistics", "north", "MP-2498", "Арктический хаб", "Апатиты", "576 м²", "15 дней", "1 860 км", "декабрь 2025"),
+        ("logistics", "north", "MP-2504", "Портовый склад", "Архангельск", "648 м²", "14 дней", "1 260 км", "ноябрь 2025"),
+        ("social", "north", "MP-2511", "Медицинский модуль", "Архангельск", "288 м²", "10 дней", "1 260 км", "июль 2026"),
+        ("social", "north", "MP-2518", "Фельдшерский пункт", "Северодвинск", "144 м²", "8 дней", "1 300 км", "июнь 2026"),
+        ("social", "central", "MP-2522", "Учебный корпус", "Рязань", "432 м²", "11 дней", "310 км", "май 2026"),
+        ("social", "central", "MP-2529", "Спортивный блок", "Липецк", "360 м²", "10 дней", "480 км", "апрель 2026"),
+        ("social", "volga", "MP-2536", "Амбулатория", "Ульяновск", "216 м²", "9 дней", "890 км", "март 2026"),
     )
     ledger = "".join(
-        f'<article data-project-row data-sector="{sector}" data-region="{region}" data-visible="{str(sector == "logistics").lower()}">'
+        f'<article data-project-row data-sector="{sector}" data-region="{region}" data-name="{name}" '
+        f'data-city="{city}" data-area="{area}" data-install="{install}" data-logistics="{logistics}" '
+        f'data-date="{date}" data-visible="{str(sector == "logistics").lower()}">'
         f'<span>{code}</span><b>{name}</b><i>{city}</i><em>{area}</em><strong>Сдан</strong></article>'
-        for sector, region, code, name, city, area in rows
+        for sector, region, code, name, city, area, install, logistics, date in rows
     )
     return (
         '<main class="mp-route mp-projects-route">'
@@ -349,7 +374,7 @@ _CSS = r"""
 .mp-brand { display: flex; align-items: center; gap: 14px; color: #fff; text-decoration: none; min-width: 0; }
 .mp-brand strong { font-size: 24px; white-space: nowrap; }
 .mp-brand strong span { color: #ff6a1a; }
-.mp-brand small { padding-left: 14px; border-left: 1px solid #69747c; color: #cbd1d5; font-size: 10px; line-height: 1.2; }
+.mp-brand small { padding-left: 14px; border-left: 1px solid #69747c; color: #cbd1d5; font-size: 12px; line-height: 1.2; }
 .mp-nav { min-width: 0; display: flex; align-items: stretch; justify-content: flex-start; overflow: hidden; }
 .mp-nav a { display: flex; align-items: center; padding: 0 24px; color: #dfe3e6; text-decoration: none; white-space: nowrap; border-left: 1px solid #343b41; font-size: 13px; }
 .mp-nav a:last-child { border-right: 1px solid #343b41; }
@@ -358,37 +383,38 @@ _CSS = r"""
 .mp-contact b { font-size: 16px; }.mp-contact span { color: #cbd1d5; font-size: 12px; }
 .mp-route { width: 1834px; height: 1048px; min-height: 0; display: grid; grid-template-rows: 130px 600px 318px; overflow: hidden; background: #f4f5f6; }
 .mp-page-head { display: flex; align-items: center; justify-content: space-between; padding: 22px 42px; background: #fff; border-bottom: 1px solid #c9cfd3; }
-.mp-page-head > div:first-child { max-width: 960px; }.mp-page-head p { margin: 0 0 8px; color: #ff6a1a; font-size: 11px; font-weight: 700; }.mp-page-head h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.05; }.mp-page-head > div > span { color: #69747c; font-size: 13px; }
+.mp-page-head > div:first-child { max-width: 960px; }.mp-page-head p { margin: 0 0 8px; color: #ff6a1a; font-size: 12px; font-weight: 700; }.mp-page-head h1 { margin: 0 0 6px; font-size: 30px; line-height: 1.05; }.mp-page-head > div > span { color: #69747c; font-size: 13px; }
 .mp-head-metrics { display: flex; height: 70px; border: 1px solid #c9cfd3; }
-.mp-head-metric { min-width: 150px; padding: 14px 18px; border-left: 1px solid #c9cfd3; display: flex; flex-direction: column; justify-content: center; }.mp-head-metric:first-child { border-left: 0; }.mp-head-metric span { color: #69747c; font-size: 11px; text-transform: uppercase; }.mp-head-metric b { margin-top: 6px; font-size: 18px; }
+.mp-head-metric { min-width: 150px; padding: 14px 18px; border-left: 1px solid #c9cfd3; display: flex; flex-direction: column; justify-content: center; }.mp-head-metric:first-child { border-left: 0; }.mp-head-metric span { color: #69747c; font-size: 12px; text-transform: uppercase; }.mp-head-metric b { margin-top: 6px; font-size: 18px; }
 .mp-work { min-height: 0; border-bottom: 1px solid #aeb6bc; }.mp-work > * { min-width: 0; min-height: 0; }
 .mp-control-rail, .mp-filter-rail, .mp-config-controls, .mp-result-rail, .mp-config-result, .mp-package-result, .mp-project-filters { padding: 24px; background: #fff; border-right: 1px solid #c9cfd3; overflow: hidden; }
 .mp-result-rail, .mp-config-result, .mp-package-result { border-right: 0; border-left: 1px solid #c9cfd3; }
-.mp-rail-index { color: #ff6a1a; font-size: 11px; font-weight: 700; letter-spacing: 0; }.mp-control-rail h2, .mp-filter-rail h2, .mp-project-filters h2 { margin: 12px 0 8px; font-size: 20px; }.mp-control-rail > p { margin: 0 0 20px; color: #69747c; line-height: 1.45; }
-.mp-label { display: block; margin: 22px 0 8px; color: #69747c; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.mp-rail-index { color: #ff6a1a; font-size: 12px; font-weight: 700; letter-spacing: 0; }.mp-control-rail h2, .mp-filter-rail h2, .mp-project-filters h2 { margin: 12px 0 8px; font-size: 20px; }.mp-control-rail > p { margin: 0 0 20px; color: #69747c; line-height: 1.45; }
+.mp-label { display: block; margin: 22px 0 8px; color: #69747c; font-size: 12px; font-weight: 700; text-transform: uppercase; }
 .mp-segment { display: flex; border: 1px solid #aeb6bc; }.mp-segment button { flex: 1; height: 42px; border: 0; border-left: 1px solid #aeb6bc; background: #fff; cursor: pointer; font-size: 12px; }.mp-segment button:first-child { border-left: 0; }.mp-segment button[aria-pressed="true"] { background: #20262b; color: #fff; box-shadow: inset 0 -3px #ff6a1a; }
 .mp-proof-list, .mp-result-list, .mp-building-detail dl, .mp-project-detail dl, .mp-engineer-panel dl { margin: 24px 0 0; border-top: 1px solid #d7dcdf; }.mp-proof-list div, .mp-result-list div, .mp-building-detail dl div, .mp-project-detail dl div, .mp-engineer-panel dl div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #d7dcdf; }.mp-proof-list dt, .mp-result-list dt, .mp-building-detail dt, .mp-project-detail dt, .mp-engineer-panel dt { color: #69747c; }.mp-proof-list dd, .mp-result-list dd, .mp-building-detail dd, .mp-project-detail dd, .mp-engineer-panel dd { margin: 0; text-align: right; font-weight: 700; }
 .mp-primary-link { display: flex; height: 46px; margin-top: 22px; align-items: center; justify-content: center; background: #ff6a1a; color: #fff; text-decoration: none; font-weight: 700; }
 .mp-cover-work { display: grid; grid-template-columns: 330px 1fr 360px; }.mp-building-stage { position: relative; margin: 0; background: #20262b; overflow: hidden; }.mp-building-stage img { width: 100%; height: 100%; object-fit: cover; display: block; }.mp-building-stage figcaption { position: absolute; left: 0; right: 0; bottom: 0; height: 48px; display: flex; align-items: center; justify-content: space-around; background: #20262b; color: #fff; border-top: 3px solid #ff6a1a; font-size: 12px; }
 .mp-result-code { display: block; margin-top: 18px; color: #1872c9; font-size: 12px; font-weight: 700; }.mp-result-rail h2, .mp-config-result h2, .mp-package-result h2 { margin: 10px 0 8px; font-size: 23px; line-height: 1.2; }.mp-result-rail > p { color: #69747c; line-height: 1.5; }.mp-price, .mp-config-total { margin: 24px 0 8px; color: #ff6a1a; font-size: 30px; font-weight: 700; }
-.mp-lower { min-height: 0; background: #e9ecee; border-top: 5px solid #20262b; overflow: hidden; }.mp-cover-lower, .mp-catalog-lower, .mp-comparison-lower, .mp-project-lower { display: grid; grid-template-columns: 1.15fr repeat(3, 1fr) .95fr; }.mp-lower-heading { padding: 30px 32px; background: #20262b; color: #fff; }.mp-lower-heading > span { color: #ff6a1a; font-size: 11px; font-weight: 700; }.mp-lower-heading h2 { margin: 14px 0 10px; font-size: 22px; line-height: 1.2; }.mp-lower-heading p { color: #cbd1d5; line-height: 1.5; }
-.mp-family, .mp-procurement, .mp-standard, .mp-engineering-note, .mp-doc-ledger { padding: 30px 26px; border-right: 1px solid #bdc5ca; background: #f4f5f6; }.mp-family > b, .mp-procurement > b { color: #ff6a1a; font-size: 28px; }.mp-family strong, .mp-procurement strong { display: block; margin: 18px 0 8px; font-size: 17px; }.mp-family span, .mp-procurement span { color: #1872c9; font-weight: 700; }.mp-family p, .mp-procurement p { color: #69747c; line-height: 1.5; }.mp-engineering-note, .mp-doc-ledger { background: #1872c9; color: #fff; border: 0; }.mp-engineering-note b, .mp-doc-ledger b { display: block; font-size: 44px; }.mp-engineering-note span, .mp-doc-ledger span { text-transform: uppercase; font-size: 11px; }.mp-engineering-note p, .mp-doc-ledger p { margin-top: 42px; line-height: 1.5; }
-.mp-catalog-work { display: grid; grid-template-columns: 290px 1fr 410px; }.mp-filter-rail fieldset, .mp-system-list { margin: 18px 0; padding: 14px; border: 1px solid #c9cfd3; }.mp-filter-rail legend, .mp-system-list legend { padding: 0 6px; color: #69747c; font-size: 11px; font-weight: 700; }.mp-filter-rail fieldset label, .mp-system-list label { display: block; padding: 6px 0; }.mp-filter-rail input, .mp-system-list input { accent-color: #ff6a1a; }
-.mp-field { display: block; margin: 14px 0; color: #69747c; font-size: 11px; font-weight: 700; text-transform: uppercase; }.mp-field select, .mp-field input { display: block; width: 100%; height: 42px; margin-top: 7px; padding: 0 12px; border: 1px solid #aeb6bc; background: #fff; text-transform: none; }.mp-filter-note { margin-top: 18px; padding: 14px; border-left: 4px solid #1872c9; background: #e9f1f8; }.mp-filter-note p { margin: 6px 0 0; color: #69747c; line-height: 1.4; }
-.mp-catalog-ledger { padding: 22px; background: #e9ecee; }.mp-catalog-ledger header { height: 76px; display: flex; justify-content: space-between; align-items: center; padding: 0 18px; background: #20262b; color: #fff; }.mp-catalog-ledger header span { display: block; color: #ff6a1a; font-size: 10px; }.mp-catalog-ledger header b { display: block; margin-top: 5px; font-size: 22px; }.mp-catalog-ledger header p { max-width: 450px; text-align: right; color: #cbd1d5; }.mp-building-rows { background: #fff; border: 1px solid #c9cfd3; border-top: 0; }.mp-building-rows article { height: 88px; display: grid; grid-template-columns: 100px 1fr 110px 100px; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid #d7dcdf; }.mp-building-rows article:last-child { border: 0; }.mp-building-rows article span { color: #1872c9; font-weight: 700; }.mp-building-rows article i, .mp-building-rows article em { color: #69747c; font-style: normal; text-align: right; }
-.mp-building-detail { background: #fff; overflow: hidden; }.mp-building-detail > img { width: 100%; height: 270px; object-fit: cover; display: block; border-bottom: 4px solid #ff6a1a; }.mp-detail-body { padding: 20px 24px; }.mp-detail-body > span, .mp-project-detail > div > span { color: #ff6a1a; font-size: 10px; font-weight: 700; }.mp-detail-body h2 { margin: 8px 0; font-size: 20px; }.mp-building-detail dl { margin-top: 14px; }
+.mp-lower { min-height: 0; background: #e9ecee; border-top: 5px solid #20262b; overflow: hidden; }.mp-cover-lower, .mp-catalog-lower, .mp-comparison-lower, .mp-project-lower { display: grid; grid-template-columns: 1.15fr repeat(3, 1fr) .95fr; }.mp-lower-heading { padding: 30px 32px; background: #20262b; color: #fff; }.mp-lower-heading > span { color: #ff6a1a; font-size: 12px; font-weight: 700; }.mp-lower-heading h2 { margin: 14px 0 10px; font-size: 22px; line-height: 1.2; }.mp-lower-heading p { color: #cbd1d5; line-height: 1.5; }
+.mp-family, .mp-procurement, .mp-standard, .mp-engineering-note, .mp-doc-ledger { padding: 30px 26px; border-right: 1px solid #bdc5ca; background: #f4f5f6; }.mp-family > b, .mp-procurement > b { color: #ff6a1a; font-size: 28px; }.mp-family strong, .mp-procurement strong { display: block; margin: 18px 0 8px; font-size: 17px; }.mp-family span, .mp-procurement span { color: #1872c9; font-weight: 700; }.mp-family p, .mp-procurement p { color: #69747c; line-height: 1.5; }.mp-engineering-note, .mp-doc-ledger { background: #1872c9; color: #fff; border: 0; }.mp-engineering-note b, .mp-doc-ledger b { display: block; font-size: 44px; }.mp-engineering-note span, .mp-doc-ledger span { text-transform: uppercase; font-size: 12px; }.mp-engineering-note p, .mp-doc-ledger p { margin-top: 42px; line-height: 1.5; }
+.mp-catalog-work { display: grid; grid-template-columns: 290px 1fr 410px; }.mp-filter-rail fieldset, .mp-system-list { margin: 18px 0; padding: 14px; border: 1px solid #c9cfd3; }.mp-filter-rail legend, .mp-system-list legend { padding: 0 6px; color: #69747c; font-size: 12px; font-weight: 700; }.mp-filter-rail fieldset label, .mp-system-list label { display: block; padding: 6px 0; }.mp-filter-rail input, .mp-system-list input { accent-color: #ff6a1a; }
+.mp-field { display: block; margin: 14px 0; color: #69747c; font-size: 12px; font-weight: 700; text-transform: uppercase; }.mp-field select, .mp-field input { display: block; width: 100%; height: 42px; margin-top: 7px; padding: 0 12px; border: 1px solid #aeb6bc; background: #fff; text-transform: none; }.mp-filter-note { margin-top: 18px; padding: 14px; border-left: 4px solid #1872c9; background: #e9f1f8; }.mp-filter-note p { margin: 6px 0 0; color: #69747c; line-height: 1.4; }
+.mp-catalog-ledger { padding: 22px; background: #e9ecee; }.mp-catalog-ledger header { height: 76px; display: flex; justify-content: space-between; align-items: center; padding: 0 18px; background: #20262b; color: #fff; }.mp-catalog-ledger header span { display: block; color: #ff6a1a; font-size: 12px; }.mp-catalog-ledger header b { display: block; margin-top: 5px; font-size: 22px; }.mp-catalog-ledger header p { max-width: 450px; text-align: right; color: #cbd1d5; }.mp-building-rows { background: #fff; border: 1px solid #c9cfd3; border-top: 0; }.mp-building-rows article { height: 52px; display: grid; grid-template-columns: 100px 1fr 100px 190px; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid #d7dcdf; }.mp-building-rows article:last-child { border: 0; }.mp-building-rows article span { color: #1872c9; font-weight: 700; }.mp-building-rows article i, .mp-building-rows article em { color: #69747c; font-style: normal; text-align: right; }
+.mp-building-rows article[data-visible="false"] { display: none; }
+.mp-building-detail { background: #fff; overflow: hidden; }.mp-building-detail > img { width: 100%; height: 270px; object-fit: cover; display: block; border-bottom: 4px solid #ff6a1a; }.mp-detail-body { padding: 20px 24px; }.mp-detail-body > span, .mp-project-detail > div > span { color: #ff6a1a; font-size: 12px; font-weight: 700; }.mp-detail-body h2 { margin: 8px 0; font-size: 20px; }.mp-building-detail dl { margin-top: 14px; }
 .mp-catalog-lower { grid-template-columns: 1.2fr repeat(4, 1fr); }.mp-procurement:last-child { border-right: 0; }
 .mp-config-work { display: grid; grid-template-columns: 330px 1fr 400px; }.mp-config-controls { padding: 18px 22px; }.mp-config-controls .mp-field { margin: 10px 0; }.mp-config-controls .mp-field select, .mp-config-controls .mp-field input { height: 36px; }.mp-dimension-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.mp-config-controls .mp-label { margin: 12px 0 6px; }.mp-config-controls .mp-segment button { height: 34px; }.mp-system-list { display: grid; grid-template-columns: 1fr; gap: 0; margin: 12px 0; padding: 8px 12px; }.mp-system-list label { padding: 3px 0; font-size: 12px; }
-.mp-config-stage { background: #d8dde0; display: grid; grid-template-rows: 48px 400px 152px; overflow: hidden; }.mp-stage-tabs { display: flex; align-items: stretch; background: #fff; border-bottom: 1px solid #aeb6bc; }.mp-stage-tabs > * { display: flex; align-items: center; padding: 0 22px; border-right: 1px solid #c9cfd3; font-size: 11px; font-style: normal; }.mp-stage-tabs b { color: #ff6a1a; box-shadow: inset 0 -3px #ff6a1a; }.mp-stage-images { display: grid; grid-template-columns: 1.45fr 1fr; gap: 2px; background: #20262b; }.mp-stage-images figure { position: relative; margin: 0; overflow: hidden; }.mp-stage-images img { width: 100%; height: 100%; object-fit: cover; display: block; }.mp-stage-images figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 11px 14px; background: #20262b; color: #fff; border-top: 3px solid #ff6a1a; font-size: 11px; }
+.mp-config-stage { background: #d8dde0; display: grid; grid-template-rows: 48px 400px 152px; overflow: hidden; }.mp-stage-tabs { display: flex; align-items: stretch; background: #fff; border-bottom: 1px solid #aeb6bc; }.mp-stage-tabs > * { display: flex; align-items: center; padding: 0 22px; border-right: 1px solid #c9cfd3; font-size: 12px; font-style: normal; }.mp-stage-tabs b { color: #ff6a1a; box-shadow: inset 0 -3px #ff6a1a; }.mp-stage-images { display: grid; grid-template-columns: 1.45fr 1fr; gap: 2px; background: #20262b; }.mp-stage-images figure { position: relative; margin: 0; overflow: hidden; }.mp-stage-images img { width: 100%; height: 100%; object-fit: cover; display: block; }.mp-stage-images figcaption { position: absolute; left: 0; right: 0; bottom: 0; padding: 11px 14px; background: #20262b; color: #fff; border-top: 3px solid #ff6a1a; font-size: 12px; }
 .mp-blueprint { position: relative; display: grid; grid-template-columns: 110px 1fr 1fr 1fr 80px; align-items: center; gap: 0; padding: 24px 28px; background: #fff; border-top: 1px solid #aeb6bc; }.mp-blueprint i { display: block; height: 70px; border-left: 2px solid #1872c9; border-right: 1px solid #69747c; }.mp-blueprint b { color: #1872c9; }.mp-blueprint em { position: absolute; left: 50%; bottom: 16px; font-style: normal; color: #69747c; }
 .mp-config-result { padding: 24px; }.mp-config-result h2 { min-height: 112px; font-size: 18px; line-height: 1.45; }.mp-config-total { margin: 10px 0; }.mp-system-state { margin-top: 14px; padding: 12px; border-left: 4px solid #1872c9; background: #e9f1f8; color: #4d5961; line-height: 1.4; }
-.mp-config-lower { display: grid; grid-template-rows: 68px 32px 1fr; padding: 0 24px 18px; background: #fff; }.mp-config-lower header { display: flex; justify-content: space-between; align-items: center; }.mp-config-lower header > div:last-child { text-align: right; }.mp-config-lower header span { display: block; color: #69747c; font-size: 10px; }.mp-config-lower header h2 { margin: 4px 0 0; font-size: 19px; }.mp-config-lower header b { display: block; margin-top: 5px; color: #ff6a1a; font-size: 20px; }.mp-spec-head, .mp-spec-row { display: grid; grid-template-columns: 54px 1.2fr 1.7fr 170px; align-items: center; }.mp-spec-head { padding: 0 12px; background: #20262b; color: #fff; font-size: 10px; }.mp-spec-head i, .mp-spec-row i { font-style: normal; }.mp-spec-head strong, .mp-spec-row strong { text-align: right; }.mp-spec-body { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 52px; border: 1px solid #c9cfd3; border-top: 0; }.mp-spec-row { padding: 0 12px; border-right: 1px solid #d7dcdf; border-bottom: 1px solid #d7dcdf; font-size: 12px; }.mp-spec-row:nth-child(even) { border-right: 0; }.mp-spec-row span, .mp-spec-row i { color: #69747c; }.mp-spec-row strong { color: #20262b; }
-.mp-compare-work { display: grid; grid-template-columns: 300px 1fr 390px; }.mp-engineer-panel { padding: 0 24px 20px; background: #20262b; color: #fff; overflow: hidden; }.mp-engineer-panel img { width: calc(100% + 48px); height: 280px; margin-left: -24px; object-fit: cover; display: block; border-bottom: 4px solid #ff6a1a; }.mp-engineer-panel > span { display: block; margin-top: 20px; color: #ff6a1a; font-size: 10px; }.mp-engineer-panel h2 { margin: 8px 0; font-size: 22px; }.mp-engineer-panel p { color: #cbd1d5; line-height: 1.5; }.mp-engineer-panel dl { border-color: #4a535a; }.mp-engineer-panel dl div { border-color: #4a535a; }.mp-engineer-panel dt { color: #aeb6bc; }
+.mp-config-lower { display: grid; grid-template-rows: 68px 32px 1fr; padding: 0 24px 18px; background: #fff; }.mp-config-lower header { display: flex; justify-content: space-between; align-items: center; }.mp-config-lower header > div:last-child { text-align: right; }.mp-config-lower header span { display: block; color: #69747c; font-size: 12px; }.mp-config-lower header h2 { margin: 4px 0 0; font-size: 19px; }.mp-config-lower header b { display: block; margin-top: 5px; color: #ff6a1a; font-size: 20px; }.mp-spec-head, .mp-spec-row { display: grid; grid-template-columns: 54px 1.2fr 1.7fr 170px; align-items: center; }.mp-spec-head { padding: 0 12px; background: #20262b; color: #fff; font-size: 12px; }.mp-spec-head i, .mp-spec-row i { font-style: normal; }.mp-spec-head strong, .mp-spec-row strong { text-align: right; }.mp-spec-body { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 52px; border: 1px solid #c9cfd3; border-top: 0; }.mp-spec-row { padding: 0 12px; border-right: 1px solid #d7dcdf; border-bottom: 1px solid #d7dcdf; font-size: 12px; }.mp-spec-row:nth-child(even) { border-right: 0; }.mp-spec-row span, .mp-spec-row i { color: #69747c; }.mp-spec-row strong { color: #20262b; }
+.mp-compare-work { display: grid; grid-template-columns: 300px 1fr 390px; }.mp-engineer-panel { padding: 0 24px 20px; background: #20262b; color: #fff; overflow: hidden; }.mp-engineer-panel img { width: calc(100% + 48px); height: 280px; margin-left: -24px; object-fit: cover; display: block; border-bottom: 4px solid #ff6a1a; }.mp-engineer-panel > span { display: block; margin-top: 20px; color: #ff6a1a; font-size: 12px; }.mp-engineer-panel h2 { margin: 8px 0; font-size: 22px; }.mp-engineer-panel p { color: #cbd1d5; line-height: 1.5; }.mp-engineer-panel dl { border-color: #4a535a; }.mp-engineer-panel dl div { border-color: #4a535a; }.mp-engineer-panel dt { color: #aeb6bc; }
 .mp-package-matrix { padding: 22px; background: #e9ecee; }.mp-package-tabs { height: 112px; display: grid; grid-template-columns: repeat(3, 1fr); background: #fff; border: 1px solid #aeb6bc; }.mp-package-tabs button { display: grid; grid-template-columns: 46px 1fr; grid-template-rows: 1fr 1fr; align-items: center; padding: 14px; border: 0; border-left: 1px solid #aeb6bc; background: #fff; text-align: left; cursor: pointer; }.mp-package-tabs button:first-child { border-left: 0; }.mp-package-tabs button[aria-pressed="true"] { background: #20262b; color: #fff; box-shadow: inset 0 -4px #ff6a1a; }.mp-package-tabs button span { grid-row: 1 / 3; color: #ff6a1a; font-size: 22px; }.mp-package-tabs button b { font-size: 16px; }.mp-package-tabs button i { color: #69747c; font-style: normal; }.mp-package-tabs button[aria-pressed="true"] i { color: #cbd1d5; }
 .mp-compare-rows { margin-top: 18px; background: #fff; border: 1px solid #aeb6bc; }.mp-compare-row { height: 58px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; border-bottom: 1px solid #d7dcdf; }.mp-compare-row:last-child { border: 0; }.mp-compare-row b { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid #aeb6bc; color: #69747c; }.mp-compare-row[data-included="true"] b { background: #1872c9; color: #fff; border-color: #1872c9; }.mp-package-result > p { min-height: 54px; color: #69747c; line-height: 1.5; }
 .mp-comparison-lower { grid-template-columns: 1.25fr repeat(3, 1fr) .9fr; }.mp-standard b { display: block; color: #1872c9; }.mp-standard span { display: block; min-height: 64px; margin: 20px 0; line-height: 1.45; }.mp-standard i { padding-top: 12px; border-top: 1px solid #aeb6bc; color: #69747c; font-style: normal; }
-.mp-project-work { display: grid; grid-template-columns: 290px 1fr 420px; }.mp-sector-buttons { margin-top: 16px; border: 1px solid #aeb6bc; }.mp-sector-buttons button { width: 100%; height: 48px; border: 0; border-bottom: 1px solid #aeb6bc; background: #fff; text-align: left; padding: 0 14px; cursor: pointer; }.mp-sector-buttons button:last-child { border: 0; }.mp-sector-buttons button[aria-pressed="true"] { background: #20262b; color: #fff; box-shadow: inset 4px 0 #ff6a1a; }.mp-project-count { margin-top: 22px; padding: 16px; background: #e9f1f8; border-left: 4px solid #1872c9; }.mp-project-count span { color: #69747c; font-size: 10px; }.mp-project-count b { display: block; margin-top: 5px; font-size: 22px; }.mp-project-count p { color: #69747c; line-height: 1.4; }
-.mp-project-ledger { padding: 22px; background: #e9ecee; }.mp-project-ledger > header, .mp-project-ledger article { display: grid; grid-template-columns: 100px 1fr 120px 100px 80px; align-items: center; gap: 10px; }.mp-project-ledger > header { height: 48px; padding: 0 16px; background: #20262b; color: #fff; font-size: 10px; }.mp-project-ledger > header i, .mp-project-ledger > header em { font-style: normal; }.mp-project-ledger > div { background: #fff; border: 1px solid #c9cfd3; border-top: 0; }.mp-project-ledger article { height: 60px; padding: 0 16px; border-bottom: 1px solid #d7dcdf; }.mp-project-ledger article[data-visible="false"] { display: none; }.mp-project-ledger article span { color: #1872c9; font-weight: 700; }.mp-project-ledger article i, .mp-project-ledger article em { color: #69747c; font-style: normal; }.mp-project-ledger article strong { color: #207449; font-size: 11px; }
+.mp-project-work { display: grid; grid-template-columns: 290px 1fr 420px; }.mp-sector-buttons { margin-top: 16px; border: 1px solid #aeb6bc; }.mp-sector-buttons button { width: 100%; height: 48px; border: 0; border-bottom: 1px solid #aeb6bc; background: #fff; text-align: left; padding: 0 14px; cursor: pointer; }.mp-sector-buttons button:last-child { border: 0; }.mp-sector-buttons button[aria-pressed="true"] { background: #20262b; color: #fff; box-shadow: inset 4px 0 #ff6a1a; }.mp-project-count { margin-top: 22px; padding: 16px; background: #e9f1f8; border-left: 4px solid #1872c9; }.mp-project-count span { color: #69747c; font-size: 12px; }.mp-project-count b { display: block; margin-top: 5px; font-size: 22px; }.mp-project-count p { color: #69747c; line-height: 1.4; }
+.mp-project-ledger { padding: 22px; background: #e9ecee; }.mp-project-ledger > header, .mp-project-ledger article { display: grid; grid-template-columns: 100px 1fr 120px 100px 80px; align-items: center; gap: 10px; }.mp-project-ledger > header { height: 48px; padding: 0 16px; background: #20262b; color: #fff; font-size: 12px; }.mp-project-ledger > header i, .mp-project-ledger > header em { font-style: normal; }.mp-project-ledger > div { background: #fff; border: 1px solid #c9cfd3; border-top: 0; }.mp-project-ledger article { height: 60px; padding: 0 16px; border-bottom: 1px solid #d7dcdf; }.mp-project-ledger article[data-visible="false"] { display: none; }.mp-project-ledger article span { color: #1872c9; font-weight: 700; }.mp-project-ledger article i, .mp-project-ledger article em { color: #69747c; font-style: normal; }.mp-project-ledger article strong { color: #207449; font-size: 12px; }
 .mp-project-detail { background: #fff; overflow: hidden; border-left: 1px solid #c9cfd3; }.mp-project-detail > img { width: 100%; height: 330px; object-fit: cover; display: block; border-bottom: 4px solid #ff6a1a; }.mp-project-detail > div { padding: 20px 24px; }.mp-project-detail h2 { margin: 8px 0; font-size: 20px; }.mp-project-detail dl { margin-top: 14px; }
 .mp-project-lower { grid-template-columns: 1.2fr repeat(4, 1fr); }.mp-timeline-step { position: relative; padding: 28px 24px; border-right: 1px solid #bdc5ca; background: #fff; }.mp-timeline-step > b { color: #ff6a1a; font-size: 26px; }.mp-timeline-step strong { display: block; margin: 20px 0 6px; font-size: 17px; }.mp-timeline-step span { color: #1872c9; font-weight: 700; }.mp-timeline-step i { display: block; width: 100%; height: 3px; margin: 22px 0; background: #20262b; }.mp-timeline-step p { color: #69747c; }
 """
@@ -432,31 +458,48 @@ _COVER_SCRIPT = r"""
 _CATALOG_SCRIPT = r"""
 (() => {
   const profiles = {
-    office: { label: "Офисные модули", count: 9, model: "MP-O96 · административный блок", term: 32, geography: "ЦФО / ПФО" },
-    warehouse: { label: "Здания под склад", count: 7, model: "MP-S180 · тёплый склад", term: 41, geography: "Россия / Казахстан" },
-    logistics: { label: "Решения для логистики", count: 5, model: "MP-L240 · логистический терминал", term: 44, geography: "РФ / до 2 500 км" }
+    office: { label: "Офисные модули", geography: "ЦФО / ПФО" },
+    warehouse: { label: "Здания под склад", geography: "Россия / Казахстан" },
+    logistics: { label: "Решения для логистики", geography: "РФ / до 2 500 км" }
   };
-  const areaProfiles = { all: { label: "любая площадь", adjustment: 0 }, compact: { label: "до 100 м²", adjustment: -2 }, large: { label: "от 200 м²", adjustment: -2 } };
-  const readinessProfiles = { ready: { label: "с инженерией", adjustment: 0, term: 0 }, shell: { label: "контур", adjustment: 1, term: -8 }, turnkey: { label: "под ключ", adjustment: -1, term: 8 } };
+  const areaProfiles = { all: "любая площадь", compact: "до 100 м²", large: "от 200 м²" };
+  const readinessProfiles = {
+    ready: { label: "с инженерией", rowLabel: "С инженерией", term: 0 },
+    shell: { label: "контур", rowLabel: "Контур", term: -8 },
+    turnkey: { label: "под ключ", rowLabel: "Под ключ", term: 8 }
+  };
   const area = document.querySelector("[data-catalog-area]");
   const readiness = document.querySelector("[data-catalog-readiness]");
+  const rows = [...document.querySelectorAll("[data-building-row]")];
   const activePurpose = () => document.querySelector("[data-catalog-purpose]:checked").dataset.catalogPurpose;
   const plural = (count) => count % 10 === 1 && count % 100 !== 11 ? "решение" : count % 10 >= 2 && count % 10 <= 4 && !(count % 100 >= 12 && count % 100 <= 14) ? "решения" : "решений";
+  const dayLabel = (count) => count % 10 === 1 && count % 100 !== 11 ? "день" : count % 10 >= 2 && count % 10 <= 4 && !(count % 100 >= 12 && count % 100 <= 14) ? "дня" : "дней";
   const update = () => {
-    const profile = profiles[activePurpose()];
-    const areaProfile = areaProfiles[area.value];
+    const purpose = activePurpose();
+    const profile = profiles[purpose];
     const readinessProfile = readinessProfiles[readiness.value];
-    const count = Math.max(1, profile.count + areaProfile.adjustment + readinessProfile.adjustment);
-    document.querySelector("[data-building-count]").textContent = `${count} ${plural(count)}`;
-    document.querySelector("[data-building-summary]").textContent = `${profile.label} · ${areaProfile.label} · ${readinessProfile.label}`;
-    document.querySelector("[data-selected-building]").textContent = profile.model;
+    const visibleRows = rows.filter((row) => {
+      const visible = row.dataset.purpose === purpose && (area.value === "all" || row.dataset.areaGroup === area.value);
+      row.dataset.visible = String(visible);
+      if (visible) {
+        const term = Number(row.dataset.baseTerm) + readinessProfile.term;
+        row.querySelector("[data-building-row-state]").textContent = `${readinessProfile.rowLabel} · ${term} ${dayLabel(term)}`;
+      }
+      return visible;
+    });
+    const selected = visibleRows[0];
+    const selectedTerm = Number(selected.dataset.baseTerm) + readinessProfile.term;
+    document.querySelector("[data-building-count]").textContent = `${visibleRows.length} ${plural(visibleRows.length)}`;
+    document.querySelector("[data-building-summary]").textContent = `${profile.label} · ${areaProfiles[area.value]} · ${readinessProfile.label}`;
+    document.querySelector("[data-selected-building]").textContent = `${selected.querySelector("span").textContent} · ${selected.querySelector("b").textContent}`;
     document.querySelector("[data-selected-readiness]").textContent = readinessProfile.label[0].toUpperCase() + readinessProfile.label.slice(1);
-    document.querySelector("[data-selected-delivery]").textContent = `${profile.term + readinessProfile.term} дня`;
+    document.querySelector("[data-selected-delivery]").textContent = `${selectedTerm} ${dayLabel(selectedTerm)}`;
     document.querySelector("[data-selected-geography]").textContent = profile.geography;
   };
   document.querySelectorAll("[data-catalog-purpose]").forEach((control) => control.addEventListener("change", update));
   area.addEventListener("change", update);
   readiness.addEventListener("change", update);
+  update();
 })();
 """
 
@@ -481,7 +524,13 @@ _CONFIG_SCRIPT = r"""
   let floors = 1;
   let shell = "cold";
   const grouped = (value) => String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-  const numeric = (control, minimum, maximum) => Math.max(minimum, Math.min(maximum, Number.parseInt(control.value, 10) || minimum));
+  const numeric = (control, minimum, maximum) => {
+    const raw = control.value.trim().replace(",", ".");
+    const parsed = raw === "" ? Number.NaN : Number(raw);
+    const normalized = Math.max(minimum, Math.min(maximum, Number.isFinite(parsed) ? Math.round(parsed) : minimum));
+    control.value = String(normalized);
+    return normalized;
+  };
   const update = () => {
     const buildingLength = numeric(length, 6, 30);
     const buildingWidth = numeric(width, 6, 12);
@@ -569,47 +618,23 @@ _COMPARISON_SCRIPT = r"""
 
 _PROJECTS_SCRIPT = r"""
 (() => {
-  const totals = {
-    industry: { all: 12, central: 5, volga: 4, north: 3 },
-    logistics: { all: 8, central: 3, volga: 2, north: 3 },
-    social: { all: 5, central: 2, volga: 1, north: 2 }
-  };
-  const selections = {
-    industry: {
-      all: ["Цех ремонта техники", "Калуга", "864 м²", "14 дней", "180 км", "май 2026"],
-      central: ["Цех ремонта техники", "Калуга", "864 м²", "14 дней", "180 км", "май 2026"],
-      volga: ["Линия упаковки", "Казань", "540 м²", "12 дней", "820 км", "апрель 2026"],
-      north: ["Ремонтная база", "Петрозаводск", "648 м²", "16 дней", "1 050 км", "февраль 2026"]
-    },
-    logistics: {
-      all: ["Логистический терминал", "Тула", "1 080 м²", "18 дней", "420 км", "июнь 2026"],
-      central: ["Логистический терминал", "Тула", "1 080 м²", "18 дней", "420 км", "июнь 2026"],
-      volga: ["Зона комплектации", "Самара", "720 м²", "15 дней", "1 060 км", "март 2026"],
-      north: ["Склад снабжения", "Мурманск", "720 м²", "17 дней", "1 880 км", "январь 2026"]
-    },
-    social: {
-      all: ["Медицинский модуль", "Архангельск", "288 м²", "10 дней", "1 260 км", "июль 2026"],
-      central: ["Учебный корпус", "Рязань", "432 м²", "11 дней", "310 км", "май 2026"],
-      volga: ["ФАП", "Ульяновск", "216 м²", "9 дней", "890 км", "март 2026"],
-      north: ["Медицинский модуль", "Архангельск", "288 м²", "10 дней", "1 260 км", "июль 2026"]
-    }
-  };
   const region = document.querySelector("[data-project-region]");
+  const rows = [...document.querySelectorAll("[data-project-row]")];
   let sector = "logistics";
   const plural = (count) => count % 10 === 1 && count % 100 !== 11 ? "проект" : count % 10 >= 2 && count % 10 <= 4 && !(count % 100 >= 12 && count % 100 <= 14) ? "проекта" : "проектов";
   const update = () => {
-    const count = totals[sector][region.value];
-    const facts = selections[sector][region.value];
-    document.querySelector("[data-project-count]").textContent = `${count} ${plural(count)}`;
-    document.querySelector("[data-project-selection]").textContent = `${facts[0]} · ${facts[1]}`;
-    document.querySelector("[data-project-area]").textContent = facts[2];
-    document.querySelector("[data-project-install]").textContent = facts[3];
-    document.querySelector("[data-project-logistics]").textContent = facts[4];
-    document.querySelector("[data-project-date]").textContent = facts[5];
-    document.querySelectorAll("[data-project-row]").forEach((row) => {
+    const visibleRows = rows.filter((row) => {
       const visible = row.dataset.sector === sector && (region.value === "all" || row.dataset.region === region.value);
       row.dataset.visible = String(visible);
+      return visible;
     });
+    const selected = visibleRows[0];
+    document.querySelector("[data-project-count]").textContent = `${visibleRows.length} ${plural(visibleRows.length)}`;
+    document.querySelector("[data-project-selection]").textContent = `${selected.dataset.name} · ${selected.dataset.city}`;
+    document.querySelector("[data-project-area]").textContent = selected.dataset.area;
+    document.querySelector("[data-project-install]").textContent = selected.dataset.install;
+    document.querySelector("[data-project-logistics]").textContent = selected.dataset.logistics;
+    document.querySelector("[data-project-date]").textContent = selected.dataset.date;
   };
   document.querySelectorAll('[data-selectable="project-sector"]').forEach((button) => button.addEventListener("click", () => {
     sector = button.dataset.value;

@@ -749,6 +749,172 @@ def test_modulprof_every_filter_option_produces_a_distinct_result(chrome_browser
         page.close()
 
 
+def test_modulprof_catalog_all_filter_combinations_reconcile_visible_rows(chrome_browser):
+    project = get_project("modulprof")
+    shot = next(shot for shot in project.shots if shot.key == "catalog")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    purposes = {
+        "office": "Офисные модули",
+        "warehouse": "Здания под склад",
+        "logistics": "Решения для логистики",
+    }
+    areas = {"all": "любая площадь", "compact": "до 100 м²", "large": "от 200 м²"}
+    readiness = {"ready": "с инженерией", "shell": "контур", "turnkey": "под ключ"}
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".mp-page").bounding_box()
+        for purpose, purpose_label in purposes.items():
+            page.locator(f'[data-catalog-purpose="{purpose}"]').check()
+            for area, area_label in areas.items():
+                page.locator("[data-catalog-area]").select_option(area)
+                for state, state_label in readiness.items():
+                    page.locator("[data-catalog-readiness]").select_option(state)
+                    rows = page.locator('[data-building-row][data-visible="true"]')
+                    count = int(page.locator("[data-building-count]").inner_text().split()[0])
+                    summary = page.locator("[data-building-summary]").inner_text().casefold()
+
+                    assert count == rows.count()
+                    assert count > 0
+                    assert purpose_label.casefold() in summary
+                    assert area_label.casefold() in summary
+                    assert state_label.casefold() in summary
+                    for index in range(rows.count()):
+                        row = rows.nth(index)
+                        assert row.get_attribute("data-purpose") == purpose
+                        if area != "all":
+                            assert row.get_attribute("data-area-group") == area
+                        assert state_label.casefold() in row.inner_text().casefold()
+
+                    first = rows.first
+                    selected = page.locator("[data-selected-building]").inner_text()
+                    assert first.locator("span").inner_text() in selected
+                    assert first.locator("b").inner_text().casefold() in selected.casefold()
+                    assert state_label.casefold() in page.locator("[data-selected-readiness]").inner_text().casefold()
+                    assert page.locator(".mp-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_modulprof_project_all_filter_combinations_reconcile_ledger_and_details(chrome_browser):
+    project = get_project("modulprof")
+    shot = next(shot for shot in project.shots if shot.key == "projects")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    expected = {
+        ("industry", "all"): (7, "Цех ремонта техники", "Калуга", "864 м²", "14 дней", "180 км", "май 2026"),
+        ("industry", "central"): (3, "Цех ремонта техники", "Калуга", "864 м²", "14 дней", "180 км", "май 2026"),
+        ("industry", "volga"): (2, "Линия упаковки", "Казань", "540 м²", "12 дней", "820 км", "апрель 2026"),
+        ("industry", "north"): (2, "Ремонтная база", "Петрозаводск", "648 м²", "16 дней", "1 050 км", "февраль 2026"),
+        ("logistics", "all"): (8, "Логистический терминал", "Тула", "1 080 м²", "18 дней", "420 км", "июнь 2026"),
+        ("logistics", "central"): (3, "Логистический терминал", "Тула", "1 080 м²", "18 дней", "420 км", "июнь 2026"),
+        ("logistics", "volga"): (2, "Зона комплектации", "Самара", "720 м²", "15 дней", "1 060 км", "март 2026"),
+        ("logistics", "north"): (3, "Склад снабжения", "Мурманск", "720 м²", "17 дней", "1 880 км", "январь 2026"),
+        ("social", "all"): (5, "Медицинский модуль", "Архангельск", "288 м²", "10 дней", "1 260 км", "июль 2026"),
+        ("social", "central"): (2, "Учебный корпус", "Рязань", "432 м²", "11 дней", "310 км", "май 2026"),
+        ("social", "volga"): (1, "Амбулатория", "Ульяновск", "216 м²", "9 дней", "890 км", "март 2026"),
+        ("social", "north"): (2, "Медицинский модуль", "Архангельск", "288 м²", "10 дней", "1 260 км", "июль 2026"),
+    }
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".mp-page").bounding_box()
+        for (sector, region), facts in expected.items():
+            count, name, city, area, install, logistics, date = facts
+            page.locator(f'[data-selectable="project-sector"][data-value="{sector}"]').click()
+            page.locator("[data-project-region]").select_option(region)
+            rows = page.locator('[data-project-row][data-visible="true"]')
+
+            assert page.locator("[data-project-count]").inner_text() == f"{count} " + (
+                "проект" if count == 1 else "проекта" if count in (2, 3, 4) else "проектов"
+            )
+            assert rows.count() == count
+            assert rows.first.locator("b").inner_text() == name
+            assert rows.first.locator("i").inner_text() == city
+            assert rows.first.locator("em").inner_text() == area
+            assert page.locator("[data-project-selection]").inner_text() == f"{name} · {city}"
+            assert page.locator("[data-project-area]").inner_text() == area
+            assert page.locator("[data-project-install]").inner_text() == install
+            assert page.locator("[data-project-logistics]").inner_text() == logistics
+            assert page.locator("[data-project-date]").inner_text() == date
+            assert page.locator(".mp-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_modulprof_visible_operational_text_is_at_least_twelve_pixels(chrome_browser):
+    project = get_project("modulprof")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        for shot in project.shots:
+            _open(page, project, shot)
+            violations = page.locator(".mp-page").evaluate(
+                """
+                root => [...root.querySelectorAll('*')]
+                  .filter((element) => {
+                    const style = getComputedStyle(element);
+                    const directText = [...element.childNodes].some(
+                      (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()
+                    );
+                    const control = element.matches('button, input, select');
+                    const visible = element.getClientRects().length > 0
+                      && style.display !== 'none'
+                      && style.visibility !== 'hidden'
+                      && Number(style.opacity) > 0;
+                    return visible
+                      && (directText || control)
+                      && !element.matches('script, style, option')
+                      && Number.parseFloat(style.fontSize) < 12;
+                  })
+                  .map((element) => ({
+                    tag: element.tagName.toLowerCase(),
+                    className: element.className || '',
+                    text: (element.innerText || element.value || '').trim().slice(0, 80),
+                    fontSize: getComputedStyle(element).fontSize,
+                  }))
+                """
+            )
+            assert violations == [], f"{shot.key}: {violations}"
+    finally:
+        page.close()
+
+
+def test_modulprof_configurator_normalizes_invalid_dimensions_before_calculation(chrome_browser):
+    project = get_project("modulprof")
+    shot = next(shot for shot in project.shots if shot.key == "configurator")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    cases = (
+        ("31", "13", "30", "12", "360 м²"),
+        ("5", "5", "6", "6", "36 м²"),
+        ("", "", "6", "6", "36 м²"),
+        ("7.5", "6.5", "8", "7", "56 м²"),
+        ("abc", "xyz", "6", "6", "36 м²"),
+    )
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".mp-page").bounding_box()
+        length = page.locator("[data-config-length]")
+        width = page.locator("[data-config-width]")
+        for raw_length, raw_width, expected_length, expected_width, expected_area in cases:
+            length.evaluate(
+                "(element, value) => { element.value = value; element.dispatchEvent(new Event('input', { bubbles: true })); }",
+                raw_length,
+            )
+            width.evaluate(
+                "(element, value) => { element.value = value; element.dispatchEvent(new Event('input', { bubbles: true })); }",
+                raw_width,
+            )
+
+            summary = page.locator("[data-config-summary]").inner_text()
+            total = int("".join(filter(str.isdigit, page.locator("[data-config-total]").inner_text())))
+            parts = page.locator("[data-config-part]").all_inner_texts()
+            assert length.input_value() == expected_length
+            assert width.input_value() == expected_width
+            assert expected_area in summary
+            assert sum(int("".join(filter(str.isdigit, value))) for value in parts) == total
+            assert f'{total:,}'.replace(",", " ") in summary
+            assert page.locator(".mp-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
 def test_doma_u_ozera_workflows_keep_availability_and_totals_consistent(chrome_browser):
     project = get_project("doma-u-ozera")
     shots = {shot.key: shot for shot in project.shots}
