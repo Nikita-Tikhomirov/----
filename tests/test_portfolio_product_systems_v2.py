@@ -266,6 +266,232 @@ def test_sever_market_workflows_update_real_product_and_order_state(chrome_brows
         page.close()
 
 
+def test_sever_market_cover_and_catalog_controls_update_dependent_state(chrome_browser):
+    project = get_project("sever-market")
+    shots = {shot.key: shot for shot in project.shots}
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shots["cover"])
+        geometry = page.locator(".sm-page").bounding_box()
+        page.locator("[data-add-kit]").click()
+        assert page.locator("[data-cart-count]").inner_text() == "1"
+        assert "Осенний маршрут добавлен" in page.locator("[data-kit-cart-state]").inner_text()
+        assert page.locator(".sm-page").bounding_box() == geometry
+
+        _open(page, project, shots["catalog"])
+        geometry = page.locator(".sm-page").bounding_box()
+        summer = page.locator('[data-catalog-filter="summer"]')
+        shoulder = page.locator('[data-catalog-filter="shoulder"]')
+        winter = page.locator('[data-catalog-filter="winter"]')
+        ultralight = page.locator('[data-catalog-filter="ultralight"]')
+        light = page.locator('[data-catalog-filter="light"]')
+        tents = page.locator('[data-catalog-filter="tents"]')
+        backpacks = page.locator('[data-catalog-filter="backpacks"]')
+        sleeping = page.locator('[data-catalog-filter="sleeping"]')
+
+        winter.check()
+        assert not summer.is_checked()
+        assert not shoulder.is_checked()
+        assert page.locator("[data-catalog-count]").inner_text() == "38 товаров"
+
+        shoulder.check()
+        assert not summer.is_checked()
+        assert not winter.is_checked()
+        assert "межсезонного похода" in page.locator("[data-catalog-summary]").inner_text()
+
+        ultralight.check()
+        assert "до 1,5 кг" in page.locator("[data-catalog-summary]").inner_text()
+        light.uncheck()
+        assert "только ультралёгкое" in page.locator("[data-catalog-summary]").inner_text()
+
+        sleeping.check()
+        assert "спальные системы" in page.locator("[data-catalog-summary]").inner_text()
+        backpacks.uncheck()
+        assert "без рюкзаков" in page.locator("[data-catalog-summary]").inner_text()
+        tents.uncheck()
+        assert "только спальные системы" in page.locator("[data-catalog-summary]").inner_text()
+
+        summer.check()
+        assert not shoulder.is_checked()
+        assert not winter.is_checked()
+        assert "летнего похода" in page.locator("[data-catalog-summary]").inner_text()
+
+        page.locator('[aria-label="Сортировка каталога"]').select_option("weight")
+        assert page.locator("[data-product-key]").first.get_attribute("data-product-key") == "stove"
+        assert "Сначала легче" in page.locator("[data-catalog-sort-state]").inner_text()
+
+        page.locator("[data-check-city]").click()
+        assert "Москва · 52 позиции" in page.locator("[data-stock-state]").inner_text()
+        page.locator("[data-send-list]").click()
+        assert "отправлен эксперту" in page.locator("[data-expert-state]").inner_text()
+
+        page.locator("[data-catalog-reset]").click()
+        assert page.locator("[data-catalog-count]").inner_text() == "126 товаров"
+        assert summer.is_checked()
+        assert not shoulder.is_checked()
+        assert not winter.is_checked()
+        assert not ultralight.is_checked()
+        assert light.is_checked()
+        assert tents.is_checked()
+        assert backpacks.is_checked()
+        assert not sleeping.is_checked()
+        assert page.locator("[data-product-key]").first.get_attribute("data-product-key") == "backpack"
+        assert page.locator(".sm-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_sever_market_tent_capacity_weather_and_cart_state_stay_consistent(chrome_browser):
+    project = get_project("sever-market")
+    shots = {shot.key: shot for shot in project.shots}
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shots["tents"])
+        geometry = page.locator(".sm-page").bounding_box()
+        page.locator('[data-selectable="tent-capacity"][data-value="4"]').click()
+
+        selected_row = page.locator(".sm-tent-comparison tbody tr.is-selected")
+        assert selected_row.get_attribute("data-tent-row") == "4"
+        assert "Taiga Base 4" in selected_row.inner_text()
+        assert "4" in selected_row.locator("td").nth(1).inner_text()
+        assert "23 900 ₽" in selected_row.inner_text()
+        assert page.locator("[data-selected-tent]").inner_text() == "Taiga Base 4"
+        assert page.locator("[data-selected-capacity]").inner_text() == "4 человека"
+        assert page.locator("[data-selected-tent-price]").inner_text() == "23 900 ₽"
+
+        wind = page.locator('[data-tent-weather="wind"]')
+        rain = page.locator('[data-tent-weather="rain"]')
+        snow = page.locator('[data-tent-weather="snow"]')
+        wind.uncheck()
+        assert "умеренный ветер" in page.locator("[data-tent-weather-state]").inner_text()
+        rain.uncheck()
+        assert "краткий дождь" in page.locator("[data-tent-weather-state]").inner_text()
+        snow.check()
+        assert "снеговая юбка" in page.locator("[data-tent-weather-state]").inner_text()
+
+        page.locator("[data-add-tent]").click()
+        cart_state = page.locator("[data-tent-cart-state]").inner_text()
+        assert "Taiga Base 4" in cart_state
+        assert "23 900 ₽" in cart_state
+        assert page.locator("[data-cart-count]").inner_text() == "1"
+        assert page.locator(".sm-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_sever_market_cart_normalizes_quantity_promos_and_next_actions(chrome_browser):
+    project = get_project("sever-market")
+    shots = {shot.key: shot for shot in project.shots}
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shots["cart"])
+        geometry = page.locator(".sm-page").bounding_box()
+        quantity = page.locator("[data-cart-quantity]")
+
+        quantity.fill("0")
+        assert quantity.input_value() == "1"
+        assert page.locator("[data-cart-total]").inner_text() == "17 990 ₽"
+
+        quantity.fill("5")
+        assert quantity.input_value() == "4"
+        assert page.locator("[data-cart-part]").all_inner_texts() == [
+            "71 960 ₽",
+            "−1 500 ₽",
+            "0 ₽",
+        ]
+        assert page.locator("[data-cart-total]").inner_text() == "70 460 ₽"
+
+        page.locator('[data-selectable="delivery-mode"][data-value="courier"]').click()
+        assert page.locator("[data-cart-total]").inner_text() == "71 760 ₽"
+
+        promo = page.locator("[data-cart-promo]")
+        promo.fill("BADCODE")
+        page.locator("[data-apply-promo]").click()
+        assert page.locator("[data-promo-state]").inner_text() == "Промокод не найден"
+        assert page.locator("[data-cart-part]").all_inner_texts() == [
+            "71 960 ₽",
+            "0 ₽",
+            "1 300 ₽",
+        ]
+        assert page.locator("[data-cart-total]").inner_text() == "73 260 ₽"
+
+        promo.fill("sever1500")
+        page.locator("[data-apply-promo]").click()
+        assert promo.input_value() == "SEVER1500"
+        assert page.locator("[data-promo-state]").inner_text() == "Скидка 1 500 ₽ применена"
+        assert page.locator("[data-cart-total]").inner_text() == "71 760 ₽"
+
+        page.locator("[data-check-compatibility]").click()
+        assert "Совместимость подтверждена" in page.locator("[data-compatibility-state]").inner_text()
+
+        page.locator("[data-add-footprint]").click()
+        assert page.locator("[data-cart-count]").inner_text() == "2"
+        assert "Футпринт добавлен" in page.locator("[data-footprint-state]").inner_text()
+        assert page.locator("[data-cart-part]").all_inner_texts() == [
+            "74 150 ₽",
+            "−1 500 ₽",
+            "1 300 ₽",
+        ]
+        assert page.locator("[data-cart-total]").inner_text() == "73 950 ₽"
+
+        page.locator("[data-checkout]").click()
+        assert "Шаг 2 из 3" in page.locator("[data-checkout-state]").inner_text()
+        assert page.locator(".sm-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_sever_market_delivery_pickup_and_confirmation_update_order_route(chrome_browser):
+    project = get_project("sever-market")
+    shots = {shot.key: shot for shot in project.shots}
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shots["delivery"])
+        geometry = page.locator(".sm-page").bounding_box()
+
+        page.locator("[data-pickup-point]").select_option("pvz")
+        summary = page.locator("[data-delivery-summary]").inner_text()
+        assert "ПВЗ рядом с метро" in summary
+        assert "390 ₽" in summary
+        assert "последняя миля" in page.locator("[data-route-note]").inner_text()
+
+        page.locator("[data-confirm-delivery]").click()
+        assert "Доставка выбрана" in page.locator("[data-delivery-choice-state]").inner_text()
+        assert "390 ₽" in page.locator("[data-delivery-choice-state]").inner_text()
+
+        page.locator("[data-delivery-city]").select_option("kazan")
+        page.locator('[data-selectable="carrier"][data-value="express"]').click()
+        summary = page.locator("[data-delivery-summary]").inner_text()
+        assert "Казань" in summary
+        assert "29 августа" in summary
+        assert "1 390 ₽" in summary
+        assert "ПВЗ рядом с метро" in summary
+        assert page.locator(".sm-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_sever_market_header_navigation_has_no_internal_overlap(chrome_browser):
+    project = get_project("sever-market")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        for shot in project.shots:
+            _open(page, project, shot)
+            navigation = page.locator(".sm-category-nav")
+            navigation_size = navigation.evaluate(
+                "el => ({clientWidth: el.clientWidth, scrollWidth: el.scrollWidth})"
+            )
+            delivery_box = navigation.locator("a").last.bounding_box()
+            cart_box = page.locator(".sm-cart-link").bounding_box()
+            shopbar_box = page.locator(".sm-shopbar").bounding_box()
+
+            assert navigation_size["scrollWidth"] <= navigation_size["clientWidth"]
+            assert delivery_box["x"] + delivery_box["width"] <= cart_box["x"]
+            assert cart_box["x"] + cart_box["width"] <= shopbar_box["x"] + shopbar_box["width"]
+    finally:
+        page.close()
+
+
 def test_modulprof_workflows_recalculate_specification_and_procurement(chrome_browser):
     project = get_project("modulprof")
     shots = {shot.key: shot for shot in project.shots}

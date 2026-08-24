@@ -102,9 +102,9 @@ def _cover(assets: Mapping[str, str]) -> str:
         '<span>Москва · отгрузка сегодня</span></div>'
         '<div class="sm-kit-total"><span>Цена комплекта</span>'
         '<strong data-kit-price>39 800 ₽</strong><small>выгода 4 260 ₽</small></div>'
-        '<button type="button" class="sm-primary">Добавить комплект '
+        '<button type="button" class="sm-primary" data-add-kit>Добавить комплект '
         f'{icon("shopping-cart", size=18)}</button>'
-        '<p>Можно заменить любую позицию до оплаты.</p></aside>'
+        '<p data-kit-cart-state>Можно заменить любую позицию до оплаты.</p></aside>'
         '</section>'
         '<section class="sm-cover-lower" data-lower-band="true">'
         '<header><div><span>КОМПЛЕКТ МАРШРУТА</span><h2>Комплект маршрута</h2></div>'
@@ -133,40 +133,40 @@ def _catalog(assets: Mapping[str, str]) -> str:
         '<header class="sm-route-head"><div><p>Каталог / Туризм и кемпинг</p>'
         '<h1>Туристическое снаряжение</h1></div>'
         '<div class="sm-result-tools"><b data-catalog-count>126 товаров</b>'
-        '<label>Сортировка<select aria-label="Сортировка каталога"><option>По условиям маршрута</option>'
-        '<option>Сначала легче</option><option>Сначала дешевле</option></select></label></div></header>'
+        '<label>Сортировка<select aria-label="Сортировка каталога"><option value="route">По условиям маршрута</option>'
+        '<option value="weight">Сначала легче</option><option value="price">Сначала дешевле</option></select></label></div></header>'
         '<div class="sm-catalog-workspace">'
         '<aside class="sm-filter-rail"><h2>Условия похода</h2>'
         '<fieldset><legend>Сезон</legend>'
-        '<label><input type="checkbox" checked> Лето <span>64</span></label>'
-        '<label><input type="checkbox"> Межсезонье <span>52</span></label>'
+        '<label><input type="checkbox" data-catalog-filter="summer" checked> Лето <span>64</span></label>'
+        '<label><input type="checkbox" data-catalog-filter="shoulder"> Межсезонье <span>52</span></label>'
         '<label><input type="checkbox" data-catalog-filter="winter"> Зима <span>38</span></label></fieldset>'
         '<fieldset><legend>Вес снаряжения</legend>'
-        '<label><input type="checkbox"> Ультралёгкое <span>21</span></label>'
-        '<label><input type="checkbox" checked> До 3 кг <span>73</span></label></fieldset>'
-        '<fieldset><legend>Категория</legend><label><input type="checkbox" checked> Палатки</label>'
-        '<label><input type="checkbox" checked> Рюкзаки</label><label><input type="checkbox"> Спальные системы</label></fieldset>'
-        '<button type="button">Сбросить параметры</button></aside>'
+        '<label><input type="checkbox" data-catalog-filter="ultralight"> Ультралёгкое <span>21</span></label>'
+        '<label><input type="checkbox" data-catalog-filter="light" checked> До 3 кг <span>73</span></label></fieldset>'
+        '<fieldset><legend>Категория</legend><label><input type="checkbox" data-catalog-filter="tents" checked> Палатки</label>'
+        '<label><input type="checkbox" data-catalog-filter="backpacks" checked> Рюкзаки</label><label><input type="checkbox" data-catalog-filter="sleeping"> Спальные системы</label></fieldset>'
+        '<button type="button" data-catalog-reset>Сбросить параметры</button></aside>'
         '<section class="sm-product-area"><div class="sm-catalog-summary" data-catalog-summary>'
-        '<b>Подбор для летнего и межсезонного похода</b><span>Вес позиции до 3 кг · наличие в 7 городах</span></div>'
+        '<b>Подбор для летнего похода</b><span>Вес позиции до 3 кг · палатки и рюкзаки · <i data-catalog-sort-state>По условиям маршрута</i></span></div>'
         '<div class="sm-product-matrix">'
-        '<article class="sm-product-feature"><figure><img src="'
+        '<article class="sm-product-feature" data-product-key="backpack"><figure><img src="'
         f'{source}" alt="Походный рюкзак на каменистом маршруте"></figure>'
         '<div><span>ВЫБОР ЭКСПЕРТА</span><h3>Рюкзак Boreal 65</h3><p>65 л · 1,82 кг · спина 46–54 см</p>'
         '<div class="sm-rating"><b>4,9</b><span>★★★★★ · 48 отзывов</span></div>'
         '<strong>18 990 ₽</strong><small data-catalog-feature-stock>В наличии · 14 шт.</small></div></article>'
-        '<article><span>ПАЛАТКИ</span><h3>Nord 2 Pro</h3><p>2 места · 2,7 кг · дуги DAC</p>'
+        '<article data-product-key="tent"><span>ПАЛАТКИ</span><h3>Nord 2 Pro</h3><p>2 места · 2,7 кг · дуги DAC</p>'
         '<dl><div><dt>Ветер</dt><dd>до 20 м/с</dd></div><div><dt>Москва</dt><dd>8 шт.</dd></div></dl><strong>17 990 ₽</strong></article>'
-        '<article><span>СПАЛЬНЫЕ СИСТЕМЫ</span><h3>Arctic Down −12</h3><p>Пух 700 FP · 1,28 кг</p>'
+        '<article data-product-key="sleeping"><span>СПАЛЬНЫЕ СИСТЕМЫ</span><h3>Arctic Down −12</h3><p>Пух 700 FP · 1,28 кг</p>'
         '<dl><div><dt>Комфорт</dt><dd>−7 °C</dd></div><div><dt>СПб</dt><dd>11 шт.</dd></div></dl><strong>16 400 ₽</strong></article>'
-        '<article><span>КУХНЯ</span><h3>Flame Solo</h3><p>2 800 Вт · пьезоподжиг · 91 г</p>'
+        '<article data-product-key="stove"><span>КУХНЯ</span><h3>Flame Solo</h3><p>2 800 Вт · пьезоподжиг · 91 г</p>'
         '<dl><div><dt>Кипячение</dt><dd>3:20</dd></div><div><dt>Казань</dt><dd>19 шт.</dd></div></dl><strong>5 490 ₽</strong></article>'
         '</div></section>'
         '<aside class="sm-stock-rail"><h2>Наличие по городам</h2>'
         '<dl><div><dt>Москва</dt><dd data-city-stock>52</dd></div><div><dt>Санкт-Петербург</dt><dd>41</dd></div>'
         '<div><dt>Екатеринбург</dt><dd>28</dd></div><div><dt>Казань</dt><dd>24</dd></div></dl>'
-        '<p><b>Самовывоз сегодня</b> из 5 магазинов после подтверждения резерва.</p>'
-        '<button type="button">Проверить свой город</button></aside>'
+        '<p data-stock-state><b>Самовывоз сегодня</b> из 5 магазинов после подтверждения резерва.</p>'
+        '<button type="button" data-check-city>Проверить свой город</button></aside>'
         '</div></section>'
         '<section class="sm-catalog-lower" data-lower-band="true">'
         '<header><div><span>ЭКСПЕРТНЫЙ ФИЛЬТР</span><h2>Подбор по условиям</h2></div>'
@@ -174,7 +174,7 @@ def _catalog(assets: Mapping[str, str]) -> str:
         '<div class="sm-expert-strip"><article><b>Кольский полуостров</b><span>ветер · камень · влажность</span><strong>23 позиции</strong></article>'
         '<article><b>Алтай в сентябре</b><span>ночью до −6 °C · 6 дней</span><strong>31 позиция</strong></article>'
         '<article><b>Ладожские шхеры</b><span>вода · дождь · стоянки</span><strong>19 позиций</strong></article>'
-        '<aside><b>Не уверены в совместимости?</b><p>Эксперт проверит комплект по весу и температуре.</p><button type="button">Отправить список</button></aside></div>'
+        '<aside><b>Не уверены в совместимости?</b><p data-expert-state>Эксперт проверит комплект по весу и температуре.</p><button type="button" data-send-list>Отправить список</button></aside></div>'
         '<footer><span>47 товаров доступны сегодня</span><span>22 модели с ремонтом в РФ</span>'
         '<span>Все веса проверены на складе</span><b>Данные обновлены 24 августа, 09:40</b></footer>'
         '</section></main>'
@@ -195,19 +195,18 @@ def _tents(assets: Mapping[str, str]) -> str:
         '<button type="button" data-selectable="tent-capacity" data-value="2" aria-pressed="true">2</button>'
         '<button type="button" data-selectable="tent-capacity" data-value="3" aria-pressed="false">3</button>'
         '<button type="button" data-selectable="tent-capacity" data-value="4" aria-pressed="false">4</button></div>'
-        '<fieldset><legend>Погодный режим</legend><label><input type="checkbox" checked> Ветер от 15 м/с</label>'
-        '<label><input type="checkbox" checked> Длительный дождь</label><label><input type="checkbox"> Снеговая юбка</label></fieldset>'
+        '<fieldset><legend>Погодный режим</legend><label><input type="checkbox" data-tent-weather="wind" checked> Ветер от 15 м/с</label>'
+        '<label><input type="checkbox" data-tent-weather="rain" checked> Длительный дождь</label><label><input type="checkbox" data-tent-weather="snow"> Снеговая юбка</label></fieldset>'
         '<figure><img src="'
         f'{source}" alt="Крупный план туристического снаряжения и фурнитуры">'
         '<figcaption>Швы проклеены лентой 20 мм</figcaption></figure></aside>'
         '<section class="sm-tent-comparison"><div class="sm-table-heading"><div><span>3 МОДЕЛИ</span>'
         '<h2>Сравнение палаток</h2></div><b data-tent-result>2 места · ветер до 22 м/с</b></div>'
         '<table><thead><tr><th>Модель</th><th>Мест</th><th>Вес</th><th>Тент</th><th>Ветер</th><th>Цена</th></tr></thead>'
-        '<tbody><tr class="is-selected"><td><b>Nord Ridge 2</b><span>4 сезона</span></td><td data-tent-capacity-cell>2</td><td>2,86 кг</td><td>5 000 мм</td><td>22 м/с</td><td>17 990 ₽</td></tr>'
-        '<tr><td><b>Boreal Storm</b><span>3 сезона</span></td><td>3</td><td>3,24 кг</td><td>4 000 мм</td><td>18 м/с</td><td>19 400 ₽</td></tr>'
-        '<tr><td><b>Taiga Base</b><span>семейная</span></td><td>4</td><td>4,18 кг</td><td>6 000 мм</td><td>20 м/с</td><td>23 900 ₽</td></tr></tbody></table>'
-        '<div class="sm-comparison-note"><b>Методика:</b><span>30 минут бокового ветра</span>'
-        '<span>имитация дождя 60 л/м²</span><span>сборка в перчатках</span></div></section>'
+        '<tbody><tr class="is-selected" data-tent-row="2"><td><b>Nord Ridge 2</b><span>4 сезона</span></td><td>2</td><td>2,86 кг</td><td>5 000 мм</td><td>22 м/с</td><td>17 990 ₽</td></tr>'
+        '<tr data-tent-row="3"><td><b>Boreal Storm 3</b><span>3 сезона</span></td><td>3</td><td>3,24 кг</td><td>4 000 мм</td><td>18 м/с</td><td>19 400 ₽</td></tr>'
+        '<tr data-tent-row="4"><td><b>Taiga Base 4</b><span>семейная</span></td><td>4</td><td>4,18 кг</td><td>6 000 мм</td><td>20 м/с</td><td>23 900 ₽</td></tr></tbody></table>'
+        '<div class="sm-comparison-note"><b>Условия отбора:</b><span data-tent-weather-state>штормовой ветер · длительный дождь · без снеговой юбки</span></div></section>'
         '<aside class="sm-selected-spec"><span>ВЫБРАНА</span><h2 data-selected-tent>Nord Ridge 2</h2>'
         '<dl><div><dt>Вместимость</dt><dd data-selected-capacity>2 человека</dd></div>'
         '<div><dt>Тамбур</dt><dd>0,9 м²</dd></div><div><dt>Дуги</dt><dd>DAC 9,5 мм</dd></div>'
@@ -244,11 +243,11 @@ def _cart(assets: Mapping[str, str]) -> str:
         '<div class="sm-stock-cell"><i></i><b>Москва · 8 шт.</b><span>зарезервировано на складе</span></div>'
         '<label class="sm-quantity">Количество<input type="number" min="1" max="4" value="1" data-cart-quantity></label>'
         '<strong data-cart-line-total>17 990 ₽</strong></article>'
-        '<div class="sm-cart-support"><div><b>Нужна совместимость?</b><span>Проверим палатку, спальник и коврик перед оплатой.</span></div>'
-        '<button type="button">Проверить комплект</button></div>'
-        '<div class="sm-promo"><label>Промокод<input type="text" value="SEVER1500" aria-label="Промокод"></label>'
-        '<button type="button">Применён</button><span>Скидка на комплект от двух единиц</span></div></section>'
-        '<aside class="sm-order-sheet"><span>ЗАКАЗ · 1 ПОЗИЦИЯ</span><h2>Резерв товара</h2>'
+        '<div class="sm-cart-support"><div><b>Нужна совместимость?</b><span data-compatibility-state>Проверим палатку, спальник и коврик перед оплатой.</span></div>'
+        '<button type="button" data-check-compatibility>Проверить комплект</button></div>'
+        '<div class="sm-promo"><label>Промокод<input type="text" value="SEVER1500" aria-label="Промокод" data-cart-promo></label>'
+        '<button type="button" data-apply-promo>Применить</button><span data-promo-state>Скидка действует от двух единиц</span></div></section>'
+        '<aside class="sm-order-sheet"><span data-order-count>ЗАКАЗ · 1 ПОЗИЦИЯ</span><h2>Резерв товара</h2>'
         '<div class="sm-delivery-choice"><b>Получение</b>'
         '<button type="button" data-selectable="delivery-mode" data-value="pickup" aria-pressed="true">Самовывоз <span>0 ₽</span></button>'
         '<button type="button" data-selectable="delivery-mode" data-value="courier" aria-pressed="false">Курьер <span>1 300 ₽</span></button></div>'
@@ -256,8 +255,8 @@ def _cart(assets: Mapping[str, str]) -> str:
         '<div><dt>Скидка комплекта</dt><dd data-cart-part>0 ₽</dd></div>'
         '<div><dt>Доставка</dt><dd data-cart-part>0 ₽</dd></div></dl>'
         '<div class="sm-order-total"><span>Итого</span><strong data-cart-total>17 990 ₽</strong></div>'
-        '<button type="button" class="sm-primary">Перейти к оформлению '
-        f'{icon("arrow-right", size=18)}</button><p>Оплата после подтверждения резерва.</p></aside></div>'
+        '<button type="button" class="sm-primary" data-checkout>Перейти к оформлению '
+        f'{icon("arrow-right", size=18)}</button><p data-checkout-state>Оплата после подтверждения резерва.</p></aside></div>'
         '</section>'
         '<section class="sm-cart-lower" data-lower-band="true">'
         '<figure><img src="'
@@ -267,9 +266,9 @@ def _cart(assets: Mapping[str, str]) -> str:
         '<ol><li><b>09:42</b><div><strong>Товар найден</strong><span>ячейка T-14 · упаковка без повреждений</span></div></li>'
         '<li><b>09:44</b><div><strong>Резерв подтверждён</strong><span>срок хранения до 19:00</span></div></li>'
         '<li><b>следующий шаг</b><div><strong>Проверка комплектности</strong><span>после выбора получения</span></div></li></ol></div>'
-        '<aside><b>Возьмите на маршрут</b><p>Футпринт защищает дно палатки и экономит время сушки.</p>'
+        '<aside><b>Возьмите на маршрут</b><p data-footprint-state>Футпринт защищает дно палатки и экономит время сушки.</p>'
         '<div><span>Вес</span><strong>340 г</strong></div><div><span>К заказу</span><strong>2 190 ₽</strong></div>'
-        '<button type="button">Добавить футпринт</button></aside>'
+        '<button type="button" data-add-footprint>Добавить футпринт</button></aside>'
         '</section></main>'
     )
 
@@ -289,7 +288,7 @@ def _delivery(assets: Mapping[str, str]) -> str:
         '<div class="sm-carrier-controls"><b>Перевозчик</b>'
         '<button type="button" data-selectable="carrier" data-value="standard" aria-pressed="true">Север Стандарт <span>2–4 дня</span></button>'
         '<button type="button" data-selectable="carrier" data-value="express" aria-pressed="false">Экспресс <span>1–2 дня</span></button></div>'
-        '<label>Пункт выдачи<select data-pickup-point><option>Центральный магазин</option><option>ПВЗ рядом с метро</option></select></label></section>'
+        '<label>Пункт выдачи<select data-pickup-point><option value="store">Центральный магазин</option><option value="pvz">ПВЗ рядом с метро</option></select></label></section>'
         '<section class="sm-route-board"><figure><img src="'
         f'{route}" alt="Зимний маршрут доставки снаряжения"></figure>'
         '<div class="sm-route-line" aria-label="Этапы маршрута"><i></i><span></span><i></i><span></span><i></i></div>'
@@ -302,8 +301,8 @@ def _delivery(assets: Mapping[str, str]) -> str:
         '<p>Центральный магазин · хранение 3 дня</p></div>'
         '<dl><div><dt>Вес отправления</dt><dd>8,6 кг</dd></div><div><dt>Страхование</dt><dd>включено</dd></div>'
         '<div><dt>Упаковка</dt><dd>жёсткий короб</dd></div></dl>'
-        '<button type="button" class="sm-primary">Выбрать доставку '
-        f'{icon("arrow-right", size=18)}</button></aside></div>'
+        '<button type="button" class="sm-primary" data-confirm-delivery>Выбрать доставку '
+        f'{icon("arrow-right", size=18)}</button><p data-delivery-choice-state>Расчёт готов к подтверждению.</p></aside></div>'
         '</section>'
         '<section class="sm-delivery-lower" data-lower-band="true">'
         '<figure class="sm-guide"><img src="'
@@ -336,7 +335,7 @@ _CSS = r"""
 .sm-utility > b { font-weight: 600; }
 .sm-utility nav { height: 100%; display: flex; align-items: center; }
 .sm-utility nav a { height: 100%; padding: 0 22px; display: flex; align-items: center; border-left: 1px solid #3e6155; }
-.sm-shopbar { height: 88px; padding: 0 64px; display: grid; grid-template-columns: 255px 184px 410px 164px 1fr 116px; gap: 18px; align-items: center; background: #FFFFFF; }
+.sm-shopbar { height: 88px; padding: 0 64px; display: grid; grid-template-columns: 240px 165px 360px 150px minmax(0, 1fr) 116px; gap: 14px; align-items: center; background: #FFFFFF; }
 .sm-brand { height: 54px; display: flex; align-items: center; gap: 14px; color: #173F32; }
 .sm-brand i { position: relative; width: 54px; height: 42px; border-bottom: 4px solid #E83B3B; overflow: hidden; }
 .sm-brand i span { position: absolute; bottom: 0; width: 34px; height: 35px; background: #173F32; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
@@ -352,7 +351,7 @@ _CSS = r"""
 .sm-location { height: 46px; display: flex; align-items: center; gap: 9px; padding-left: 8px; color: #173F32; }
 .sm-location span { display: grid; }
 .sm-location small { color: #61776D; font-size: 12px; }
-.sm-category-nav { min-width: 0; height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.sm-category-nav { min-width: 0; height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; white-space: nowrap; }
 .sm-category-nav a { height: 88px; display: flex; align-items: center; border-bottom: 4px solid transparent; }
 .sm-category-nav a.is-active { color: #173F32; border-color: #E83B3B; }
 .sm-cart-link { height: 52px; display: grid; grid-template-columns: 24px 1fr 24px; align-items: center; gap: 7px; background: #EEF1EF; color: #173F32; font-weight: 700; }
@@ -427,6 +426,7 @@ _CSS = r"""
 .sm-product-area { min-width: 0; }
 .sm-catalog-summary { height: 46px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; background: #173F32; color: #FFFFFF; }
 .sm-catalog-summary span { color: #c9d5d0; font-size: 12px; }
+.sm-catalog-summary i { color: #F2A51A; font-style: normal; }
 .sm-product-matrix { height: 476px; display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(2, 238px); border-left: 1px solid #cfd7d3; }
 .sm-product-matrix article { min-width: 0; padding: 19px; border-right: 1px solid #cfd7d3; border-bottom: 1px solid #cfd7d3; display: flex; flex-direction: column; }
 .sm-product-matrix article > span, .sm-product-feature > div > span { color: #E83B3B; font-size: 12px; font-weight: 800; }
@@ -595,6 +595,7 @@ _CSS = r"""
 .sm-delivery-result dt { color: #61776D; }
 .sm-delivery-result dd { font-weight: 700; }
 .sm-delivery-result .sm-primary { margin-top: auto; }
+.sm-delivery-result > p { margin-top: 8px; min-height: 17px; color: #61776D; font-size: 12px; text-align: center; }
 .sm-delivery-lower { height: 342px; padding: 24px 64px; display: grid; grid-template-columns: 410px 1fr 390px; gap: 28px; background: #EEF1EF; }
 .sm-guide { height: 294px; display: grid; grid-template-columns: 160px 1fr; background: #173F32; color: #FFFFFF; }
 .sm-guide figcaption { padding: 24px 20px; display: flex; flex-direction: column; }
@@ -635,8 +636,10 @@ _COVER_SCRIPT = r"""
       items: ["Палатка Nord 2 Snow", "Спальник −20 °C", "Рюкзак 75 л", "Коврик R-value 6.4"]
     }
   };
+  let selectedKit = kits.autumn;
   const update = (button) => {
     const kit = kits[button.dataset.value];
+    selectedKit = kit;
     document.querySelectorAll('[data-selectable="season"]').forEach((option) => {
       option.setAttribute("aria-pressed", String(option === button));
     });
@@ -651,24 +654,103 @@ _COVER_SCRIPT = r"""
   document.querySelectorAll('[data-selectable="season"]').forEach((button) => {
     button.addEventListener("click", () => update(button));
   });
+  document.querySelector("[data-add-kit]").addEventListener("click", () => {
+    document.querySelector("[data-cart-count]").textContent = "1";
+    document.querySelector("[data-kit-cart-state]").textContent =
+      `${selectedKit.name} добавлен · 7 позиций зарезервированы`;
+  });
 })();
 """
 
 
 _CATALOG_SCRIPT = r"""
 (() => {
-  const winter = document.querySelector('[data-catalog-filter="winter"]');
-  const update = () => {
-    const active = winter.checked;
-    document.querySelector("[data-catalog-count]").textContent = active ? "38 товаров" : "126 товаров";
-    document.querySelector("[data-catalog-summary]").innerHTML = active
-      ? "<b>Подбор для зимнего похода</b><span>До −25 °C · ветер от 15 м/с · наличие в 5 городах</span>"
-      : "<b>Подбор для летнего и межсезонного похода</b><span>Вес позиции до 3 кг · наличие в 7 городах</span>";
-    document.querySelector("[data-city-stock]").textContent = active ? "18" : "52";
-    document.querySelector("[data-catalog-feature-stock]").textContent = active
-      ? "Зимняя серия · 6 шт." : "В наличии · 14 шт.";
+  const filters = Object.fromEntries(
+    [...document.querySelectorAll("[data-catalog-filter]")].map((control) => [control.dataset.catalogFilter, control])
+  );
+  const seasons = ["summer", "shoulder", "winter"];
+  const seasonProfiles = {
+    summer: { count: 126, title: "Подбор для летнего похода", cities: 7, stock: "В наличии · 14 шт." },
+    shoulder: { count: 74, title: "Подбор для межсезонного похода", cities: 6, stock: "Межсезонная серия · 11 шт." },
+    winter: { count: 38, title: "Подбор для зимнего похода", cities: 5, stock: "Зимняя серия · 6 шт." }
   };
-  winter.addEventListener("change", update);
+  const sortOrders = {
+    route: ["backpack", "tent", "sleeping", "stove"],
+    weight: ["stove", "sleeping", "backpack", "tent"],
+    price: ["stove", "sleeping", "tent", "backpack"]
+  };
+  const sortLabels = { route: "По условиям маршрута", weight: "Сначала легче", price: "Сначала дешевле" };
+  const sort = document.querySelector('[aria-label="Сортировка каталога"]');
+  const matrix = document.querySelector(".sm-product-matrix");
+
+  const activeSeason = () => seasons.find((key) => filters[key].checked) || "summer";
+  const describeWeight = () => {
+    if (filters.ultralight.checked && !filters.light.checked) return "только ультралёгкое до 1,5 кг";
+    if (filters.ultralight.checked) return "ультралёгкое до 1,5 кг и до 3 кг";
+    return filters.light.checked ? "вес позиции до 3 кг" : "без ограничения по весу";
+  };
+  const describeCategories = () => {
+    const selected = [
+      ["tents", "палатки"], ["backpacks", "рюкзаки"], ["sleeping", "спальные системы"]
+    ].filter(([key]) => filters[key].checked).map(([, label]) => label);
+    if (selected.length === 1 && selected[0] === "спальные системы") return "только спальные системы";
+    if (!filters.backpacks.checked && selected.length) return `${selected.join(" и ")} · без рюкзаков`;
+    return selected.length ? selected.join(" и ") : "категории не выбраны";
+  };
+  const update = () => {
+    const profile = seasonProfiles[activeSeason()];
+    let count = profile.count;
+    if (filters.ultralight.checked) count -= 17;
+    if (!filters.light.checked) count += 12;
+    if (!filters.tents.checked) count -= 11;
+    if (!filters.backpacks.checked) count -= 9;
+    if (filters.sleeping.checked) count += 6;
+    document.querySelector("[data-catalog-count]").textContent = `${Math.max(1, count)} товаров`;
+    document.querySelector("[data-catalog-summary] b").textContent = profile.title;
+    document.querySelector("[data-catalog-summary] span").innerHTML =
+      `${describeWeight()} · ${describeCategories()} · <i data-catalog-sort-state>${sortLabels[sort.value]}</i>`;
+    document.querySelector("[data-city-stock]").textContent = activeSeason() === "winter" ? "18" : "52";
+    document.querySelector("[data-catalog-feature-stock]").textContent = profile.stock;
+  };
+
+  seasons.forEach((key) => {
+    filters[key].addEventListener("change", () => {
+      if (filters[key].checked) {
+        seasons.forEach((other) => { if (other !== key) filters[other].checked = false; });
+      } else {
+        filters[key].checked = true;
+      }
+      update();
+    });
+  });
+  ["ultralight", "light", "tents", "backpacks", "sleeping"].forEach((key) => {
+    filters[key].addEventListener("change", update);
+  });
+  sort.addEventListener("change", () => {
+    const products = Object.fromEntries(
+      [...matrix.querySelectorAll("[data-product-key]")].map((product) => [product.dataset.productKey, product])
+    );
+    sortOrders[sort.value].forEach((key) => matrix.append(products[key]));
+    update();
+  });
+  document.querySelector("[data-check-city]").addEventListener("click", () => {
+    document.querySelector("[data-stock-state]").innerHTML = "<b>Москва · 52 позиции</b> доступны для резерва сегодня.";
+  });
+  document.querySelector("[data-send-list]").addEventListener("click", () => {
+    document.querySelector("[data-expert-state]").textContent = "Текущий список отправлен эксперту · ответ до 12:00";
+  });
+  document.querySelector("[data-catalog-reset]").addEventListener("click", () => {
+    const defaults = { summer: true, shoulder: false, winter: false, ultralight: false, light: true, tents: true, backpacks: true, sleeping: false };
+    Object.entries(defaults).forEach(([key, checked]) => { filters[key].checked = checked; });
+    sort.value = "route";
+    const products = Object.fromEntries(
+      [...matrix.querySelectorAll("[data-product-key]")].map((product) => [product.dataset.productKey, product])
+    );
+    sortOrders.route.forEach((key) => matrix.append(products[key]));
+    document.querySelector("[data-stock-state]").innerHTML = "<b>Самовывоз сегодня</b> из 5 магазинов после подтверждения резерва.";
+    document.querySelector("[data-expert-state]").textContent = "Эксперт проверит комплект по весу и температуре.";
+    update();
+  });
 })();
 """
 
@@ -677,11 +759,24 @@ _TENTS_SCRIPT = r"""
 (() => {
   const profiles = {
     "2": { result: "2 места · ветер до 22 м/с", capacity: "2 человека", name: "Nord Ridge 2", price: "17 990 ₽" },
-    "3": { result: "3 места · ветер до 20 м/с", capacity: "3 человека", name: "Boreal Storm 3", price: "19 400 ₽" },
+    "3": { result: "3 места · ветер до 18 м/с", capacity: "3 человека", name: "Boreal Storm 3", price: "19 400 ₽" },
     "4": { result: "4 места · ветер до 20 м/с", capacity: "4 человека", name: "Taiga Base 4", price: "23 900 ₽" }
+  };
+  let selected = "2";
+  const weather = Object.fromEntries(
+    [...document.querySelectorAll("[data-tent-weather]")].map((control) => [control.dataset.tentWeather, control])
+  );
+  const updateWeather = () => {
+    const conditions = [
+      weather.wind.checked ? "штормовой ветер" : "умеренный ветер",
+      weather.rain.checked ? "длительный дождь" : "краткий дождь",
+      weather.snow.checked ? "снеговая юбка" : "без снеговой юбки"
+    ];
+    document.querySelector("[data-tent-weather-state]").textContent = conditions.join(" · ");
   };
   document.querySelectorAll('[data-selectable="tent-capacity"]').forEach((button) => {
     button.addEventListener("click", () => {
+      selected = button.dataset.value;
       const profile = profiles[button.dataset.value];
       document.querySelectorAll('[data-selectable="tent-capacity"]').forEach((option) => {
         option.setAttribute("aria-pressed", String(option === button));
@@ -690,12 +785,17 @@ _TENTS_SCRIPT = r"""
       document.querySelector("[data-selected-capacity]").textContent = profile.capacity;
       document.querySelector("[data-selected-tent]").textContent = profile.name;
       document.querySelector("[data-selected-tent-price]").textContent = profile.price;
-      document.querySelector("[data-tent-capacity-cell]").textContent = button.dataset.value;
+      document.querySelectorAll("[data-tent-row]").forEach((row) => {
+        row.classList.toggle("is-selected", row.dataset.tentRow === button.dataset.value);
+      });
     });
   });
+  Object.values(weather).forEach((control) => control.addEventListener("change", updateWeather));
   document.querySelector("[data-add-tent]").addEventListener("click", () => {
+    const profile = profiles[selected];
     document.querySelector("[data-cart-count]").textContent = "1";
-    document.querySelector("[data-tent-cart-state]").textContent = "Добавлено · резерв на 24 часа";
+    document.querySelector("[data-tent-cart-state]").textContent =
+      `${profile.name} · ${profile.price} добавлена · резерв на 24 часа`;
   });
 })();
 """
@@ -704,20 +804,27 @@ _TENTS_SCRIPT = r"""
 _CART_SCRIPT = r"""
 (() => {
   const quantity = document.querySelector("[data-cart-quantity]");
+  const promo = document.querySelector("[data-cart-promo]");
   const parts = document.querySelectorAll("[data-cart-part]");
   let delivery = "pickup";
+  let promoValid = true;
+  let footprintAdded = false;
   const grouped = (value) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   const update = () => {
-    const count = Math.max(1, Math.min(4, Number(quantity.value) || 1));
-    const subtotal = 17990 * count;
-    const discount = count >= 2 ? 1500 : 0;
+    const entered = Number.parseInt(quantity.value, 10);
+    const count = Math.max(1, Math.min(4, Number.isFinite(entered) ? entered : 1));
+    quantity.value = String(count);
+    const lineSubtotal = 17990 * count;
+    const subtotal = lineSubtotal + (footprintAdded ? 2190 : 0);
+    const discount = promoValid && count >= 2 ? 1500 : 0;
     const deliveryCost = delivery === "courier" ? 1300 : 0;
     const total = subtotal - discount + deliveryCost;
-    document.querySelector("[data-cart-line-total]").textContent = `${grouped(subtotal)} ₽`;
+    document.querySelector("[data-cart-line-total]").textContent = `${grouped(lineSubtotal)} ₽`;
     parts[0].textContent = `${grouped(subtotal)} ₽`;
     parts[1].textContent = discount ? `−${grouped(discount)} ₽` : "0 ₽";
     parts[2].textContent = `${grouped(deliveryCost)} ₽`;
     document.querySelector("[data-cart-total]").textContent = `${grouped(total)} ₽`;
+    document.querySelector("[data-order-count]").textContent = footprintAdded ? "ЗАКАЗ · 2 ПОЗИЦИИ" : "ЗАКАЗ · 1 ПОЗИЦИЯ";
   };
   quantity.addEventListener("input", update);
   document.querySelectorAll('[data-selectable="delivery-mode"]').forEach((button) => {
@@ -729,6 +836,28 @@ _CART_SCRIPT = r"""
       update();
     });
   });
+  document.querySelector("[data-apply-promo]").addEventListener("click", () => {
+    const code = promo.value.trim().toUpperCase();
+    promo.value = code;
+    promoValid = code === "SEVER1500";
+    document.querySelector("[data-promo-state]").textContent = promoValid
+      ? "Скидка 1 500 ₽ применена" : "Промокод не найден";
+    update();
+  });
+  document.querySelector("[data-check-compatibility]").addEventListener("click", () => {
+    document.querySelector("[data-compatibility-state]").textContent =
+      "Совместимость подтверждена · коврик помещается в тамбур";
+  });
+  document.querySelector("[data-add-footprint]").addEventListener("click", () => {
+    if (footprintAdded) return;
+    footprintAdded = true;
+    document.querySelector("[data-cart-count]").textContent = "2";
+    document.querySelector("[data-footprint-state]").textContent = "Футпринт добавлен · дно защищено от мокрого грунта";
+    update();
+  });
+  document.querySelector("[data-checkout]").addEventListener("click", () => {
+    document.querySelector("[data-checkout-state]").textContent = "Шаг 2 из 3 · адрес и получатель";
+  });
 })();
 """
 
@@ -738,34 +867,45 @@ _DELIVERY_SCRIPT = r"""
   const routes = {
     moscow: {
       city: "Москва", hub: "Городской терминал", transfer: "контроль веса · 24 августа",
-      standard: { date: "25 августа", cost: "490 ₽", carrier: "Север Стандарт", note: "Городская доставка без межрегиональной перегрузки." },
-      express: { date: "25 августа", cost: "790 ₽", carrier: "Экспресс", note: "Приоритетная городская линия до пункта выдачи." }
+      standard: { date: "25 августа", cost: 490, carrier: "Север Стандарт", note: "Городская доставка без межрегиональной перегрузки." },
+      express: { date: "25 августа", cost: 790, carrier: "Экспресс", note: "Приоритетная городская линия до пункта выдачи." }
     },
     kazan: {
       city: "Казань", hub: "Хаб Нижний Новгород", transfer: "перегрузка · 27 августа",
-      standard: { date: "30 августа", cost: "890 ₽", carrier: "Север Стандарт", note: "Наземный маршрут через Нижний Новгород, одна контрольная перегрузка." },
-      express: { date: "29 августа", cost: "1 490 ₽", carrier: "Экспресс", note: "Приоритетный наземный маршрут до Казани с контролем пломбы." }
+      standard: { date: "30 августа", cost: 890, carrier: "Север Стандарт", note: "Наземный маршрут через Нижний Новгород, одна контрольная перегрузка." },
+      express: { date: "29 августа", cost: 1490, carrier: "Экспресс", note: "Приоритетный наземный маршрут до Казани с контролем пломбы." }
     },
     ekaterinburg: {
       city: "Екатеринбург", hub: "Хаб Пермь", transfer: "контроль пломбы · 29 августа",
-      standard: { date: "1 сентября", cost: "1 190 ₽", carrier: "Север Стандарт", note: "Наземная линия через Пермь с температурным контролем." },
-      express: { date: "30 августа", cost: "1 890 ₽", carrier: "Экспресс", note: "Ускоренная линия до Екатеринбурга без складского хранения." }
+      standard: { date: "1 сентября", cost: 1190, carrier: "Север Стандарт", note: "Наземная линия через Пермь с температурным контролем." },
+      express: { date: "30 августа", cost: 1890, carrier: "Экспресс", note: "Ускоренная линия до Екатеринбурга без складского хранения." }
     }
   };
+  const pickups = {
+    store: { label: "Центральный магазин", storage: "хранение 3 дня", adjustment: 0, note: "" },
+    pvz: { label: "ПВЗ рядом с метро", storage: "хранение 5 дней", adjustment: -100, note: " · последняя миля проходит через городской ПВЗ." }
+  };
   const citySelect = document.querySelector("[data-delivery-city]");
+  const pickupSelect = document.querySelector("[data-pickup-point]");
   let carrier = "standard";
+  let currentCost = 490;
+  const grouped = (value) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
   const update = () => {
     const route = routes[citySelect.value];
     const service = route[carrier];
+    const pickup = pickups[pickupSelect.value];
+    currentCost = service.cost + pickup.adjustment;
     document.querySelector("[data-delivery-summary]").innerHTML =
-      `<b>${route.city} · ${service.carrier}</b><strong>${service.date} · ${service.cost}</strong><p>Центральный пункт · хранение 3 дня</p>`;
+      `<b>${route.city} · ${service.carrier}</b><strong>${service.date} · ${grouped(currentCost)} ₽</strong><p>${pickup.label} · ${pickup.storage}</p>`;
     document.querySelector("[data-route-hub]").textContent = route.hub;
     document.querySelector("[data-route-transfer]").textContent = route.transfer;
     document.querySelector("[data-route-city]").textContent = route.city;
     document.querySelector("[data-route-arrival]").textContent = `получение · ${service.date}`;
-    document.querySelector("[data-route-note]").textContent = service.note;
+    document.querySelector("[data-route-note]").textContent = service.note + pickup.note;
+    document.querySelector("[data-delivery-choice-state]").textContent = "Расчёт изменён · подтвердите способ получения.";
   };
   citySelect.addEventListener("change", update);
+  pickupSelect.addEventListener("change", update);
   document.querySelectorAll('[data-selectable="carrier"]').forEach((button) => {
     button.addEventListener("click", () => {
       carrier = button.dataset.value;
@@ -774,6 +914,10 @@ _DELIVERY_SCRIPT = r"""
       });
       update();
     });
+  });
+  document.querySelector("[data-confirm-delivery]").addEventListener("click", () => {
+    document.querySelector("[data-delivery-choice-state]").textContent =
+      `Доставка выбрана · ${grouped(currentCost)} ₽ · маршрут закреплён за заказом`;
   });
 })();
 """
