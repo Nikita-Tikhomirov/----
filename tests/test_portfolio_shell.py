@@ -3,6 +3,7 @@ import pytest
 from portfolio.kwork_pack.catalog import get_project
 from portfolio.kwork_pack.icons import icon
 from portfolio.kwork_pack.models import ProjectSpec, ShotSpec
+import portfolio.kwork_pack.shell as shell
 from portfolio.kwork_pack.shell import build_document
 
 
@@ -23,6 +24,21 @@ def test_desktop_document_never_uses_a_mobile_browser_frame():
     assert 'data-canvas="1920x1280"' in html
     assert "doma-u-ozera.ru" in html
     assert 'class="mobile-url-bar"' not in html
+
+
+def test_build_document_keeps_an_externally_constructed_mobile_shot_in_desktop_shell():
+    project = get_project("tochka-hoda")
+    mobile_shot = ShotSpec("legacy-mobile", "/legacy-mobile", "mobile", "content")
+
+    html = build_document(project, mobile_shot, "<main>Desktop only</main>", "")
+
+    assert 'data-layout="desktop"' in html
+    assert 'class="browser-url-bar"' in html
+    assert 'class="mobile-url-bar"' not in html
+
+
+def test_shell_does_not_export_the_legacy_mobile_renderer():
+    assert not hasattr(shell, "render_mobile_shell")
 
 
 def test_build_document_includes_page_owned_css_and_trusted_scripts_after_markup():

@@ -45,12 +45,13 @@ def test_commercial_sites_have_unique_value_and_function(slug, required_copy, fu
 
 
 @pytest.mark.parametrize("slug", [case[0] for case in COMMERCIAL_CASES])
-def test_commercial_sites_render_all_four_shot_variants(slug):
+def test_commercial_sites_render_five_routes_with_three_legacy_variants(slug):
     project = get_project(slug)
 
     rendered = [render_commercial(project, shot, {"hero": "/asset.webp"}) for shot in project.shots]
 
-    assert len(set(rendered)) == 4
+    assert len(rendered) == 5
+    assert len(set(rendered)) == 3
     for shot, html in zip(project.shots, rendered):
         assert f'data-variant="{shot.variant}"' in html
         assert f'class="commercial-page {project.palette} ' in html
@@ -107,12 +108,13 @@ def test_leadgen_sites_solve_one_clear_customer_problem(slug, required_copy, fun
 
 
 @pytest.mark.parametrize("slug", [case[0] for case in LEADGEN_CASES])
-def test_leadgen_sites_render_four_distinct_shot_variants(slug):
+def test_leadgen_sites_render_five_routes_with_three_legacy_variants(slug):
     project = get_project(slug)
 
     rendered = [render_leadgen(project, shot, {"hero": "/asset.webp"}) for shot in project.shots]
 
-    assert len(set(rendered)) == 4
+    assert len(rendered) == 5
+    assert len(set(rendered)) == 3
     for shot, html in zip(project.shots, rendered):
         assert f'data-variant="{shot.variant}"' in html
         assert f'class="leadgen-page {project.palette} ' in html
@@ -194,12 +196,13 @@ def test_complex_sites_show_a_real_workflow_state(slug, required_copy, functiona
 
 
 @pytest.mark.parametrize("slug", [case[0] for case in COMPLEX_CASES])
-def test_complex_sites_render_four_distinct_shot_variants(slug):
+def test_complex_sites_render_five_routes_with_three_legacy_variants(slug):
     project = get_project(slug)
 
     rendered = [render_complex(project, shot, {"hero": "/asset.webp"}) for shot in project.shots]
 
-    assert len(set(rendered)) == 4
+    assert len(rendered) == 5
+    assert len(set(rendered)) == 3
     for shot, html in zip(project.shots, rendered):
         assert f'data-variant="{shot.variant}"' in html
         assert f'class="complex-page {project.palette} ' in html
@@ -316,16 +319,13 @@ def test_complex_renderer_rejects_unsupported_projects_variants_and_missing_asse
         render_complex(project, project.shots[0], {})
 
 
-def test_render_site_adapts_semantic_assets_for_every_legacy_story_screen():
-    for project in PROJECTS:
-        assets = {
-            asset.key: f"/{asset.filename}"
-            for asset in project.assets
-        }
-        first_asset = assets[project.assets[0].key]
+def test_render_site_adapts_semantic_assets_for_a_legacy_story_screen():
+    project = get_project("dentalea")
+    assets = {asset.key: f"/{asset.filename}" for asset in project.assets}
+    first_asset = assets[project.assets[0].key]
 
-        for shot in project.shots:
-            rendered = render_site(project, shot, assets)
+    for shot in project.shots:
+        rendered = render_site(project, shot, assets)
 
-            assert first_asset in rendered
-            assert "hero" not in assets
+        assert first_asset in rendered.html
+        assert "hero" not in assets

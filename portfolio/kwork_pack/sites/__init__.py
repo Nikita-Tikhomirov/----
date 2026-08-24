@@ -81,11 +81,18 @@ def render_site(
 ) -> RenderedPage:
     """Render a dedicated module or the temporary exact-module migration fallback."""
     try:
-        return get_renderer(project)(project, shot, assets)
+        renderer = get_renderer(project)
     except ModuleNotFoundError as exc:
         if exc.name != project.renderer_module:
             raise
         return _render_legacy_site(project, shot, assets)
+    page = renderer(project, shot, assets)
+    if not isinstance(page, RenderedPage):
+        raise TypeError(
+            f"Project {project.slug} renderer module {project.renderer_module} "
+            f"must return RenderedPage, got {type(page).__name__}"
+        )
+    return page
 
 
 __all__ = [

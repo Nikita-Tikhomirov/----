@@ -1,18 +1,11 @@
 import sys
-from dataclasses import dataclass
 from types import ModuleType
 
 import pytest
 
 from portfolio.kwork_pack.catalog import PROJECTS, get_project
 import portfolio.kwork_pack.sites as sites
-
-
-@dataclass(frozen=True)
-class DedicatedPage:
-    html: str
-    css: str
-    scripts: str = ""
+from portfolio.kwork_pack.sites.runtime import RenderedPage
 
 
 def _registry_api(name):
@@ -29,7 +22,7 @@ def _dedicated_module(project, marker="dedicated"):
     module = ModuleType(project.renderer_module)
 
     def render(_project, _shot, _assets):
-        return DedicatedPage(f'<main data-renderer="{marker}"></main>', ".site {}")
+        return RenderedPage(f'<main data-renderer="{marker}"></main>', ".site {}")
 
     module.render = render
     return module
@@ -83,18 +76,45 @@ def test_render_site_prefers_an_exact_dedicated_module_over_legacy_dispatch(monk
 
     page = _registry_api("render_site")(project, project.shots[0], _semantic_assets(project))
 
+    assert isinstance(page, RenderedPage)
     assert page.html == '<main data-renderer="dedicated"></main>'
     assert page.css == ".site {}"
 
 
 def test_render_site_wraps_legacy_output_only_when_the_declared_module_is_absent():
-    project = get_project("tochka-hoda")
+    project = get_project("dentalea")
 
     page = _registry_api("render_site")(project, project.shots[0], _semantic_assets(project))
 
     assert f'data-project="{project.slug}"' in page.html
     assert page.css == ""
     assert page.scripts == ""
+
+
+def test_render_site_propagates_module_not_found_raised_by_dedicated_renderer(monkeypatch):
+    project = get_project("tochka-hoda")
+    module = ModuleType(project.renderer_module)
+
+    def render(_project, _shot, _assets):
+        raise ModuleNotFoundError("renderer dependency failed", name=project.renderer_module)
+
+    module.render = render
+    monkeypatch.setitem(sys.modules, project.renderer_module, module)
+
+    with pytest.raises(ModuleNotFoundError) as error:
+        _registry_api("render_site")(project, project.shots[0], _semantic_assets(project))
+
+    assert error.value.name == project.renderer_module
+
+
+def test_render_site_rejects_a_dedicated_renderer_returning_the_wrong_type(monkeypatch):
+    project = get_project("tochka-hoda")
+    module = ModuleType(project.renderer_module)
+    module.render = lambda _project, _shot, _assets: "plain string"
+    monkeypatch.setitem(sys.modules, project.renderer_module, module)
+
+    with pytest.raises(TypeError, match=r"tochka-hoda.*tochka_hoda.*RenderedPage"):
+        _registry_api("render_site")(project, project.shots[0], _semantic_assets(project))
 
 
 def test_render_site_propagates_dependency_import_failures(monkeypatch):

@@ -31,24 +31,6 @@ def render_browser_shell(project: ProjectSpec, shot: ShotSpec, page_html: str) -
     )
 
 
-def render_mobile_shell(project: ProjectSpec, shot: ShotSpec, page_html: str) -> str:
-    url = public_url(project, shot)
-    mobile_shell = (
-        f"{browser_toolbar(url, mobile=True)}"
-        f'<div class="mobile-viewport">{page_html}</div>'
-    )
-    return panel(
-        "section",
-        panel(
-            "div",
-            mobile_shell,
-            class_name="mobile-device",
-            attrs={"data-layout": "mobile"},
-        ),
-        class_name="mobile-stage",
-    )
-
-
 def build_document(
     project: ProjectSpec,
     shot: ShotSpec,
@@ -56,11 +38,7 @@ def build_document(
     css_text: str,
     scripts: str = "",
 ) -> str:
-    shell_html = (
-        render_mobile_shell(project, shot, page_html)
-        if shot.layout == "mobile"
-        else render_browser_shell(project, shot, page_html)
-    )
+    shell_html = render_browser_shell(project, shot, page_html)
     title = f"{project.brand} - {shot.key}"
     style_text = "\n".join(
         part for part in (_static_css("base.css"), _static_css("themes.css"), css_text) if part
@@ -80,7 +58,7 @@ def build_document(
         f"<title>{escape_html(title)}</title>"
         f"<style>{style_text}</style>"
         "</head>"
-        f'<body data-layout="{escape_html(shot.layout)}" '
+        '<body data-layout="desktop" '
         f'data-palette="{escape_html(project.palette)}" data-shot="{escape_html(shot.key)}">'
         f"{body}"
         f"{script_tag}"
