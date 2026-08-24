@@ -533,6 +533,222 @@ def test_modulprof_workflows_recalculate_specification_and_procurement(chrome_br
         page.close()
 
 
+def test_modulprof_cover_and_catalog_controls_update_dependent_facts(chrome_browser):
+    project = get_project("modulprof")
+    shots = {shot.key: shot for shot in project.shots}
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shots["cover"])
+        geometry = page.locator(".mp-page").bounding_box()
+        page.locator('[data-selectable="building-purpose"][data-value="checkpoint"]').click()
+        page.locator('[data-selectable="building-area"][data-value="144"]').click()
+        assert "Контрольно-пропускной пункт" in page.locator("[data-cover-model]").inner_text()
+        assert "144 м²" in page.locator("[data-cover-spec]").inner_text()
+        assert "3 240 000 ₽" in page.locator("[data-cover-price]").inner_text()
+        assert "35 рабочих дней" in page.locator("[data-cover-term]").inner_text()
+        assert page.locator(".mp-page").bounding_box() == geometry
+
+        _open(page, project, shots["catalog"])
+        geometry = page.locator(".mp-page").bounding_box()
+        page.locator('[data-catalog-purpose="logistics"]').check()
+        page.locator("[data-catalog-area]").select_option("large")
+        page.locator("[data-catalog-readiness]").select_option("turnkey")
+        assert page.locator("[data-building-count]").inner_text() == "2 решения"
+        summary = page.locator("[data-building-summary]").inner_text()
+        assert "логистики" in summary.casefold()
+        assert "от 200 м²" in summary
+        assert "под ключ" in summary.casefold()
+        assert "MP-L240" in page.locator("[data-selected-building]").inner_text()
+        assert "52 дня" in page.locator("[data-selected-delivery]").inner_text()
+        assert page.locator(".mp-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_modulprof_configurator_uses_every_input_and_reconciles_edge_combination(chrome_browser):
+    project = get_project("modulprof")
+    shot = next(shot for shot in project.shots if shot.key == "configurator")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".mp-page").bounding_box()
+        summary = page.locator("[data-config-summary]")
+        total = page.locator("[data-config-total]")
+
+        def fingerprint():
+            return summary.inner_text(), total.inner_text()
+
+        previous = fingerprint()
+        actions = (
+            lambda: page.locator("[data-config-purpose]").select_option("medical"),
+            lambda: page.locator("[data-config-length]").fill("15"),
+            lambda: page.locator("[data-config-width]").fill("6"),
+            lambda: page.locator('[data-selectable="config-floor"][data-value="2"]').click(),
+            lambda: page.locator('[data-selectable="config-shell"][data-value="warm"]').click(),
+            lambda: page.locator('[data-config-option="electricity"]').uncheck(),
+            lambda: page.locator('[data-config-option="plumbing"]').check(),
+            lambda: page.locator("[data-config-delivery]").select_option("north"),
+        )
+        for action in actions:
+            action()
+            current = fingerprint()
+            assert current != previous
+            previous = current
+
+        text = summary.inner_text()
+        assert "180 м²" in text
+        assert "Медицинский модуль" in text
+        assert "2 этажа" in text
+        assert "Тёплый контур" in text
+        assert "северная логистика" in text.casefold()
+        assert "4 334 000 ₽" in text
+        parts = page.locator("[data-config-part]").all_inner_texts()
+        assert sum(int("".join(filter(str.isdigit, value))) for value in parts) == 4334000
+        assert page.locator(".mp-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_modulprof_packages_and_project_filters_replace_full_result_state(chrome_browser):
+    project = get_project("modulprof")
+    shots = {shot.key: shot for shot in project.shots}
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shots["comparison"])
+        expected_packages = {
+            "base": ("Базовая", "3 240 000 ₽", "30 дней", "4 из 7"),
+            "engineering": ("Инженерная", "4 680 000 ₽", "42 дня", "6 из 7"),
+            "turnkey": ("Под ключ", "5 940 000 ₽", "55 дней", "7 из 7"),
+        }
+        for value, expected in expected_packages.items():
+            page.locator(f'[data-selectable="package"][data-value="{value}"]').click()
+            result = " | ".join(
+                (
+                    page.locator("[data-package-summary]").inner_text(),
+                    page.locator("[data-package-total]").inner_text(),
+                    page.locator("[data-package-term]").inner_text(),
+                    page.locator("[data-package-compliance]").inner_text(),
+                )
+            )
+            assert all(fragment in result for fragment in expected)
+            assert page.locator('[data-comparison-row][data-included="true"]').count() == int(expected[3][0])
+
+        _open(page, project, shots["projects"])
+        page.locator('[data-selectable="project-sector"][data-value="social"]').click()
+        assert page.locator("[data-project-count]").inner_text() == "5 проектов"
+        assert "Медицинский модуль" in page.locator("[data-project-selection]").inner_text()
+        page.locator("[data-project-region]").select_option("north")
+        assert page.locator("[data-project-count]").inner_text() == "2 проекта"
+        selection = page.locator("[data-project-selection]").inner_text()
+        assert "Медицинский модуль" in selection
+        assert "Архангельск" in selection
+        assert "1 260 км" in page.locator("[data-project-logistics]").inner_text()
+        assert page.locator('[data-project-row][data-visible="true"]').count() == 2
+    finally:
+        page.close()
+
+
+def test_modulprof_header_and_route_content_never_overlap(chrome_browser):
+    project = get_project("modulprof")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        for shot in project.shots:
+            _open(page, project, shot)
+            header = page.locator(".mp-header").bounding_box()
+            content = page.locator(".mp-route").bounding_box()
+            nav = page.locator(".mp-nav")
+            nav_size = nav.evaluate("el => ({clientWidth: el.clientWidth, scrollWidth: el.scrollWidth})")
+            brand = page.locator(".mp-brand").bounding_box()
+            first_link = nav.locator("a").first.bounding_box()
+            last_link = nav.locator("a").last.bounding_box()
+            contact = page.locator(".mp-contact").bounding_box()
+            root = page.locator(".mp-page").bounding_box()
+            viewport = page.locator(".browser-viewport").bounding_box()
+
+            assert header["y"] + header["height"] <= content["y"]
+            assert nav_size["scrollWidth"] <= nav_size["clientWidth"]
+            assert brand["x"] + brand["width"] <= first_link["x"]
+            assert last_link["x"] + last_link["width"] <= contact["x"]
+            assert contact["x"] + contact["width"] <= root["x"] + root["width"]
+            assert header["x"] + header["width"] <= viewport["x"] + viewport["width"]
+            assert content["x"] + content["width"] <= viewport["x"] + viewport["width"]
+    finally:
+        page.close()
+
+
+def test_modulprof_every_filter_option_produces_a_distinct_result(chrome_browser):
+    project = get_project("modulprof")
+    shots = {shot.key: shot for shot in project.shots}
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shots["cover"])
+        purpose_results = set()
+        for value in ("production", "office", "checkpoint"):
+            page.locator(f'[data-selectable="building-purpose"][data-value="{value}"]').click()
+            purpose_results.add(
+                (
+                    page.locator("[data-cover-model]").inner_text(),
+                    page.locator("[data-cover-price]").inner_text(),
+                )
+            )
+        assert len(purpose_results) == 3
+
+        area_results = set()
+        for value in ("72", "108", "144"):
+            page.locator(f'[data-selectable="building-area"][data-value="{value}"]').click()
+            area_results.add(
+                (
+                    page.locator("[data-cover-spec]").inner_text(),
+                    page.locator("[data-cover-term]").inner_text(),
+                    page.locator("[data-cover-weight]").inner_text(),
+                )
+            )
+        assert len(area_results) == 3
+
+        _open(page, project, shots["catalog"])
+        purpose_results = set()
+        for value in ("office", "warehouse", "logistics"):
+            page.locator(f'[data-catalog-purpose="{value}"]').check()
+            purpose_results.add(page.locator("[data-building-summary]").inner_text())
+        assert len(purpose_results) == 3
+
+        area_results = set()
+        for value in ("all", "compact", "large"):
+            page.locator("[data-catalog-area]").select_option(value)
+            area_results.add(page.locator("[data-building-summary]").inner_text())
+        assert len(area_results) == 3
+
+        readiness_results = set()
+        for value in ("ready", "shell", "turnkey"):
+            page.locator("[data-catalog-readiness]").select_option(value)
+            readiness_results.add(
+                " | ".join(
+                    (
+                        page.locator("[data-building-summary]").inner_text(),
+                        page.locator("[data-selected-delivery]").inner_text(),
+                    )
+                )
+            )
+        assert len(readiness_results) == 3
+
+        _open(page, project, shots["projects"])
+        project_results = set()
+        for sector in ("industry", "logistics", "social"):
+            page.locator(f'[data-selectable="project-sector"][data-value="{sector}"]').click()
+            for region in ("all", "central", "volga", "north"):
+                page.locator("[data-project-region]").select_option(region)
+                project_results.add(
+                    (
+                        page.locator("[data-project-count]").inner_text(),
+                        page.locator("[data-project-selection]").inner_text(),
+                        page.locator("[data-project-logistics]").inner_text(),
+                    )
+                )
+        assert len(project_results) == 12
+    finally:
+        page.close()
+
+
 def test_doma_u_ozera_workflows_keep_availability_and_totals_consistent(chrome_browser):
     project = get_project("doma-u-ozera")
     shots = {shot.key: shot for shot in project.shots}
