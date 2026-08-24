@@ -357,3 +357,317 @@ def test_dentalea_module_is_isolated_from_other_site_renderers():
         name.endswith(("tochka_hoda", "commercial", "leadgen", "complex"))
         for name in imported_modules
     )
+
+
+_VENTKONTUR_ROUTE_COPY = {
+    "cover": (
+        "Промышленная вентиляция под параметры объекта",
+        "Расчёт, поставка и ввод в эксплуатацию",
+        "Оборудование в производстве",
+    ),
+    "catalog": (
+        "Каталог вентиляционных установок",
+        "Сравнение характеристик",
+        "VK-AHU 45",
+    ),
+    "selection": (
+        "Подбор по расходу и давлению",
+        "Расчётная точка системы",
+        "VK-AHU 45",
+    ),
+    "projects": (
+        "Вентиляция цеха без остановки производства",
+        "Подтверждённые показатели",
+        "18% снижения энергопотребления",
+    ),
+    "service": (
+        "Сервисная заявка VK-2481",
+        "График обслуживания",
+        "Инженер назначен",
+    ),
+}
+
+_VENTKONTUR_ASSETS_BY_ROUTE = {
+    "cover": ("air_handling_unit",),
+    "catalog": ("factory_rooftop",),
+    "selection": ("control_panel",),
+    "projects": ("project_hall",),
+    "service": ("engineer_portrait", "duct_installation"),
+}
+
+
+def _render_ventkontur(project, shot, assets):
+    module = import_module("portfolio.kwork_pack.sites.ventkontur")
+    return module.render(project, shot, assets)
+
+
+def _ventkontur_assets(project):
+    return {
+        asset.key: f'/assets/{asset.filename}?project=ventkontur&mode="preview"'
+        for asset in project.assets
+    }
+
+
+def test_ventkontur_renders_five_distinct_routes_with_exact_b2b_copy():
+    project = get_project("ventkontur")
+    pages = [
+        _render_ventkontur(project, shot, _ventkontur_assets(project))
+        for shot in project.shots
+    ]
+
+    assert all(isinstance(page, RenderedPage) for page in pages)
+    assert [shot.key for shot in project.shots] == list(_VENTKONTUR_ROUTE_COPY)
+    assert len({page.html for page in pages}) == 5
+    for shot, page in zip(project.shots, pages):
+        assert 'data-site="ventkontur"' in page.html
+        assert f'data-route="{shot.key}"' in page.html
+        assert "ВентКонтур" in page.html
+        assert "промышленная вентиляция" in page.html
+        for fragment in _VENTKONTUR_ROUTE_COPY[shot.key]:
+            assert fragment in page.html
+
+
+def test_ventkontur_uses_each_route_owned_asset_exactly_once():
+    project = get_project("ventkontur")
+    assets = _ventkontur_assets(project)
+    pages = {
+        shot.key: _render_ventkontur(project, shot, assets).html
+        for shot in project.shots
+    }
+
+    for route, owned_keys in _VENTKONTUR_ASSETS_BY_ROUTE.items():
+        for key in owned_keys:
+            source = escape(assets[key], quote=True)
+            assert pages[route].count(source) == 1
+            assert sum(page.count(source) for page in pages.values()) == 1
+
+
+@pytest.mark.parametrize(
+    ("shot_key", "owned_keys"), _VENTKONTUR_ASSETS_BY_ROUTE.items()
+)
+def test_ventkontur_reports_a_missing_route_owned_asset(shot_key, owned_keys):
+    project = get_project("ventkontur")
+    shot = next(item for item in project.shots if item.key == shot_key)
+    assets = _ventkontur_assets(project)
+    missing_key = owned_keys[0]
+    assets.pop(missing_key)
+
+    with pytest.raises(KeyError, match=rf"ventkontur.*{shot_key}.*{missing_key}"):
+        _render_ventkontur(project, shot, assets)
+
+
+def test_ventkontur_rejects_other_projects_and_unknown_routes():
+    project = get_project("ventkontur")
+    other = get_project("dentalea")
+
+    with pytest.raises(KeyError, match="ventkontur renderer.*dentalea"):
+        _render_ventkontur(other, other.shots[0], _ventkontur_assets(project))
+
+    unknown = replace(project.shots[0], key="unknown")
+    with pytest.raises(ValueError, match="ventkontur.*unknown"):
+        _render_ventkontur(project, unknown, _ventkontur_assets(project))
+
+
+def test_ventkontur_has_industrial_geometry_and_meaningful_lower_bands():
+    project = get_project("ventkontur")
+    pages = {
+        shot.key: _render_ventkontur(project, shot, _ventkontur_assets(project))
+        for shot in project.shots
+    }
+    combined = "\n".join(page.html + page.css for page in pages.values()).casefold()
+
+    for fragment in (
+        "height: 1120px",
+        ".vk-utility-header",
+        ".vk-catalog-header",
+        ".vk-cover-products",
+        ".vk-catalog-comparison",
+        ".vk-selection-result",
+        ".vk-project-evidence",
+        ".vk-service-dispatch",
+    ):
+        assert fragment.casefold() in combined
+    for forbidden in (
+        "gradient",
+        "border-radius",
+        "overlay",
+        "localhost",
+        "lorem",
+        "никита тихомиров",
+    ):
+        assert forbidden not in combined
+
+
+def test_ventkontur_semantic_workflows_update_dependent_content_in_chrome(
+    chrome_browser,
+):
+    project = get_project("ventkontur")
+    assets = _ventkontur_assets(project)
+    shots = {shot.key: shot for shot in project.shots}
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        catalog = _render_ventkontur(project, shots["catalog"], assets)
+        page.set_content(
+            build_document(
+                project,
+                shots["catalog"],
+                catalog.html,
+                catalog.css,
+                catalog.scripts,
+            )
+        )
+        catalog_geometry = page.locator(".vk-page").bounding_box()
+        sectors = page.locator('[data-selectable="catalog-sector"]')
+        assert sectors.count() == 3
+        sectors.nth(2).click()
+        assert sectors.nth(2).get_attribute("aria-pressed") == "true"
+        assert page.locator(
+            '[data-selectable="catalog-sector"][aria-pressed="true"]'
+        ).count() == 1
+        assert "VK-HYG 30" in page.locator(".vk-catalog-table tbody").inner_text()
+        assert "Пищевые производства" in page.locator(
+            ".vk-catalog-comparison"
+        ).inner_text()
+        assert page.locator(".vk-page").bounding_box() == catalog_geometry
+
+        selection = _render_ventkontur(project, shots["selection"], assets)
+        page.set_content(
+            build_document(
+                project,
+                shots["selection"],
+                selection.html,
+                selection.css,
+                selection.scripts,
+            )
+        )
+        selection_geometry = page.locator(".vk-page").bounding_box()
+        duties = page.locator('[data-selectable="selection-duty"]')
+        assert duties.count() == 3
+        duties.nth(2).click()
+        assert duties.nth(2).get_attribute("aria-pressed") == "true"
+        page.locator("[data-airflow]").fill("26000")
+        page.locator("[data-pressure]").fill("980")
+        assert page.locator(".vk-selection-model").inner_text() == "VK-AHU 60"
+        result_text = page.locator(".vk-selection-result").inner_text()
+        assert "26 000 м³/ч" in result_text
+        assert "980 Па" in result_text
+        assert "Резерв по расходу 15%" in result_text
+        assert page.locator(".vk-page").bounding_box() == selection_geometry
+
+        projects = _render_ventkontur(project, shots["projects"], assets)
+        page.set_content(
+            build_document(
+                project,
+                shots["projects"],
+                projects.html,
+                projects.css,
+                projects.scripts,
+            )
+        )
+        sectors = page.locator('[data-selectable="project-sector"]')
+        assert sectors.count() == 3
+        sectors.nth(1).click()
+        assert sectors.nth(1).get_attribute("aria-pressed") == "true"
+        evidence = page.locator(".vk-project-evidence").inner_text()
+        assert "Фармацевтический корпус" in evidence
+        assert "ISO 8" in evidence
+        assert "48 точек контроля" in evidence
+
+        service = _render_ventkontur(project, shots["service"], assets)
+        page.set_content(
+            build_document(
+                project,
+                shots["service"],
+                service.html,
+                service.css,
+                service.scripts,
+            )
+        )
+        service_geometry = page.locator(".vk-page").bounding_box()
+        priorities = page.locator('[data-selectable="ticket-priority"]')
+        statuses = page.locator('[data-selectable="ticket-status"]')
+        assert priorities.count() == 3
+        assert statuses.count() == 3
+        priorities.nth(2).click()
+        statuses.nth(1).click()
+        ticket = page.locator(".vk-ticket-summary").inner_text()
+        dispatch = page.locator(".vk-service-dispatch").inner_text()
+        assert "Аварийная" in ticket
+        assert "SLA 2 часа" in ticket
+        assert "Бригада выехала" in dispatch
+        assert "ETA 14:30" in dispatch
+        assert statuses.nth(1).get_attribute("aria-pressed") == "true"
+        assert page.locator(".vk-page").bounding_box() == service_geometry
+    finally:
+        page.close()
+
+
+def test_ventkontur_computed_text_is_at_least_12px_and_canvas_is_stable_in_chrome(
+    chrome_browser,
+):
+    project = get_project("ventkontur")
+    assets = _ventkontur_assets(project)
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        for shot in project.shots:
+            rendered = _render_ventkontur(project, shot, assets)
+            page.set_content(
+                build_document(
+                    project,
+                    shot,
+                    rendered.html,
+                    rendered.css,
+                    rendered.scripts,
+                )
+            )
+            audit = page.locator(".vk-page").evaluate(
+                """root => {
+                  const box = root.getBoundingClientRect();
+                  const small = [...root.querySelectorAll('*')].filter((node) => {
+                    const style = getComputedStyle(node);
+                    const hasText = [...node.childNodes].some(
+                      (child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim()
+                    );
+                    return hasText && style.display !== 'none' &&
+                      style.visibility !== 'hidden' && parseFloat(style.fontSize) < 12;
+                  }).map((node) => ({text: node.textContent.trim(), size: getComputedStyle(node).fontSize}));
+                  return {
+                    width: box.width,
+                    height: box.height,
+                    scrollHeight: root.scrollHeight,
+                    small,
+                  };
+                }"""
+            )
+            assert audit["height"] == 1120
+            assert audit["scrollHeight"] == 1120
+            assert audit["small"] == []
+    finally:
+        page.close()
+
+
+def test_ventkontur_module_is_isolated_from_all_other_site_renderers():
+    project = get_project("ventkontur")
+    renderer = import_module("portfolio.kwork_pack.sites.ventkontur").render
+    _render_ventkontur(project, project.shots[0], _ventkontur_assets(project))
+    source = inspect.getsource(inspect.getmodule(renderer))
+    imported_modules = {
+        alias.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        node.module or ""
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom)
+    }
+
+    assert "def render" in source
+    assert "da-" not in source
+    assert "th-" not in source
+    assert not any(
+        name.endswith(
+            ("dentalea", "tochka_hoda", "commercial", "leadgen", "complex")
+        )
+        for name in imported_modules
+    )
