@@ -2,7 +2,21 @@
 
 ## Verdict
 
-CHANGES_REQUIRED
+APPROVED
+
+## Scoped Re-review
+
+Reviewed remediation commits `b94a1c9` and `28660f6`. All four original
+findings are resolved:
+
+- The migration fallback now catches `ModuleNotFoundError` only while resolving
+  the declared renderer; errors raised by the renderer callable propagate.
+- Dedicated renderers must return the production `RenderedPage` type, with a
+  project/module-aware `TypeError` for invalid results.
+- The mobile shell and its layout branch are removed; document output always
+  uses desktop browser chrome.
+- Tracked migration tests use `RenderedPage.html` and cover five routes with
+  the three explicitly temporary legacy variants. The tracked suite is green.
 
 ## Scope
 
@@ -10,9 +24,9 @@ Reviewed the Task 3 specification, implementation plan, brief, report,
 `e5dbdfa`, and the documentation commits `44e69bf` and `0690150` relative to
 `1de42be`. No source files were modified.
 
-## Findings
+## Original Findings
 
-### HIGH - Dedicated renderer execution can incorrectly fall back to legacy
+### RESOLVED HIGH - Dedicated renderer execution can incorrectly fall back to legacy
 
 **File:** `portfolio/kwork_pack/sites/__init__.py:83`
 
@@ -31,7 +45,7 @@ inside the narrow import `try`, then invoke it after the `except`. Add a test
 where the callable itself raises this exact exception and assert that it
 propagates without legacy dispatch.
 
-### MEDIUM - The promised `RenderedPage` result is not enforced
+### RESOLVED MEDIUM - The promised `RenderedPage` result is not enforced
 
 **Files:** `portfolio/kwork_pack/sites/__init__.py:84`,
 `tests/test_portfolio_site_registry.py:11`
@@ -47,7 +61,7 @@ Reproduced with an installed synthetic module returning `"plain string"`:
 `render_site` returned `str`. Use the real runtime type in positive tests and
 add a negative test with a diagnostic naming the project and module.
 
-### MEDIUM - Desktop-only is not an enforced shell contract
+### RESOLVED MEDIUM - Desktop-only is not an enforced shell contract
 
 **File:** `portfolio/kwork_pack/shell.py:34`
 
@@ -62,7 +76,7 @@ Reproduced by passing such a shot to `build_document`; the result contained
 layout explicitly, and add a negative contract test rather than testing only
 the current catalog's happy path.
 
-### MEDIUM - Task 3 leaves a newly broken tracked test and documents it as deferred
+### RESOLVED MEDIUM - Task 3 leaves a newly broken tracked test and documents it as deferred
 
 **Files:** `tests/test_portfolio_sites.py:328`,
 `.superpowers/sdd/2026-08-24-premium-kwork-portfolio-redesign/task-3-report.md:80`
@@ -97,17 +111,14 @@ but the new `RenderedPage` failure belongs directly to Task 3.
 ## Verification
 
 ```text
-python -m pytest tests/test_portfolio_site_registry.py tests/test_portfolio_render.py tests/test_portfolio_shell.py -q
-25 passed in 2.43s
+python -m pytest tests/test_portfolio_site_registry.py tests/test_portfolio_render.py tests/test_portfolio_shell.py tests/test_portfolio_sites.py -q
+90 passed in 2.61s
 
-python -m pytest tests/test_portfolio_catalog.py tests/test_portfolio_manifest.py tests/test_portfolio_quality.py tests/test_portfolio_validation.py -q
-40 passed in 16.97s
-
-tracked tests only: 504 passed, 16 failed in 28.53s
-python -m compileall -q portfolio/kwork_pack
-git diff --check 1de42be..0690150
+$trackedTests = git ls-files 'tests/test_*.py'; python -m pytest $trackedTests -q
+524 passed in 27.27s
 ```
 
-The ordinary full-suite command also discovered two unrelated untracked Task 4
-test files created during this review, so the recorded 504/16 result was run
-against the tracked test set only.
+The first combined target run had one Chrome startup `TargetClosedError`; the
+isolated real-Chrome rerun passed in 1.39s, and the complete target rerun above
+then passed. Uncommitted Task 4 files were not modified or included in the
+tracked test list.
