@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 from .assets import missing_assets
-from .catalog import PROJECTS
+from .catalog import PROJECTS, get_project
 from .domain_check import check_domain
 from .gallery import write_gallery
 from .manifest import write_manifests
@@ -21,6 +21,11 @@ def _add_output_argument(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=_DEFAULT_OUTPUT,
         help="Каталог ассетов и итоговых файлов",
+    )
+    parser.add_argument(
+        "--project",
+        choices=tuple(project.slug for project in PROJECTS),
+        help="Обработать только один проект",
     )
 
 
@@ -52,6 +57,11 @@ def _display_path(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+def _selected_projects(args: argparse.Namespace):
+    project_slug = getattr(args, "project", None)
+    return (get_project(project_slug),) if project_slug else PROJECTS
+
+
 def _run_domains(_args: argparse.Namespace) -> int:
     failed = False
     for project in PROJECTS:
@@ -74,8 +84,9 @@ def _run_domains(_args: argparse.Namespace) -> int:
 
 def _run_validate_assets(args: argparse.Namespace) -> int:
     root = Path(args.output)
-    missing = missing_assets(root, PROJECTS)
-    expected = sum(len(project.assets) for project in PROJECTS)
+    projects = _selected_projects(args)
+    missing = missing_assets(root, projects)
+    expected = sum(len(project.assets) for project in projects)
     for path in missing:
         print(f"Отсутствует ассет: {_display_path(path, root)}")
     print(f"Ассеты: {expected - len(missing)} из {expected}; отсутствуют: {len(missing)}")
@@ -83,14 +94,17 @@ def _run_validate_assets(args: argparse.Namespace) -> int:
 
 
 def _run_render(args: argparse.Namespace) -> int:
-    paths = render_all(PROJECTS, Path(args.output))
-    expected = sum(len(project.shots) for project in PROJECTS)
+    projects = _selected_projects(args)
+    paths = render_all(projects, Path(args.output))
+    expected = sum(len(project.shots) for project in projects)
     print(f"Отрендерено изображений: {len(paths)} из {expected}")
     return int(len(paths) != expected)
 
 
 def _run_manifest(args: argparse.Namespace) -> int:
-    json_path, csv_path = write_manifests(PROJECTS, Path(args.output))
+    json_path, csv_path = write_manifests(
+        _selected_projects(args), Path(args.output)
+    )
     print(f"Манифесты созданы: {json_path.name}, {csv_path.name}")
     return 0
 
@@ -116,7 +130,7 @@ def _russian_issue(issue: ValidationIssue) -> str:
 
 
 def _run_validate(args: argparse.Namespace) -> int:
-    report = validate_pack(PROJECTS, Path(args.output))
+    report = validate_pack(_selected_projects(args), Path(args.output))
     for issue in report.issues:
         print(
             f"[{issue.project_slug}] {issue.file}: {_russian_issue(issue)}"
@@ -128,7 +142,7 @@ def _run_validate(args: argparse.Namespace) -> int:
 
 
 def _run_gallery(args: argparse.Namespace) -> int:
-    gallery_path = write_gallery(PROJECTS, Path(args.output))
+    gallery_path = write_gallery(_selected_projects(args), Path(args.output))
     print(f"Галерея создана: {gallery_path}")
     return 0
 
