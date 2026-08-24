@@ -958,6 +958,333 @@ def test_doma_u_ozera_workflows_keep_availability_and_totals_consistent(chrome_b
         page.close()
 
 
+def test_doma_u_ozera_cover_dates_and_every_guest_option_reconcile(chrome_browser):
+    project = get_project("doma-u-ozera")
+    shot = next(shot for shot in project.shots if shot.key == "cover")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    expected_guests = {
+        "2": ("Дом «Берёзы»", "28 800 ₽"),
+        "4": ("Дом «Тихий берег»", "37 200 ₽"),
+        "6": ("Дом «Сосны»", "43 200 ₽"),
+        "8": ("Дом «Большая вода»", "52 800 ₽"),
+    }
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".du-page").bounding_box()
+        for guests, (house, total) in expected_guests.items():
+            page.locator(
+                f'[data-selectable="guest-count"][data-value="{guests}"]'
+            ).click()
+            assert house in page.locator("[data-cover-house]").inner_text()
+            assert total in page.locator("[data-cover-total]").inner_text()
+            assert f"{guests} гост" in page.locator("[data-cover-summary]").inner_text()
+
+        page.locator('[data-selectable="guest-count"][data-value="6"]').click()
+        page.locator("[data-cover-arrival]").fill("2026-09-14")
+        page.locator("[data-cover-departure]").fill("2026-09-17")
+        assert "14–17 сентября" in page.locator("[data-cover-summary]").inner_text()
+        assert "3 ночи" in page.locator("[data-cover-summary]").inner_text()
+        assert page.locator("[data-cover-total]").inner_text() == "64 800 ₽"
+
+        page.locator("[data-cover-arrival]").fill("2026-09-20")
+        page.locator("[data-cover-departure]").fill("2026-09-18")
+        assert page.locator("[data-cover-departure]").input_value() == "2026-09-21"
+        assert "Дата выезда исправлена" in page.locator("[data-cover-date-state]").inner_text()
+        assert "1 ночь" in page.locator("[data-cover-summary]").inner_text()
+        assert page.locator("[data-cover-total]").inner_text() == "21 600 ₽"
+        assert page.locator(".du-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_doma_u_ozera_sauna_packages_and_guest_capacity_replace_full_state(chrome_browser):
+    project = get_project("doma-u-ozera")
+    shot = next(shot for shot in project.shots if shot.key == "sauna-house")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    expected_packages = {
+        "quiet": ("Тихие будни", "4 гостя", "43 200 ₽", "сауна 3 часа"),
+        "base": ("Дом и сауна", "6 гостей", "48 000 ₽", "сауна 6 часов"),
+        "sauna-plus": (
+            "Сауна без ограничений",
+            "6 гостей",
+            "52 800 ₽",
+            "сауна без ограничений",
+        ),
+    }
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".du-page").bounding_box()
+        for value, expected in expected_packages.items():
+            page.locator(
+                f'[data-selectable="stay-package"][data-value="{value}"]'
+            ).click()
+            state = " | ".join(
+                (
+                    page.locator("[data-stay-summary]").inner_text(),
+                    page.locator("[data-stay-capacity]").inner_text(),
+                    page.locator("[data-stay-total]").inner_text(),
+                    page.locator("[data-stay-sauna]").inner_text(),
+                )
+            ).casefold()
+            assert all(fragment.casefold() in state for fragment in expected)
+
+        page.locator('[data-selectable="stay-package"][data-value="quiet"]').click()
+        page.locator("[data-stay-guests]").fill("9")
+        assert page.locator("[data-stay-guests]").input_value() == "4"
+        assert "Ограничено вместимостью пакета" in page.locator("[data-stay-guest-state]").inner_text()
+        page.locator("[data-stay-guests]").fill("0")
+        assert page.locator("[data-stay-guests]").input_value() == "1"
+        assert "1 гость" in page.locator("[data-stay-summary]").inner_text()
+        assert page.locator(".du-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_doma_u_ozera_search_filter_combinations_match_rows_and_totals(chrome_browser):
+    project = get_project("doma-u-ozera")
+    shot = next(shot for shot in project.shots if shot.key == "search")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    cases = (
+        (2, "all", False, False, 6),
+        (4, "2", False, False, 5),
+        (6, "all", False, True, 3),
+        (6, "3", False, True, 3),
+        (6, "3", True, True, 2),
+        (8, "all", True, True, 1),
+        (8, "3", False, False, 1),
+    )
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".du-page").bounding_box()
+        guests = page.locator("[data-search-guests]")
+        bedrooms = page.locator("[data-search-bedrooms]")
+        sauna = page.locator('[data-search-filter="sauna"]')
+        pets = page.locator('[data-search-filter="pets"]')
+        for guest_count, bedroom_count, sauna_only, pets_only, expected_count in cases:
+            guests.fill(str(guest_count))
+            bedrooms.select_option(bedroom_count)
+            sauna.set_checked(sauna_only)
+            pets.set_checked(pets_only)
+            rows = page.locator('[data-house-row][data-visible="true"]')
+            summary = page.locator("[data-search-summary]").inner_text().casefold()
+            assert rows.count() == expected_count
+            assert page.locator("[data-search-count]").inner_text() == (
+                f"{expected_count} дом" if expected_count == 1 else
+                f"{expected_count} дома" if expected_count in (2, 3, 4) else
+                f"{expected_count} домов"
+            )
+            assert f"{guest_count} гост" in summary
+            assert ("с сауной" in summary) == sauna_only
+            assert ("с питомцем" in summary) == pets_only
+            for index in range(rows.count()):
+                row = rows.nth(index)
+                assert int(row.get_attribute("data-capacity")) >= guest_count
+                if bedroom_count != "all":
+                    assert int(row.get_attribute("data-bedrooms")) >= int(bedroom_count)
+                if sauna_only:
+                    assert row.get_attribute("data-sauna") == "true"
+                if pets_only:
+                    assert row.get_attribute("data-pets") == "true"
+                nightly = int(row.get_attribute("data-nightly"))
+                total = int("".join(filter(str.isdigit, row.locator("[data-row-total]").inner_text())))
+                assert total == nightly * 2
+
+        page.locator("[data-search-arrival]").fill("2026-09-18")
+        page.locator("[data-search-departure]").fill("2026-09-21")
+        assert "3 ночи" in page.locator("[data-search-summary]").inner_text()
+        assert page.locator('[data-house-row][data-visible="true"]').count() == 1
+        visible = page.locator('[data-house-row][data-visible="true"]').first
+        nightly = int(visible.get_attribute("data-nightly"))
+        total = int("".join(filter(str.isdigit, visible.locator("[data-row-total]").inner_text())))
+        assert total == nightly * 3
+
+        guests.evaluate(
+            "element => { element.value = 'abc'; element.dispatchEvent(new Event('input', { bubbles: true })); }"
+        )
+        assert guests.input_value() == "1"
+        page.locator("[data-search-arrival]").fill("2026-09-22")
+        page.locator("[data-search-departure]").fill("2026-09-20")
+        assert page.locator("[data-search-departure]").input_value() == "2026-09-23"
+        assert "Порядок дат исправлен" in page.locator("[data-search-date-state]").inner_text()
+        assert page.locator(".du-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_doma_u_ozera_calendar_ranges_house_prices_and_invalid_order(chrome_browser):
+    project = get_project("doma-u-ozera")
+    shot = next(shot for shot in project.shots if shot.key == "calendar")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".du-page").bounding_box()
+        enabled_dates = page.locator("[data-calendar-date]:not([disabled])")
+        assert enabled_dates.count() >= 8
+        for index in range(enabled_dates.count()):
+            button = enabled_dates.nth(index)
+            value = button.get_attribute("data-calendar-date")
+            button.click()
+            assert value in page.locator("[data-calendar-iso-state]").inner_text()
+
+        _open(page, project, shot)
+        geometry = page.locator(".du-page").bounding_box()
+        page.locator('[data-calendar-date="2026-09-16"]').click()
+        page.locator('[data-calendar-date="2026-09-14"]').click()
+        summary = page.locator("[data-calendar-summary]").inner_text()
+        assert "14–16 сентября" in summary
+        assert "2 ночи" in summary
+        assert "43 200 ₽" in summary
+        assert "Порядок дат исправлен" in page.locator("[data-calendar-state]").inner_text()
+
+        page.locator("[data-calendar-house]").select_option("sauna")
+        summary = page.locator("[data-calendar-summary]").inner_text()
+        assert "Дом с сауной" in summary
+        assert "48 000 ₽" in summary
+        assert page.locator('[data-calendar-date="2026-09-18"]').is_disabled()
+
+        page.locator("[data-calendar-house]").select_option("prichal")
+        assert "Дом «Причал»" in page.locator("[data-calendar-summary]").inner_text()
+        assert "39 600 ₽" in page.locator("[data-calendar-summary]").inner_text()
+        assert page.locator(".du-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_doma_u_ozera_booking_reconciles_dates_house_extras_contact_and_consent(chrome_browser):
+    project = get_project("doma-u-ozera")
+    shot = next(shot for shot in project.shots if shot.key == "booking")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        _open(page, project, shot)
+        geometry = page.locator(".du-page").bounding_box()
+        page.locator("[data-booking-house]").select_option("sauna")
+        page.locator("[data-booking-arrival]").fill("2026-09-14")
+        page.locator("[data-booking-departure]").fill("2026-09-17")
+        page.locator("[data-booking-guests]").fill("9")
+        assert page.locator("[data-booking-guests]").input_value() == "6"
+        assert "Дом с сауной" in page.locator("[data-booking-summary]").inner_text()
+        assert "3 ночи" in page.locator("[data-booking-summary]").inner_text()
+        assert "6 гостей" in page.locator("[data-booking-summary]").inner_text()
+        assert page.locator("[data-booking-stay]").inner_text() == "72 000 ₽"
+
+        expected_extras = {
+            "sauna": "4 800 ₽",
+            "breakfast": "2 400 ₽",
+            "canoe": "1 200 ₽",
+        }
+        for extra, amount in expected_extras.items():
+            page.locator(f'[data-booking-extra="{extra}"]').check()
+            assert amount in page.locator(f'[data-booking-extra-part="{extra}"]').inner_text()
+        assert page.locator("[data-booking-total]").inner_text() == "80 400 ₽"
+        assert page.locator("[data-booking-deposit]").inner_text() == "24 120 ₽"
+
+        page.locator("[data-booking-arrival]").fill("2026-09-24")
+        page.locator("[data-booking-departure]").fill("2026-09-22")
+        assert page.locator("[data-booking-departure]").input_value() == "2026-09-25"
+        assert "Порядок дат исправлен" in page.locator("[data-booking-date-state]").inner_text()
+
+        submit = page.locator("[data-booking-submit]")
+        assert submit.is_disabled()
+        page.locator("[data-booking-name]").fill("Анна Петрова")
+        page.locator("[data-booking-phone]").fill("+7 999 123-45-67")
+        page.locator("[data-booking-email]").fill("anna@example.ru")
+        assert "Контакты заполнены" in page.locator("[data-contact-state]").inner_text()
+        assert submit.is_disabled()
+        page.locator("[data-booking-consent]").check()
+        assert "Согласие получено" in page.locator("[data-consent-state]").inner_text()
+        assert submit.is_enabled()
+        submit.click()
+        assert "Бронь готова к оплате" in page.locator("[data-booking-result]").inner_text()
+        assert page.locator(".du-page").bounding_box() == geometry
+    finally:
+        page.close()
+
+
+def test_doma_u_ozera_header_rails_and_content_never_overlap(chrome_browser):
+    project = get_project("doma-u-ozera")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        for shot in project.shots:
+            _open(page, project, shot)
+            root = page.locator(".du-page").bounding_box()
+            viewport = page.locator(".browser-viewport").bounding_box()
+            header = page.locator(".du-header").bounding_box()
+            route = page.locator(".du-route").bounding_box()
+            nav = page.locator(".du-nav")
+            nav_size = nav.evaluate(
+                "el => ({clientWidth: el.clientWidth, scrollWidth: el.scrollWidth})"
+            )
+            rail = page.locator("[data-primary-rail]").bounding_box()
+            content = page.locator("[data-primary-content]").bounding_box()
+            lower = page.locator('[data-lower-band="true"]').bounding_box()
+
+            assert header["y"] + header["height"] <= route["y"]
+            assert nav_size["scrollWidth"] <= nav_size["clientWidth"]
+            assert rail["x"] + rail["width"] <= content["x"]
+            assert route["x"] >= root["x"]
+            assert route["x"] + route["width"] <= root["x"] + root["width"]
+            assert root["x"] >= viewport["x"]
+            assert root["x"] + root["width"] <= viewport["x"] + viewport["width"]
+            assert lower["y"] >= route["y"]
+            assert lower["y"] + lower["height"] <= root["y"] + root["height"] + 1
+
+            if shot.key == "search":
+                row_overflow = page.locator(
+                    '.du-house-rows article[data-visible="true"]'
+                ).evaluate_all(
+                    """
+                    rows => rows.map((row) => {
+                      const rowRight = row.getBoundingClientRect().right;
+                      return Math.max(
+                        ...[...row.children].map(
+                          (child) => child.getBoundingClientRect().right - rowRight
+                        )
+                      );
+                    })
+                    """
+                )
+                assert max(row_overflow, default=0) <= 1
+    finally:
+        page.close()
+
+
+def test_doma_u_ozera_visible_semantic_text_is_at_least_twelve_pixels(chrome_browser):
+    project = get_project("doma-u-ozera")
+    page = chrome_browser.new_page(viewport={"width": 1920, "height": 1280})
+    try:
+        for shot in project.shots:
+            _open(page, project, shot)
+            violations = page.locator(".du-page").evaluate(
+                """
+                root => [...root.querySelectorAll('*')]
+                  .filter((element) => {
+                    const style = getComputedStyle(element);
+                    const directText = [...element.childNodes].some(
+                      (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()
+                    );
+                    const control = element.matches('button, input, select');
+                    const visible = element.getClientRects().length > 0
+                      && style.display !== 'none'
+                      && style.visibility !== 'hidden'
+                      && Number(style.opacity) > 0;
+                    return visible
+                      && (directText || control)
+                      && !element.matches('script, style, option')
+                      && Number.parseFloat(style.fontSize) < 12;
+                  })
+                  .map((element) => ({
+                    tag: element.tagName.toLowerCase(),
+                    className: element.className || '',
+                    text: (element.innerText || element.value || '').trim().slice(0, 80),
+                    fontSize: getComputedStyle(element).fontSize,
+                  }))
+                """
+            )
+            assert violations == [], f"{shot.key}: {violations}"
+    finally:
+        page.close()
+
+
 def test_praktika_workflows_update_learning_plan_and_completion(chrome_browser):
     project = get_project("praktika")
     shots = {shot.key: shot for shot in project.shots}
