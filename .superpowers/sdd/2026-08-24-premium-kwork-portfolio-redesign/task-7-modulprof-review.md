@@ -113,3 +113,100 @@ exit 0
 ```
 
 The automated suites pass, but the independent Chrome combinations above demonstrate missing assertions and production-visible contract failures. Both mandatory verdicts therefore fail.
+
+## Fix round 1
+
+### Scope and verdict
+
+- Re-reviewed only the four original findings against production/test changes in `bd7c9b8..5482161`.
+- No unrelated findings were introduced; regression review was limited to the touched Modulprof behavior and layout.
+- **SPEC COMPLIANCE: PASS**
+- **TASK QUALITY: PASS**
+- **FIX ROUND 1: APPROVED**
+
+All four original findings are closed, and no patch regression was found.
+
+### Closure evidence
+
+#### Original P1: catalog rows did not follow filters - CLOSED
+
+The catalog now renders row-owned purpose, area-group, base-term, and visibility data at `portfolio/kwork_pack/sites/modulprof.py:152`. The update flow at `portfolio/kwork_pack/sites/modulprof.py:477` filters that ledger, updates every visible row's readiness/term, derives the reported count from the visible rows, and derives selected model/detail from the first visible row.
+
+Independent Chrome review exercised all 27 purpose/area/readiness combinations. Result: **27/27 passed**. In every state:
+
+- reported count equaled visible row count and remained non-zero;
+- every row matched the selected purpose and requested area group;
+- row readiness, selected readiness, and summary readiness agreed;
+- selected model code/name came from the first visible row;
+- `.mp-page` geometry remained unchanged.
+
+Dedicated regression coverage is present at `tests/test_portfolio_product_systems_v2.py:752`.
+
+#### Original P1: project count/detail did not reconcile with rows - CLOSED
+
+Every project row now owns its name, city, area, installation, logistics, and date facts at `portfolio/kwork_pack/sites/modulprof.py:329`. The update flow at `portfolio/kwork_pack/sites/modulprof.py:625` derives both count and all detail fields from the filtered row set and its first row.
+
+Independent Chrome review exercised all 12 sector/region combinations. Result: **12/12 passed**. Counts matched visible rows in every state; selected name/city, area, installation, logistics, and date exactly matched the first visible row. The former `social + volga` mismatch now consistently resolves to `Амбулатория · Ульяновск`.
+
+Dedicated regression coverage is present at `tests/test_portfolio_product_systems_v2.py:798`.
+
+#### Original P2: visible operational text below 12px - CLOSED
+
+The affected brand, heading metadata, metrics, rail labels, field labels, catalog labels, specification headers, and project ledger labels/statuses are set to 12px or larger across `portfolio/kwork_pack/sites/modulprof.py:377` through `portfolio/kwork_pack/sites/modulprof.py:417`.
+
+Computed-style inspection in Chrome found **zero visible operational text elements below 12px** on all five routes. The larger text introduced no header, rail, table, or lower-band clipping and no sibling overlap. Dedicated regression coverage is present at `tests/test_portfolio_product_systems_v2.py:842`.
+
+#### Original P2: dimensions silently clamped away from visible fields - CLOSED
+
+Dimension normalization at `portfolio/kwork_pack/sites/modulprof.py:527` now parses, rounds, clamps, and writes the normalized value back to the visible input before calculating area, totals, and parts.
+
+Independent Chrome cases all passed:
+
+| Raw length × width | Visible normalized fields | Calculated area |
+| --- | --- | ---: |
+| `31 × 13` | `30 × 12` | 360 m² |
+| `5 × 5` | `6 × 6` | 36 m² |
+| blank × blank | `6 × 6` | 36 m² |
+| `7.5 × 6.5` | `8 × 7` | 56 m² |
+| non-numeric × non-numeric | `6 × 6` | 36 m² |
+| non-finite × non-finite | `6 × 6` | 36 m² |
+
+For all cases, the visible fields matched the area used in the summary, summary total matched the displayed total, and all eight parts summed to both displayed totals. Geometry remained stable. Dedicated regression coverage is present at `tests/test_portfolio_product_systems_v2.py:879`.
+
+### Chrome and geometry evidence
+
+- Environment: installed Google Chrome `151.0.0.0`, Playwright `channel="chrome"`, viewport 1920 × 1280.
+- All five `.mp-page` roots remained exactly 1920 × 1120.
+- Header and route content remained separated; work-surface sibling overlap count was zero on every route.
+- Computed visible operational text minimum was 12px on every route, with zero violations.
+- Each meaningful lower band remained 318px high, reached the bottom quarter, and contained 291-433 characters of route-specific content.
+- No visible text/content clipping was found. The configurator's eight specification rows and final row values remain fully inside the lower band.
+
+### Fresh visual evidence
+
+All five freshly rendered originals were inspected at original resolution. Each is 1920 × 1280 RGB:
+
+- `01-cover.png`: larger labels remain contained; header, offer rails, image stage, and lower families are unchanged geometrically.
+- `02-catalog.png`: the new nine-row default ledger fits the work surface without clipping and agrees with the default `9 решений` state.
+- `03-configurator.png`: 12px labels and specification headings remain readable; all eight part rows and totals are visible through the bottom edge.
+- `04-comparison.png`: larger operational labels preserve package/result alignment and lower standards content.
+- `05-projects.png`: eight default logistics rows, `8 проектов`, and selected first-row detail agree and fit without clipping.
+
+### Verification
+
+```text
+python -m pytest tests/test_portfolio_product_systems_v2.py -k modulprof -q
+14 passed, 25 deselected in 9.01s
+
+python -m pytest tests/test_portfolio_quality.py -q
+9 passed in 0.32s
+
+python -m py_compile portfolio/kwork_pack/sites/modulprof.py tests/test_portfolio_product_systems_v2.py
+exit 0
+
+python -m portfolio.kwork_pack.cli validate --output artifacts/kwork-portfolio-v2 --project modulprof
+Checked files: 5; issues: 0
+
+Independent Chrome matrix
+catalog 27/27; projects 12/12; dimension edge cases 6/6; failures 0
+```
