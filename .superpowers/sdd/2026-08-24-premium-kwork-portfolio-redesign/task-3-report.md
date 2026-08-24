@@ -2,9 +2,10 @@
 
 ## Status
 
-Implementation is complete locally. The dedicated renderer runtime, browser
-shell handoff, and five-desktop-shot tests are committed in `e5dbdfa`.
-Publication is blocked by rejected GitHub credentials.
+Implementation and review remediation are complete locally. The dedicated
+renderer runtime and shell handoff are committed in `e5dbdfa`; the review
+fixes are committed in `b94a1c9`. Publication remains blocked by rejected
+GitHub credentials.
 
 ## Files Changed
 
@@ -18,6 +19,16 @@ Publication is blocked by rejected GitHub credentials.
 
 No legacy site module, generated artifact, design inventory, or Kwork state
 was modified.
+
+Review remediation additionally changed:
+
+- `portfolio/kwork_pack/sites/__init__.py`
+- `portfolio/kwork_pack/shell.py`
+- `tests/test_portfolio_site_registry.py`
+- `tests/test_portfolio_shell.py`
+- `tests/test_portfolio_sites.py`
+
+The current uncommitted Task 4 files were not modified or staged.
 
 ## RED Evidence
 
@@ -70,22 +81,52 @@ harness passed in `CLOUD_ONLY` mode.
 - Shell tests assert page-owned CSS plus trusted scripts after page markup.
 - No user data is added to raw script text.
 
-## Full Suite Concern
+## Review Remediation
+
+The independent review identified four migration gaps. Each received a
+test-first fix:
+
+- The fallback `try` now wraps only `get_renderer(project)`. A
+  `ModuleNotFoundError` raised by the dedicated callable itself propagates and
+  cannot select a legacy renderer.
+- `render_site` requires an actual `RenderedPage` from a dedicated renderer.
+  A wrong return type raises `TypeError` with the project and declared module.
+- The mobile shell function and layout branch are removed. `build_document`
+  always renders desktop browser chrome, including for an externally
+  constructed legacy mobile shot.
+- Legacy direct renderer tests now assert five declared routes with three
+  temporary legacy variants. The semantic-asset migration test reads
+  `RenderedPage.html` and uses a project without a dedicated module.
+
+Review RED evidence:
 
 ```text
-python -m pytest -q
-504 passed, 16 failed in 27.36s
+python -m pytest tests/test_portfolio_site_registry.py tests/test_portfolio_shell.py tests/test_portfolio_sites.py -q
+4 failed, 74 passed
 ```
 
-All 16 failures are in the unchanged `tests/test_portfolio_sites.py`: 15 still
-assert four legacy renderer variants even though Task 1 defines five routes,
-and one still expects `render_site` to return a string. They are intentionally
-deferred because this task must not modify legacy site-specific renderers or
-their transition tests.
+Review GREEN evidence:
+
+```text
+python -m pytest tests/test_portfolio_site_registry.py tests/test_portfolio_shell.py tests/test_portfolio_sites.py -q
+78 passed in 0.18s
+
+python -m pytest tests/test_portfolio_catalog.py tests/test_portfolio_manifest.py tests/test_portfolio_quality.py tests/test_portfolio_validation.py -q
+40 passed in 16.46s
+
+$trackedTests = git ls-files 'tests/test_*.py'; python -m pytest @trackedTests -q
+exit code 0
+```
+
+`python -m compileall -q portfolio/kwork_pack`, `git diff --check`, and the
+global smoke harness also passed. One parallel Playwright driver startup
+closed before test execution; its isolated rerun passed in 1.63 seconds.
 
 ## Commit
 
 `e5dbdfa` - `refactor: isolate portfolio site renderers`
+
+`b94a1c9` - `fix: harden portfolio renderer migration`
 
 ## Publication Concern
 
