@@ -143,26 +143,52 @@ def test_flagship_detail_routes_keep_the_premium_information_density():
     assert 'class="th-finding-copy"' in case_study
     assert 'class="th-repair-proof"' in case_study
     assert "Контрольный замер" in case_study
+    assert 'class="th-control-drive"' in case_study
+    assert "Контрольный заезд" in case_study
+
+    booking = pages["booking"].html
+    assert "Предпочтительный способ связи" in booking
+    assert "Данные хранятся в защищённой CRM" in booking
+
+    prices = pages["prices"].html
+    assert "Диагностика в подарок" in prices
+    assert "4 проверенных поставщика" in prices
 
     prices_css = pages["prices"].css
     assert ".th-prices-title { height: 132px;" in prices_css
     assert ".th-prices-main" in prices_css
     assert "height: 590px" in prices_css
+    assert "linear-gradient" not in prices_css
+    assert ".th-result-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px;" in prices_css
+    assert ".th-contact-list { display: grid; gap: 8px; margin-top: 12px; font-size: 12px;" in prices_css
+
+
+def test_flagship_selectable_controls_are_semantic_buttons():
+    project = get_project("tochka-hoda")
+    pages = {
+        shot.key: render(project, shot, _assets(project)).html
+        for shot in project.shots
+    }
+
+    assert '<button type="button" class="th-package' in pages["diagnostics"]
+    assert '<button type="button" class="th-category' in pages["prices"]
+    assert '<div class="th-package active" data-selectable=' not in pages["diagnostics"]
+    assert '<div class="th-category active" data-selectable=' not in pages["prices"]
 
 
 def test_flagship_interactive_choices_change_selected_state_in_chrome():
     project = get_project("tochka-hoda")
     scenarios = (
-        ("diagnostics", 'package', 1),
-        ("booking", 'time', 2),
-        ("prices", 'category', 3),
+        ("diagnostics", 'package', 1, ".th-package-price", "1 990 ₽"),
+        ("booking", 'time', 2, ".th-summary-date", "16:30"),
+        ("prices", 'category', 3, ".th-table-panel h2", "Ходовая"),
     )
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="chrome", headless=True)
         page = browser.new_page(viewport={"width": 1920, "height": 1280})
         try:
-            for shot_key, group, selected_index in scenarios:
+            for shot_key, group, selected_index, target, expected_text in scenarios:
                 shot = next(item for item in project.shots if item.key == shot_key)
                 rendered = render(project, shot, _assets(project))
                 page.set_content(
@@ -182,6 +208,18 @@ def test_flagship_interactive_choices_change_selected_state_in_chrome():
                     "active" in (choices.nth(index).get_attribute("class") or "")
                     for index in range(choices.count())
                 ) == 1
+                assert choices.nth(selected_index).get_attribute("aria-pressed") == "true"
+                assert all(
+                    choices.nth(index).get_attribute("aria-pressed") == "false"
+                    for index in range(choices.count())
+                    if index != selected_index
+                )
+                assert expected_text in page.locator(target).inner_text()
+
+                if shot_key == "prices":
+                    assert "Диагностика подвески" in page.locator(
+                        ".th-price-table tbody"
+                    ).inner_text()
         finally:
             page.close()
             browser.close()

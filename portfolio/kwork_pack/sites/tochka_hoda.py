@@ -37,7 +37,7 @@ _CSS = r"""
 .th-page button,
 .th-page input,
 .th-page select { font: inherit; }
-.th-page button { cursor: default; }
+.th-page button { cursor: pointer; }
 .th-page h1,
 .th-page h2,
 .th-page h3,
@@ -173,16 +173,6 @@ _CSS = r"""
 }
 .th-offer-note { grid-column: 1 / -1; margin-top: 15px; color: #979ba2; font-size: 13px; }
 .th-home-photo { position: relative; overflow: hidden; background: #f2f3f4; }
-.th-home-photo::before {
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 90px;
-  background: linear-gradient(90deg, #ffffff, rgba(255,255,255,0));
-  content: "";
-}
 .th-home-photo img { width: 100%; height: 100%; object-fit: cover; object-position: 54% center; }
 .th-trust-row {
   position: absolute;
@@ -202,7 +192,7 @@ _CSS = r"""
 .th-trust-item span { color: var(--th-muted); font-size: 12px; }
 .th-home-services { height: 404px; padding: 33px 78px 26px; border-top: 1px solid #eceef0; }
 .th-home-services-head { text-align: center; }
-.th-home-services-head span { color: var(--th-red); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.th-home-services-head span { color: var(--th-red); font-size: 12px; font-weight: 800; text-transform: uppercase; }
 .th-home-services-head h2 { margin-top: 7px; font-size: 30px; text-transform: uppercase; }
 .th-service-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 34px; margin-top: 27px; }
 .th-service-item { min-height: 180px; padding-top: 19px; border-top: 3px solid var(--th-red); }
@@ -234,15 +224,19 @@ _CSS = r"""
   display: grid;
   grid-template-columns: 48px 1fr;
   align-items: center;
+  width: 100%;
   min-height: 80px;
   padding: 11px 14px;
+  border: 0;
   border-bottom: 1px solid #e5e6e9;
   background: #ffffff;
+  color: var(--th-ink);
+  text-align: left;
 }
 .th-package:last-child { border-bottom: 0; }
 .th-package.active { box-shadow: inset 3px 0 var(--th-red); background: #fffafa; }
 .th-package strong { display: block; font-size: 14px; }
-.th-package span { display: block; color: var(--th-muted); font-size: 11px; }
+.th-package > span:last-child > span { display: block; color: var(--th-muted); font-size: 12px; }
 .th-package-detail { padding: 20px 24px; }
 .th-check-list { display: grid; gap: 12px; }
 .th-check-line { display: flex; align-items: center; gap: 10px; color: #4f535b; font-size: 13px; }
@@ -258,7 +252,7 @@ _CSS = r"""
 }
 .th-package-total strong { color: var(--th-red); font-size: 24px; }
 .th-diagnostic-action { display: flex; align-items: center; gap: 18px; margin-top: 14px; }
-.th-diagnostic-action span { color: var(--th-muted); font-size: 11px; }
+.th-diagnostic-action span { color: var(--th-muted); font-size: 12px; }
 .th-diagnostic-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .th-proof-strip {
   display: grid;
@@ -271,15 +265,15 @@ _CSS = r"""
 .th-proof-item { display: flex; align-items: center; gap: 12px; padding: 0 16px; border-right: 1px solid var(--th-line); }
 .th-proof-item:last-child { border-right: 0; }
 .th-proof-item strong { display: block; font-size: 12px; }
-.th-proof-item span { display: block; color: var(--th-muted); font-size: 10px; }
+.th-proof-item span { display: block; color: var(--th-muted); font-size: 12px; }
 .th-diagnostic-checklist { height: 436px; padding: 24px 58px; }
 .th-diagnostic-checklist h2 { font-size: 28px; }
 .th-diagnostic-checklist > p { margin-top: 3px; color: var(--th-muted); font-size: 13px; }
 .th-check-columns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 15px; }
 .th-check-group { min-height: 300px; padding: 15px 18px; border: 1px solid var(--th-line); border-radius: 5px; }
 .th-check-group h3 { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; font-size: 14px; }
-.th-check-count { display: grid; width: 25px; height: 25px; place-items: center; border: 1px solid var(--th-line); border-radius: 50%; color: var(--th-muted); font-size: 10px; font-weight: 700; }
-.th-check-group ol { margin: 12px 0 0; padding-left: 20px; color: #555a62; font-size: 11px; line-height: 1.55; }
+.th-check-count { display: grid; width: 25px; height: 25px; place-items: center; border: 1px solid var(--th-line); border-radius: 50%; color: var(--th-muted); font-size: 12px; font-weight: 700; }
+.th-check-group ol { margin: 12px 0 0; padding-left: 20px; color: #555a62; font-size: 12px; line-height: 1.55; }
 
 .th-booking-title { height: 96px; padding: 18px 58px 0; }
 .th-booking-title h1 { margin-top: 8px; font-size: 38px; }
@@ -296,7 +290,7 @@ _CSS = r"""
 .th-step-label { display: grid; grid-template-columns: 42px 1fr; align-content: start; padding-top: 14px; }
 .th-step-number { color: var(--th-red); font-size: 27px; font-weight: 800; }
 .th-step-label strong { display: block; font-size: 17px; }
-.th-step-label span { display: block; margin-top: 4px; color: var(--th-muted); font-size: 11px; }
+.th-step-label span { display: block; margin-top: 4px; color: var(--th-muted); font-size: 12px; }
 .th-step-content { align-self: stretch; padding: 14px 18px; border: 1px solid var(--th-line); border-radius: 4px; }
 .th-selected-row { display: flex; align-items: center; justify-content: space-between; height: 100%; }
 .th-selected-main { display: flex; align-items: center; gap: 16px; }
@@ -308,7 +302,7 @@ _CSS = r"""
 .th-calendar { padding-right: 20px; border-right: 1px solid var(--th-line); }
 .th-calendar-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; }
 .th-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-top: 8px; text-align: center; }
-.th-calendar-grid span { display: flex; align-items: center; justify-content: center; height: 21px; font-size: 10px; }
+.th-calendar-grid span { display: flex; align-items: center; justify-content: center; height: 21px; font-size: 12px; }
 .th-calendar-grid .muted { color: #b1b4b9; }
 .th-calendar-grid .selected { width: 24px; margin: 0 auto; border-radius: 50%; background: var(--th-red); color: #ffffff; font-weight: 800; }
 .th-time-panel { padding-left: 22px; }
@@ -317,9 +311,19 @@ _CSS = r"""
 .th-time { height: 44px; border: 1px solid var(--th-line); border-radius: 4px; background: #ffffff; font-size: 17px; }
 .th-time.active { border-color: var(--th-red); color: var(--th-red); font-weight: 800; }
 .th-contact-fields { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 12px; }
-.th-field label { display: block; color: var(--th-muted); font-size: 10px; }
+.th-field label { display: block; color: var(--th-muted); font-size: 12px; }
 .th-field div { height: 38px; margin-top: 5px; padding: 9px 12px; border: 1px solid var(--th-line); border-radius: 3px; font-size: 12px; }
-.th-consent { margin-top: 11px; color: var(--th-muted); font-size: 10px; }
+.th-contact-meta { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; margin-top: 14px; }
+.th-contact-preference strong { display: block; font-size: 12px; }
+.th-contact-options { display: flex; gap: 8px; margin-top: 8px; }
+.th-contact-option { min-height: 34px; padding: 0 14px; border: 1px solid var(--th-line); border-radius: 3px; background: #ffffff; color: #4f5359; font-size: 12px; }
+.th-contact-option.active { border-color: var(--th-red); color: var(--th-red); font-weight: 700; }
+.th-data-note { display: grid; grid-template-columns: 30px 1fr; gap: 9px; align-items: center; padding: 9px 11px; background: #f7f8f9; }
+.th-data-note .lucide-icon { color: var(--th-red); }
+.th-data-note strong { display: block; font-size: 12px; }
+.th-data-note span { display: block; margin-top: 2px; color: var(--th-muted); font-size: 11px; }
+.th-consent { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: var(--th-muted); font-size: 12px; }
+.th-consent input { width: 15px; height: 15px; accent-color: var(--th-red); }
 .th-order-summary { align-self: start; padding: 18px; border: 1px solid var(--th-line); border-radius: 5px; }
 .th-order-summary img { width: 100%; height: 180px; object-fit: cover; border-radius: 3px; }
 .th-order-summary h2 { margin-top: 14px; font-size: 16px; }
@@ -343,12 +347,12 @@ _CSS = r"""
 .th-flow-item::before { position: absolute; top: 8px; right: 0; left: 0; height: 1px; background: #d4d6d9; content: ""; }
 .th-flow-item b { position: absolute; z-index: 1; top: -2px; left: calc(50% - 11px); display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; background: var(--th-red); color: #ffffff; font-size: 10px; }
 .th-flow-item strong { display: block; margin-top: 7px; font-size: 12px; }
-.th-flow-item span { display: block; margin-top: 5px; color: var(--th-muted); font-size: 9px; }
+.th-flow-item span { display: block; margin-top: 5px; color: var(--th-muted); font-size: 12px; }
 .th-note-column { padding: 20px 22px; border-right: 1px solid var(--th-line); }
 .th-note-column:last-child { border-right: 0; }
 .th-note-column h3 { font-size: 14px; }
 .th-note-column ul { margin: 14px 0 0; padding: 0; list-style: none; }
-.th-note-column li { margin-top: 11px; padding-left: 18px; color: #656a72; font-size: 10px; }
+.th-note-column li { margin-top: 11px; padding-left: 18px; color: #656a72; font-size: 12px; }
 .th-note-column li::before { float: left; margin-left: -18px; color: var(--th-red); content: "✓"; }
 
 .th-case-hero { display: grid; grid-template-columns: 44% 56%; height: 420px; overflow: hidden; }
@@ -358,14 +362,14 @@ _CSS = r"""
 .th-case-metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 28px; }
 .th-case-metric { min-height: 82px; padding-right: 10px; border-right: 1px solid var(--th-line); }
 .th-case-metric:last-child { border-right: 0; }
-.th-case-metric span { display: block; margin-top: 8px; color: var(--th-muted); font-size: 10px; }
+.th-case-metric span { display: block; margin-top: 8px; color: var(--th-muted); font-size: 12px; }
 .th-case-metric strong { display: block; margin-top: 4px; font-size: 14px; }
 .th-case-hero-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
 .th-diagnosis-strip { display: grid; grid-template-columns: 70px 1fr 1fr 1fr; align-items: center; height: 100px; margin: 0 68px; padding: 0 26px; border: 1px solid var(--th-line); }
 .th-alert { display: grid; width: 48px; height: 48px; place-items: center; border-radius: 50%; background: var(--th-red); color: #ffffff; font-size: 27px; font-weight: 800; }
 .th-diagnosis-item { padding: 0 22px; }
 .th-diagnosis-item strong { display: block; font-size: 12px; }
-.th-diagnosis-item span { display: block; margin-top: 5px; color: var(--th-muted); font-size: 11px; }
+.th-diagnosis-item span { display: block; margin-top: 5px; color: var(--th-muted); font-size: 12px; }
 .th-case-grid { display: grid; grid-template-columns: 1.05fr 1.05fr 1fr; gap: 16px; height: 504px; padding: 16px 68px 22px; }
 .th-case-panel { padding: 16px 18px; border: 1px solid var(--th-line); border-radius: 4px; overflow: hidden; }
 .th-case-panel h2 { font-size: 18px; }
@@ -374,26 +378,35 @@ _CSS = r"""
 .th-finding-copy { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 13px; }
 .th-finding-copy section + section { padding-left: 14px; border-left: 1px solid var(--th-line); }
 .th-finding h3 { font-size: 13px; line-height: 1.25; }
-.th-finding p { margin-top: 6px; color: var(--th-muted); font-size: 9px; line-height: 1.45; }
+.th-finding p { margin-top: 6px; color: var(--th-muted); font-size: 12px; line-height: 1.45; }
 .th-repair-proof { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--th-line); }
 .th-repair-proof div { padding: 0 9px; border-right: 1px solid var(--th-line); }
 .th-repair-proof div:first-child { padding-left: 0; }
 .th-repair-proof div:last-child { border-right: 0; }
 .th-repair-proof strong { display: block; color: var(--th-red); font-size: 13px; }
-.th-repair-proof span { display: block; margin-top: 2px; color: var(--th-muted); font-size: 8px; }
-.th-work-list { margin: 12px 0 0; padding-left: 18px; color: #50555c; font-size: 11px; line-height: 1.7; }
+.th-repair-proof span { display: block; margin-top: 2px; color: var(--th-muted); font-size: 11px; }
+.th-work-list { margin: 12px 0 0; padding-left: 18px; color: #50555c; font-size: 12px; line-height: 1.7; }
 .th-parts { margin-top: 12px; border-top: 1px solid var(--th-line); }
-.th-part { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #eceef0; font-size: 10px; }
+.th-part { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #eceef0; font-size: 12px; }
 .th-case-total { display: flex; justify-content: space-between; margin-top: 13px; padding: 12px; border: 1px solid var(--th-red); font-weight: 800; }
 .th-case-total strong { color: var(--th-red); font-size: 22px; }
-.th-result-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 10px; }
+.th-result-table { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
 .th-result-table th,
 .th-result-table td { padding: 7px 5px; border-bottom: 1px solid var(--th-line); text-align: left; }
 .th-result-table th { color: var(--th-muted); font-weight: 500; }
 .th-before { color: var(--th-red); }
 .th-after { color: #199252; }
-.th-quote { margin-top: 15px; padding: 14px; border-left: 4px solid var(--th-red); background: #fafafa; color: #555a61; font-size: 11px; }
-.th-warranty { display: flex; align-items: center; gap: 12px; margin-top: 12px; font-size: 11px; }
+.th-quote { margin-top: 15px; padding: 14px; border-left: 4px solid var(--th-red); background: #fafafa; color: #555a61; font-size: 12px; }
+.th-warranty { display: flex; align-items: center; gap: 12px; margin-top: 12px; font-size: 12px; }
+.th-control-drive { margin-top: 15px; padding-top: 13px; border-top: 1px solid var(--th-line); }
+.th-control-drive h3 { font-size: 14px; }
+.th-control-drive > p { margin-top: 4px; color: var(--th-muted); font-size: 12px; }
+.th-control-metrics { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 11px; }
+.th-control-metric { padding-right: 9px; border-right: 1px solid var(--th-line); }
+.th-control-metric + .th-control-metric { padding-left: 9px; }
+.th-control-metric:last-child { border-right: 0; }
+.th-control-metric strong { display: block; color: var(--th-red); font-size: 13px; }
+.th-control-metric span { display: block; margin-top: 3px; color: var(--th-muted); font-size: 11px; line-height: 1.3; }
 
 .th-prices-title { height: 132px; padding: 18px 68px 0; }
 .th-prices-title h1 { margin-top: 10px; font-size: 42px; }
@@ -404,34 +417,37 @@ _CSS = r"""
   display: flex;
   align-items: center;
   gap: 13px;
+  width: 100%;
   height: 78px;
   padding: 0 18px;
+  border: 0;
   border-bottom: 1px solid var(--th-line);
   background: #ffffff;
   color: #555a61;
+  text-align: left;
 }
 .th-category:last-child { border-bottom: 0; }
 .th-category.active { box-shadow: inset 3px 0 var(--th-red); color: var(--th-ink); font-weight: 750; }
 .th-table-panel h2 { font-size: 25px; }
 .th-price-filters { display: flex; justify-content: flex-end; gap: 10px; margin: -32px 0 12px; }
-.th-filter { display: flex; align-items: center; justify-content: space-between; min-width: 145px; height: 38px; padding: 0 12px; border: 1px solid var(--th-line); border-radius: 3px; background: #ffffff; font-size: 11px; }
+.th-filter { display: flex; align-items: center; justify-content: space-between; min-width: 145px; height: 38px; padding: 0 12px; border: 1px solid var(--th-line); border-radius: 3px; background: #ffffff; font-size: 12px; }
 .th-price-table { width: 100%; border-collapse: collapse; border: 1px solid var(--th-line); }
-.th-price-table th { height: 38px; padding: 0 14px; background: #fafafa; color: var(--th-muted); font-size: 10px; font-weight: 500; text-align: left; }
-.th-price-table td { height: 57px; padding: 7px 14px; border-top: 1px solid var(--th-line); font-size: 11px; }
+.th-price-table th { height: 38px; padding: 0 14px; background: #fafafa; color: var(--th-muted); font-size: 12px; font-weight: 600; text-align: left; }
+.th-price-table td { height: 57px; padding: 7px 14px; border-top: 1px solid var(--th-line); font-size: 13px; }
 .th-price-table td:first-child { width: 56%; }
-.th-price-table td:first-child strong { display: block; color: var(--th-ink); font-size: 12px; }
-.th-price-table td:first-child span { display: block; color: var(--th-muted); font-size: 9px; }
+.th-price-table td:first-child strong { display: block; color: var(--th-ink); font-size: 13px; }
+.th-price-table td:first-child span { display: block; color: var(--th-muted); font-size: 12px; }
 .th-price-value { color: var(--th-red); font-size: 19px; font-weight: 800; white-space: nowrap; }
-.th-row-action { min-height: 34px; padding: 0 15px; border: 0; border-radius: 3px; background: var(--th-red); color: #ffffff; font-size: 10px; font-weight: 700; }
+.th-row-action { min-height: 34px; padding: 0 15px; border: 0; border-radius: 3px; background: var(--th-red); color: #ffffff; font-size: 12px; font-weight: 700; }
 .th-consultant { padding: 15px; border: 1px solid var(--th-line); border-radius: 4px; }
 .th-consultant h2 { font-size: 14px; }
 .th-consultant img { width: 100%; height: 215px; margin-top: 10px; object-fit: cover; object-position: center 20%; }
 .th-consultant h3 { margin-top: 10px; font-size: 14px; }
-.th-consultant > p { color: var(--th-muted); font-size: 10px; }
-.th-contact-list { display: grid; gap: 8px; margin-top: 12px; font-size: 11px; }
+.th-consultant > p { color: var(--th-muted); font-size: 12px; }
+.th-contact-list { display: grid; gap: 8px; margin-top: 12px; font-size: 12px; }
 .th-contact-line { display: flex; align-items: center; gap: 8px; }
 .th-contact-line .lucide-icon { color: var(--th-red); }
-.th-consultant .th-secondary { width: 100%; min-height: 38px; margin-top: 14px; font-size: 11px; }
+.th-consultant .th-secondary { width: 100%; min-height: 38px; margin-top: 14px; font-size: 12px; }
 .th-prices-bottom {
   display: grid;
   grid-template-columns: 1.1fr 1.2fr 1fr 1fr;
@@ -442,20 +458,28 @@ _CSS = r"""
 .th-bottom-panel { position: relative; padding: 18px 20px; border-right: 1px solid var(--th-line); overflow: hidden; }
 .th-bottom-panel:last-child { border-right: 0; }
 .th-bottom-panel h2 { font-size: 16px; }
-.th-bottom-panel > p { margin-top: 8px; color: var(--th-muted); font-size: 10px; }
-.th-policy-photo { position: absolute; right: 14px; bottom: 14px; width: 140px; height: 96px; object-fit: cover; border-radius: 3px; }
-.th-policy-points { margin: 18px 130px 0 0; padding: 0; list-style: none; }
-.th-policy-points li { margin-top: 8px; color: #555a61; font-size: 9px; }
+.th-bottom-panel > p { margin-top: 8px; color: var(--th-muted); font-size: 12px; }
+.th-policy-photo { position: absolute; right: 14px; bottom: 14px; width: 148px; height: 112px; object-fit: cover; border-radius: 3px; }
+.th-policy-points { margin: 16px 142px 0 0; padding: 0; list-style: none; }
+.th-policy-points li { margin-top: 8px; color: #555a61; font-size: 12px; }
+.th-policy-caption { position: absolute; right: 14px; bottom: 132px; width: 148px; color: var(--th-muted); font-size: 11px; line-height: 1.3; }
 .th-offers { margin-top: 10px; }
-.th-offer-line { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--th-line); font-size: 10px; }
+.th-offer-line { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--th-line); font-size: 12px; }
 .th-offer-line strong:last-child { color: var(--th-red); font-size: 16px; }
+.th-offer-note { margin-top: 12px; padding: 9px 11px; border-left: 3px solid var(--th-red); background: #fafafa; color: #555a61; font-size: 12px; }
 .th-parts-list { margin: 14px 0 0; padding: 0; list-style: none; }
-.th-parts-list li { margin-top: 9px; color: #555a61; font-size: 10px; }
+.th-parts-list li { margin-top: 9px; color: #555a61; font-size: 12px; }
 .th-parts-list li::before { margin-right: 8px; color: var(--th-red); content: "✓"; }
-.th-warranty-big { display: grid; grid-template-columns: 62px 1fr; gap: 12px; margin-top: 24px; }
+.th-supplier-proof { margin-top: 16px; padding: 10px 12px; border: 1px solid var(--th-line); }
+.th-supplier-proof strong { display: block; color: var(--th-red); font-size: 17px; }
+.th-supplier-proof span { display: block; margin-top: 3px; color: var(--th-muted); font-size: 11px; }
+.th-warranty-big { display: grid; grid-template-columns: 62px 1fr; gap: 12px; margin-top: 18px; }
 .th-warranty-big .lucide-icon { width: 58px; height: 58px; color: var(--th-red); }
-.th-warranty-big strong { display: block; font-size: 13px; }
-.th-warranty-big span { display: block; margin-top: 7px; color: var(--th-muted); font-size: 10px; }
+.th-warranty-big strong { display: block; font-size: 14px; }
+.th-warranty-big span { display: block; margin-top: 7px; color: var(--th-muted); font-size: 12px; }
+.th-warranty-facts { display: grid; gap: 7px; margin-top: 15px; }
+.th-warranty-fact { display: flex; align-items: center; gap: 8px; color: #555a61; font-size: 12px; }
+.th-warranty-fact .lucide-icon { width: 15px; height: 15px; color: var(--th-red); }
 """
 
 _SCRIPTS = r"""
@@ -464,8 +488,38 @@ document.querySelectorAll('[data-selectable]').forEach(function (element) {
     var group = element.getAttribute('data-selectable');
     document.querySelectorAll('[data-selectable="' + group + '"]').forEach(function (item) {
       item.classList.remove('active');
+      item.setAttribute('aria-pressed', 'false');
     });
     element.classList.add('active');
+    element.setAttribute('aria-pressed', 'true');
+
+    if (group === 'package') {
+      var packageTemplate = document.querySelector(
+        'template[data-package-template="' + element.dataset.packageKey + '"]'
+      );
+      var packageFeatures = document.querySelector('[data-package-features]');
+      if (packageTemplate && packageFeatures) {
+        packageFeatures.innerHTML = packageTemplate.innerHTML;
+      }
+      document.querySelector('.th-package-duration').textContent = element.dataset.duration;
+      document.querySelector('.th-package-price').textContent = element.dataset.price;
+    }
+
+    if (group === 'time') {
+      document.querySelector('.th-summary-date').textContent =
+        '26 августа 2026 · ' + element.textContent.trim();
+    }
+
+    if (group === 'category') {
+      var categoryTemplate = document.querySelector(
+        'template[data-category-template="' + element.dataset.categoryKey + '"]'
+      );
+      var priceRows = document.querySelector('.th-price-table tbody');
+      if (categoryTemplate && priceRows) {
+        priceRows.innerHTML = categoryTemplate.innerHTML;
+      }
+      document.querySelector('.th-table-panel h2').textContent = element.dataset.title;
+    }
   });
 });
 """
@@ -584,19 +638,75 @@ def _diagnostics(
 ) -> str:
     photo = _asset(project, shot, assets, "diagnostic_closeup")
     packages = (
-        ("Базовая", "Оценка состояния основных систем", "activity"),
-        ("Комплексная", "Расширенная проверка всех систем", "car-front"),
-        ("Перед покупкой", "Полная проверка перед покупкой", "shield-check"),
+        (
+            "basic",
+            "Базовая",
+            "Оценка состояния основных систем",
+            "activity",
+            "от 45 минут",
+            "от 990 ₽",
+            (
+                "Чтение и расшифровка ошибок",
+                "Проверка двигателя и трансмиссии",
+                "Проверка ходовой части",
+                "Проверка тормозной системы",
+                "Проверка систем безопасности",
+            ),
+        ),
+        (
+            "complex",
+            "Комплексная",
+            "Расширенная проверка всех систем",
+            "car-front",
+            "от 60 минут",
+            "1 990 ₽",
+            (
+                "Полное сканирование электронных блоков",
+                "Проверка двигателя под нагрузкой",
+                "Диагностика АКПП и приводов",
+                "Осмотр подвески на подъёмнике",
+                "Замер тормозной системы и жидкостей",
+            ),
+        ),
+        (
+            "purchase",
+            "Перед покупкой",
+            "Полная проверка перед покупкой",
+            "shield-check",
+            "от 120 минут",
+            "4 900 ₽",
+            (
+                "Компьютерная диагностика всех блоков",
+                "Проверка кузова толщиномером",
+                "Осмотр двигателя и трансмиссии",
+                "Тест-драйв с мастером-диагностом",
+                "Письменный отчёт с оценкой вложений",
+            ),
+        ),
     )
     package_html = "".join(
-        '<div class="th-package{}" data-selectable="package">'
-        '<span class="th-icon">{}</span><div><strong>{}</strong><span>{}</span></div></div>'.format(
+        '<button type="button" class="th-package{}" data-selectable="package" aria-pressed="{}" '
+        'data-package-key="{}" data-duration="{}" data-price="{}">'
+        '<span class="th-icon">{}</span><span><strong>{}</strong><span>{}</span></span></button>'.format(
             " active" if index == 0 else "",
+            "true" if index == 0 else "false",
+            key,
+            duration,
+            price,
             icon(icon_name),
             title,
             copy,
         )
-        for index, (title, copy, icon_name) in enumerate(packages)
+        for index, (key, title, copy, icon_name, duration, price, _) in enumerate(packages)
+    )
+    package_templates = "".join(
+        f'<template data-package-template="{key}">'
+        + "".join(
+            f'<div class="th-check-line">{icon("check", size=16)}<span>{item}</span></div>'
+            for item in features
+        )
+        + "</template>"
+        for key, _, _, _, _, _, features in packages
     )
     check_groups = (
         ("Двигатель и управление", ("Считывание кодов неисправностей", "Система управления двигателем", "Катушки зажигания и свечи", "Компрессия в цилиндрах", "Топливная система", "Система охлаждения", "Система впуска воздуха", "Турбонаддув / наддув", "Система вентиляции картера")),
@@ -610,13 +720,7 @@ def _diagnostics(
         f'<ol>{"".join(f"<li>{item}</li>" for item in items)}</ol></article>'
         for title, items in check_groups
     )
-    included_checks = (
-        "Чтение и расшифровка ошибок",
-        "Проверка двигателя и трансмиссии",
-        "Проверка ходовой части",
-        "Проверка тормозной системы",
-        "Проверка систем безопасности",
-    )
+    included_checks = packages[0][-1]
     included_html = "".join(
         f'<div class="th-check-line">{icon("check", size=16)}'
         f'<span>{item}</span></div>'
@@ -639,10 +743,11 @@ def _diagnostics(
         '<div class="th-breadcrumbs">Главная <span>›</span> Услуги <span>›</span> Диагностика</div>'
         '<h1>Диагностика автомобиля</h1><div class="th-diagnostic-price">41 параметр проверки <strong>от 990 ₽</strong></div>'
         '<div class="th-package-panel"><div class="th-package-list">'
-        f'{package_html}</div><div class="th-package-detail"><div class="th-check-list">'
+        f'{package_html}</div><div class="th-package-detail"><div class="th-check-list" data-package-features>'
         f'{included_html}'
-        '</div><div class="th-package-total"><span>Время выполнения<br /><b>от 45 минут</b></span>'
-        '<span>Стоимость<br /><strong>от 990 ₽</strong></span></div></div></div>'
+        '</div><div class="th-package-total"><span>Время выполнения<br /><b class="th-package-duration">от 45 минут</b></span>'
+        '<span>Стоимость<br /><strong class="th-package-price">от 990 ₽</strong></span></div></div>'
+        f'{package_templates}</div>'
         '<div class="th-diagnostic-action"><button class="th-primary">Записаться</button>'
         '<span>Гарантия на работы и сохранность данных</span></div></div>'
         f'<figure class="th-diagnostic-photo">{_image(photo, "Мастер выполняет компьютерную диагностику")}</figure></section>'
@@ -701,20 +806,26 @@ def _booking(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) ->
         '<div class="th-calendar-head"><span>‹</span><span>Август 2026</span><span>›</span></div>'
         f'<div class="th-calendar-grid">{_calendar_days()}</div></div><div class="th-time-panel">'
         '<strong>Доступное время на 26 августа</strong><div class="th-time-list">'
-        '<button class="th-time active" data-selectable="time">11:30</button>'
-        '<button class="th-time" data-selectable="time">13:00</button>'
-        '<button class="th-time" data-selectable="time">16:30</button></div></div></div></div></div>'
+        '<button type="button" class="th-time active" data-selectable="time" aria-pressed="true">11:30</button>'
+        '<button type="button" class="th-time" data-selectable="time" aria-pressed="false">13:00</button>'
+        '<button type="button" class="th-time" data-selectable="time" aria-pressed="false">16:30</button></div></div></div></div></div>'
         '<div class="th-step"><div class="th-step-label"><b class="th-step-number">4</b><div><strong>Контакты</strong><span>Укажите контактные данные</span></div></div>'
         '<div class="th-step-content"><div class="th-contact-fields">'
         '<div class="th-field"><label>Ваше имя</label><div>Иван Иванов</div></div>'
         '<div class="th-field"><label>Телефон</label><div>+7 (999) 123-45-67</div></div>'
         '<div class="th-field"><label>E-mail</label><div>ivan.ivanov@mail.ru</div></div></div>'
-        '<div class="th-consent">☑ Я согласен на обработку персональных данных и получение уведомлений</div></div></div>'
+        '<div class="th-contact-meta"><div class="th-contact-preference"><strong>Предпочтительный способ связи</strong>'
+        '<div class="th-contact-options"><button type="button" class="th-contact-option active" data-selectable="contact" aria-pressed="true">Телефон</button>'
+        '<button type="button" class="th-contact-option" data-selectable="contact" aria-pressed="false">WhatsApp</button>'
+        '<button type="button" class="th-contact-option" data-selectable="contact" aria-pressed="false">E-mail</button></div></div>'
+        f'<div class="th-data-note">{icon("lock", size=20)}<div><strong>Данные хранятся в защищённой CRM</strong>'
+        '<span>Доступ только у сервисного консультанта</span></div></div></div>'
+        '<label class="th-consent"><input type="checkbox" checked />Я согласен на обработку персональных данных и получение уведомлений</label></div></div>'
         '</div><aside class="th-order-summary">'
         f'{_image(photo, "Приёмка клиента в сервисе")}<h2>Ваш заказ</h2><div class="th-summary-list">'
         '<div class="th-summary-row"><span>Автомобиль</span><strong>BMW X5 · А123ВС777</strong></div>'
         '<div class="th-summary-row"><span>Услуга</span><strong>Комплексная диагностика</strong></div>'
-        '<div class="th-summary-row"><span>Дата и время</span><strong>26 августа 2026 · 11:30</strong></div>'
+        '<div class="th-summary-row"><span>Дата и время</span><strong class="th-summary-date">26 августа 2026 · 11:30</strong></div>'
         '<div class="th-summary-row"><span>Длительность</span><strong>60 минут</strong></div>'
         '<div class="th-summary-row"><span>Адрес</span><strong>Москва, ул. Дорожная, 8</strong></div></div>'
         '<div class="th-summary-total"><span>Итого</span><strong>1 990 ₽</strong></div>'
@@ -774,7 +885,11 @@ def _case_study(
         '<tr><td>Развал передний правый</td><td class="th-before">−1°05′</td><td class="th-after">−0°34′</td><td>−0°30′ ±0°30′</td></tr>'
         '<tr><td>Схождение суммарное</td><td class="th-before">0°32′</td><td class="th-after">0°10′</td><td>0°10′ ±0°20′</td></tr></tbody></table>'
         '<div class="th-quote">«Стук ушёл сразу после ремонта, руль больше не вибрирует. Машина снова идёт ровно и уверенно».</div>'
-        f'<div class="th-warranty">{icon("shield-check")}<strong>Гарантия 24 месяца или 20 000 км на работы и запчасти</strong></div></article></section>',
+        f'<div class="th-warranty">{icon("shield-check")}<strong>Гарантия 24 месяца или 20 000 км на работы и запчасти</strong></div>'
+        '<div class="th-control-drive"><h3>Контрольный заезд</h3><p>Проверили автомобиль после ремонта на городском маршруте и стенде.</p>'
+        '<div class="th-control-metrics"><div class="th-control-metric"><strong>12 км</strong><span>тестовый маршрут</span></div>'
+        '<div class="th-control-metric"><strong>0 вибраций</strong><span>на руле и педали</span></div>'
+        '<div class="th-control-metric"><strong>Без замечаний</strong><span>повторный осмотр</span></div></div></div></article></section>',
     )
 
 
@@ -782,18 +897,20 @@ def _prices(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> 
     portrait = _asset(project, shot, assets, "mechanic_portrait")
     engine = _asset(project, shot, assets, "engine_inspection")
     categories = (
-        ("activity", "Диагностика"),
-        ("settings", "Техническое обслуживание"),
-        ("wrench", "Двигатель"),
-        ("car-front", "Ходовая"),
-        ("activity", "Тормозная система"),
-        ("settings", "Электрика"),
-        ("car-front", "Шиномонтаж"),
+        ("diagnostics", "activity", "Диагностика"),
+        ("maintenance", "settings", "Техническое обслуживание"),
+        ("engine", "wrench", "Двигатель"),
+        ("suspension", "car-front", "Ходовая"),
+        ("brakes", "activity", "Тормозная система"),
+        ("electric", "settings", "Электрика"),
+        ("tires", "car-front", "Шиномонтаж"),
     )
     category_html = "".join(
-        f'<div class="th-category{" active" if index == 0 else ""}" data-selectable="category">'
-        f'<span class="th-icon">{icon(icon_name)}</span><span>{label}</span></div>'
-        for index, (icon_name, label) in enumerate(categories)
+        f'<button type="button" class="th-category{" active" if index == 0 else ""}" '
+        f'aria-pressed="{"true" if index == 0 else "false"}" '
+        f'data-selectable="category" data-category-key="{key}" data-title="{label}">'
+        f'<span class="th-icon">{icon(icon_name)}</span><span>{label}</span></button>'
+        for index, (key, icon_name, label) in enumerate(categories)
     )
     rows = (
         ("Компьютерная диагностика", "Считывание кодов ошибок и проверка систем", "от 30 мин", "990 ₽"),
@@ -805,12 +922,65 @@ def _prices(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> 
         ("Диагностика электрики", "Проверка оборудования и проводки", "от 60 мин", "1 590 ₽"),
         ("Проверка кондиционера", "Диагностика давления, утечек и работы системы", "от 45 мин", "1 290 ₽"),
     )
-    rows_html = "".join(
-        '<tr><td><strong>{}</strong><span>{}</span></td><td>{}</td>'
-        '<td><span class="th-price-value">от {}</span></td><td><button class="th-row-action">Записаться</button></td></tr>'.format(
-            title, copy, duration, price
+    rows_by_category = {
+        "diagnostics": rows,
+        "maintenance": (
+            ("Замена моторного масла", "Масло и фильтр по регламенту", "от 40 мин", "1 800 ₽"),
+            ("Большое ТО", "Полный регламент с диагностикой", "от 180 мин", "9 900 ₽"),
+            ("Замена фильтров", "Воздушный и салонный фильтры", "от 30 мин", "1 200 ₽"),
+            ("Замена свечей", "Проверка катушек и установка свечей", "от 60 мин", "2 900 ₽"),
+            ("Обслуживание кондиционера", "Заправка и антибактериальная обработка", "от 90 мин", "3 900 ₽"),
+        ),
+        "engine": (
+            ("Диагностика двигателя", "Компрессия, питание и навесное", "от 60 мин", "1 590 ₽"),
+            ("Замена ремня ГРМ", "Комплект ГРМ и контроль меток", "от 240 мин", "8 900 ₽"),
+            ("Устранение течи масла", "Поиск и герметизация источника", "от 120 мин", "4 500 ₽"),
+            ("Ремонт системы охлаждения", "Проверка герметичности и циркуляции", "от 120 мин", "3 900 ₽"),
+            ("Чистка впуска", "Удаление нагара и адаптация", "от 180 мин", "6 900 ₽"),
+        ),
+        "suspension": (
+            ("Диагностика подвески", "Проверка на подъёмнике и люфт-детекторе", "от 45 мин", "1 390 ₽"),
+            ("Замена амортизаторов", "Демонтаж, установка и контроль", "от 180 мин", "6 900 ₽"),
+            ("Замена сайлентблоков", "Перепрессовка и протяжка подвески", "от 180 мин", "5 900 ₽"),
+            ("Ступичный подшипник", "Замена узла с контролем момента", "от 120 мин", "4 900 ₽"),
+            ("Развал-схождение 3D", "Регулировка углов установки колёс", "от 60 мин", "2 900 ₽"),
+        ),
+        "brakes": (
+            ("Диагностика тормозов", "Измерение дисков, колодок и жидкости", "от 30 мин", "990 ₽"),
+            ("Замена тормозных дисков", "Комплект дисков и очистка ступиц", "от 120 мин", "4 900 ₽"),
+            ("Замена колодок", "Очистка и обслуживание направляющих", "от 60 мин", "2 400 ₽"),
+            ("Замена тормозной жидкости", "Аппаратная прокачка системы", "от 60 мин", "2 900 ₽"),
+            ("Ремонт суппорта", "Дефектовка и установка ремкомплекта", "от 150 мин", "5 500 ₽"),
+        ),
+        "electric": (
+            ("Компьютерная диагностика", "Сканирование электронных блоков", "от 30 мин", "990 ₽"),
+            ("Поиск утечки тока", "Замер потребления по цепям", "от 90 мин", "2 900 ₽"),
+            ("Ремонт проводки", "Локализация и восстановление цепи", "от 120 мин", "3 900 ₽"),
+            ("Диагностика генератора", "Проверка зарядки под нагрузкой", "от 45 мин", "1 500 ₽"),
+            ("Кодирование блоков", "Настройка и адаптация оборудования", "от 60 мин", "2 900 ₽"),
+        ),
+        "tires": (
+            ("Шиномонтаж R16", "Снятие, установка и балансировка", "от 60 мин", "3 200 ₽"),
+            ("Шиномонтаж R18", "Комплект колёс с балансировкой", "от 75 мин", "4 200 ₽"),
+            ("Ремонт прокола", "Грибок с демонтажем колеса", "от 30 мин", "1 200 ₽"),
+            ("Правка диска", "Восстановление геометрии", "от 90 мин", "2 500 ₽"),
+            ("Сезонное хранение", "Мойка и маркировка комплекта", "сезон", "4 900 ₽"),
+        ),
+    }
+
+    def render_rows(items: tuple[tuple[str, str, str, str], ...]) -> str:
+        return "".join(
+            '<tr><td><strong>{}</strong><span>{}</span></td><td>{}</td>'
+            '<td><span class="th-price-value">от {}</span></td><td><button class="th-row-action">Записаться</button></td></tr>'.format(
+                title, copy, duration, price
+            )
+            for title, copy, duration, price in items
         )
-        for title, copy, duration, price in rows
+
+    rows_html = render_rows(rows)
+    category_templates = "".join(
+        f'<template data-category-template="{key}">{render_rows(items)}</template>'
+        for key, items in rows_by_category.items()
     )
     return _root(
         shot,
@@ -823,7 +993,7 @@ def _prices(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> 
         f'<button class="th-filter">Все модели {icon("chevron-down", size=14)}</button>'
         f'<button class="th-filter">Все типы {icon("chevron-down", size=14)}</button></div>'
         '<table class="th-price-table"><thead><tr><th>Услуга</th><th>Время</th><th>Стоимость работ</th><th></th></tr></thead>'
-        f'<tbody>{rows_html}</tbody></table></div><aside class="th-consultant"><h2>Ваш сервисный консультант</h2>'
+        f'<tbody>{rows_html}</tbody></table>{category_templates}</div><aside class="th-consultant"><h2>Ваш сервисный консультант</h2>'
         f'{_image(portrait, "Сервисный консультант Алексей Соколов")}<h3>Алексей Соколов</h3><p>Сервисный консультант</p>'
         '<div class="th-contact-list">'
         f'<div class="th-contact-line">{icon("phone", size=16)}<span>+7 (495) 128-95-95</span></div>'
@@ -833,15 +1003,23 @@ def _prices(project: ProjectSpec, shot: ShotSpec, assets: Mapping[str, str]) -> 
         '<section class="th-prices-bottom"><article class="th-bottom-panel"><h2>Цена фиксируется до начала работ</h2>'
         '<p>После согласования перечня работ стоимость закрепляется в заказ-наряде.</p>'
         '<ul class="th-policy-points"><li>Фиксируем стоимость</li><li>Согласовываем детали</li><li>Без доплат без согласия</li></ul>'
+        '<span class="th-policy-caption">Мастер показывает результаты осмотра до начала ремонта</span>'
         f'{_image(engine, "Проверка двигателя перед согласованием работ", "th-policy-photo")}</article>'
         '<article class="th-bottom-panel"><h2>Актуальные предложения</h2><div class="th-offers">'
-        '<div class="th-offer-line"><strong>Бесплатная диагностика</strong><strong>0 ₽</strong></div>'
+        '<div class="th-offer-line"><strong>Диагностика в подарок</strong><strong>0 ₽</strong></div>'
         '<div class="th-offer-line"><strong>Скидка 10% на работы</strong><strong>−10%</strong></div>'
-        '<div class="th-offer-line"><strong>Сезонное хранение шин</strong><strong>0 ₽</strong></div></div></article>'
-        '<article class="th-bottom-panel"><h2>Запчасти и материалы</h2><ul class="th-parts-list"><li>Проверенные поставщики</li>'
-        '<li>Оригинальные запчасти и аналоги</li><li>Расходные материалы в наличии</li><li>Подбор по VIN</li></ul></article>'
+        '<div class="th-offer-line"><strong>Сезонное хранение шин</strong><strong>0 ₽</strong></div></div>'
+        '<div class="th-offer-note">Предложения применяются автоматически при оформлении заказ-наряда.</div></article>'
+        '<article class="th-bottom-panel"><h2>Запчасти и материалы</h2><ul class="th-parts-list">'
+        '<li>Оригинальные запчасти и аналоги</li><li>Расходные материалы в наличии</li><li>Подбор по VIN</li></ul>'
+        '<div class="th-supplier-proof"><strong>4 проверенных поставщика</strong><span>Сравним цену и срок поставки перед согласованием</span></div></article>'
         '<article class="th-bottom-panel"><h2>Гарантия на работы и запчасти</h2><div class="th-warranty-big">'
-        f'{icon("shield-check")}<div><strong>До 24 месяцев на работы</strong><span>До 12 месяцев на установленные запчасти</span></div></div></article></section>',
+        f'{icon("shield-check")}<div><strong>До 24 месяцев на работы</strong><span>До 12 месяцев на установленные запчасти</span></div></div>'
+        '<div class="th-warranty-facts">'
+        f'<div class="th-warranty-fact">{icon("check", size=15)}<span>Гарантия прописана в заказ-наряде</span></div>'
+        f'<div class="th-warranty-fact">{icon("check", size=15)}<span>История обслуживания хранится в CRM</span></div>'
+        f'<div class="th-warranty-fact">{icon("check", size=15)}<span>Повторная проверка без очереди</span></div>'
+        '</div></article></section>',
     )
 
 
