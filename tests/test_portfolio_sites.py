@@ -320,7 +320,10 @@ def test_complex_renderer_rejects_unsupported_projects_variants_and_missing_asse
 
 
 def test_render_site_adapts_semantic_assets_for_a_legacy_story_screen():
-    project = get_project("dentalea")
+    project = replace(
+        get_project("dentalea"),
+        renderer_module="portfolio.kwork_pack.sites._missing_commercial_fixture",
+    )
     assets = {asset.key: f"/{asset.filename}" for asset in project.assets}
     first_asset = assets[project.assets[0].key]
 

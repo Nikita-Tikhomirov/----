@@ -1,4 +1,5 @@
 import sys
+from dataclasses import replace
 from types import ModuleType
 
 import pytest
@@ -82,7 +83,10 @@ def test_render_site_prefers_an_exact_dedicated_module_over_legacy_dispatch(monk
 
 
 def test_render_site_wraps_legacy_output_only_when_the_declared_module_is_absent():
-    project = get_project("dentalea")
+    project = replace(
+        get_project("dentalea"),
+        renderer_module="portfolio.kwork_pack.sites._missing_commercial_fixture",
+    )
 
     page = _registry_api("render_site")(project, project.shots[0], _semantic_assets(project))
 
