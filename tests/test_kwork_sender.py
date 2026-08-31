@@ -106,12 +106,13 @@ def test_auto_login_script_targets_email_password_and_submit_controls():
     assert "submit.click()" in _AUTO_LOGIN_SCRIPT
 
 
-def test_reply_form_opener_supports_kwork_span_buttons():
+def test_reply_form_opener_ignores_kwork_project_feedback_button():
     from app.kwork_sender import _FILL_AND_SUBMIT_SCRIPT, _HAS_REPLY_FIELD_SCRIPT, _OPEN_REPLY_FORM_SCRIPT
 
     assert ".kw-button" in _OPEN_REPLY_FORM_SCRIPT
     assert ".trumbowyg-editor" in _OPEN_REPLY_FORM_SCRIPT
-    assert "оставить отзыв" in _OPEN_REPLY_FORM_SCRIPT
+    assert "предложить услугу" in _OPEN_REPLY_FORM_SCRIPT
+    assert "оставить отзыв" not in _OPEN_REPLY_FORM_SCRIPT
     assert ".trumbowyg-editor" in _HAS_REPLY_FIELD_SCRIPT
     assert ".trumbowyg-editor" in _FILL_AND_SUBMIT_SCRIPT
     assert "#offer-custom-price" in _FILL_AND_SUBMIT_SCRIPT

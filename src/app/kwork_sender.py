@@ -565,7 +565,7 @@ _OPEN_REPLY_FORM_SCRIPT = r"""
   if (cookie && visible(cookie)) cookie.click();
   const opener = Array.from(document.querySelectorAll('button,a,input[type=button],input[type=submit],span.kw-button,[role=button],.kw-button')).find(el => {
     const text = norm(el.innerText || el.value || el.getAttribute('aria-label'));
-    return visible(el) && /(предложить услугу|откликнуться|оставить предложение|оставить отзыв|предложить)$/i.test(text);
+    return visible(el) && /(предложить услугу|откликнуться|оставить предложение|предложить)$/i.test(text);
   });
   if (opener) opener.click();
   return true;
