@@ -24,6 +24,16 @@ def test_rejects_tilda_and_elementor_orders_by_default():
         assert platform.lower() in result.reasons.lower()
 
 
+def test_allows_builder_name_when_the_order_explicitly_forbids_it():
+    result = evaluate_post(
+        "Нужно заменить тему WordPress. Все настройки выполнить без использования "
+        "тяжёлых конструкторов страниц (типа Elementor, WPBakery), только Gutenberg. "
+        "Отклик: https://example.com/order"
+    )
+
+    assert result.accepted is True
+
+
 def test_rejects_visual_builders_before_ai_analysis():
     platforms = (
         "Яндекс Кит",

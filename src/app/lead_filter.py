@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.keyword_matching import has_non_excluded_keyword, has_non_excluded_match
+
 
 @dataclass(frozen=True)
 class LeadEvaluation:
@@ -143,10 +145,10 @@ def _extract_contact(text: str) -> str:
 
 
 def _matched_blocked_labels(text: str, keywords: tuple[str, ...]) -> list[str]:
-    labels = [label for label, pattern in BLOCKED_PATTERNS if pattern.search(text)]
+    labels = [label for label, pattern in BLOCKED_PATTERNS if has_non_excluded_match(text, pattern)]
     for keyword in keywords:
         clean = keyword.strip()
-        if clean and clean.lower() in text.lower() and clean not in labels:
+        if has_non_excluded_keyword(text, clean) and clean not in labels:
             labels.append(clean)
     return labels
 

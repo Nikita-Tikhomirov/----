@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.keyword_matching import has_non_excluded_keyword, has_non_excluded_match
 from app.llm_client import openrouter_chat
 from app.reply_policy import COMMERCIAL_REPLY_PATTERN
 
@@ -85,7 +86,7 @@ def judge_lead(
 ) -> LeadJudgeResult:
     """Score a Kwork lead against the user's week-with-AI fit criteria."""
     blocked = _matched_keywords(text, blocked_keywords)
-    if BITRIX_PATTERN.search(text):
+    if has_non_excluded_match(text, BITRIX_PATTERN):
         return _reject("Bitrix/Битрикс исключен", text)
     if AI_WORKFLOW_PROHIBITION_PATTERN.search(text):
         return _reject("заказ запрещает рабочий процесс с AI-агентом", text)
@@ -269,11 +270,10 @@ def _apply_acceptance_settings(
 
 
 def _matched_keywords(text: str, keywords: tuple[str, ...]) -> list[str]:
-    lowered = text.lower()
     matches: list[str] = []
     for keyword in keywords:
         clean = keyword.strip()
-        if clean and clean.lower() in lowered and clean not in matches:
+        if has_non_excluded_keyword(text, clean) and clean not in matches:
             matches.append(clean)
     return matches
 

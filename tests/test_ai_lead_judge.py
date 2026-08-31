@@ -79,6 +79,17 @@ def test_judge_prompt_keeps_questions_internal_and_out_of_customer_draft():
     assert "не добавляй каналы связи" in prompt
 
 
+def test_judge_allows_builder_name_when_the_spec_explicitly_forbids_it():
+    result = judge_lead(
+        "Нужно заменить тему WordPress и сохранить SEO. "
+        "Все настройки выполнить без использования тяжёлых конструкторов страниц "
+        "(типа Elementor, WPBakery), только Gutenberg и нативные блоки.",
+        blocked_keywords=("elementor",),
+    )
+
+    assert result.accepted is True
+
+
 def test_parse_judge_response_keeps_customer_goal_and_fact_grounded_work_plan():
     raw = """
     {
