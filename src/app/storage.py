@@ -468,6 +468,32 @@ class Storage:
                 (response_count, reason.strip()[:2000], lead_id),
             )
 
+    def update_lead_kwork_pricing(
+        self,
+        lead_id: int,
+        *,
+        buyer_desired_budget_rub: int | None,
+        kwork_max_price_rub: int | None,
+        proposal_price_rub: int | None,
+    ) -> None:
+        """Persist the current Kwork budget ceiling and its derived proposal price."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE leads
+                SET buyer_desired_budget_rub = ?,
+                    kwork_max_price_rub = ?,
+                    proposal_price_rub = ?
+                WHERE id = ?
+                """,
+                (
+                    _optional_positive_int(buyer_desired_budget_rub, "Buyer desired budget"),
+                    _optional_positive_int(kwork_max_price_rub, "Kwork maximum price"),
+                    _optional_positive_int(proposal_price_rub, "Lead proposal price"),
+                    lead_id,
+                ),
+            )
+
     def update_lead_reply(self, lead_id: int, draft_reply: str) -> None:
         clean_reply = draft_reply.strip()
         if not clean_reply:

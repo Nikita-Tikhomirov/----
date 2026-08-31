@@ -39,6 +39,7 @@ from app.storage import Storage
 from app.telegram_client import TelegramLeadClient
 
 logger = logging.getLogger(__name__)
+REPLY_GENERATION_ERROR_PREFIX = "AI-отклик не готов: "
 
 
 @contextmanager
@@ -179,12 +180,17 @@ def scan_once(
             storage.mark_rejected(existing_lead.id, reason)
             logger.warning("Rejected approved generic draft for lead %s", existing_lead.id)
             continue
+        retry_failed_reply = bool(
+            existing_lead is not None
+            and existing_lead.status == "failed"
+            and existing_lead.last_error.startswith(REPLY_GENERATION_ERROR_PREFIX)
+        )
         rebuild_existing = bool(
             text_api_key.strip()
             and
             existing_lead is not None
             and existing_lead.status not in {"approved", "sending", "sent", "rejected"}
-            and is_generic_fallback_reply(existing_lead.draft_reply)
+            and (is_generic_fallback_reply(existing_lead.draft_reply) or retry_failed_reply)
         )
         if existing_lead is not None and not rebuild_existing:
             _refresh_existing_lead_live_status(
@@ -387,23 +393,6 @@ def scan_once(
             work_plan=tuple(judge_result.work_plan),
             risks=tuple(judge_result.risks),
         )
-        try:
-            draft_reply = reply_composer(
-                reply_context,
-                judge_result.draft_reply,
-                api_key=text_api_key,
-                model=reply_model,
-                base_url=text_base_url,
-                fallback_models=fallback_models,
-            )
-        except ReplyGenerationUnavailable as exc:
-            logger.error(
-                "Deferred post %s/%s until cloud reply generation recovers: %s",
-                post.channel,
-                post.message_id,
-                exc,
-            )
-            continue
         summary = f"{_summary_from_judge(judge_result)}{project_summary_suffix}"
         if kwork_facts:
             summary = "\n\n".join([summary, _format_kwork_facts(kwork_facts)])
@@ -416,7 +405,69 @@ def scan_once(
         kwork_max_price_rub = (
             getattr(project_info, "kwork_max_price_rub", None) if project_info is not None else None
         )
-        proposal_price_rub = _proposal_price_from_kwork_max(kwork_max_price_rub) or judge_result.price_rub or None
+        budget_ceiling_rub = kwork_max_price_rub or buyer_desired_budget_rub
+        proposal_price_rub = _proposal_price_from_kwork_max(budget_ceiling_rub) or judge_result.price_rub or None
+
+        try:
+            draft_reply = reply_composer(
+                reply_context,
+                judge_result.draft_reply,
+                api_key=text_api_key,
+                model=reply_model,
+                base_url=text_base_url,
+                fallback_models=fallback_models,
+            )
+        except ReplyGenerationUnavailable as exc:
+            error = REPLY_GENERATION_ERROR_PREFIX + str(exc)
+            logger.error(
+                "Saved post %s/%s for retry after cloud reply generation failed: %s",
+                post.channel,
+                post.message_id,
+                exc,
+            )
+            if rebuild_existing and existing_lead is not None:
+                lead_id = existing_lead.id
+                storage.update_lead_assessment(
+                    lead_id,
+                    score=judge_result.score,
+                    summary=summary,
+                    price_rub=proposal_price_rub,
+                    days=judge_result.estimated_days or None,
+                )
+                storage.update_lead_kwork_pricing(
+                    lead_id,
+                    buyer_desired_budget_rub=buyer_desired_budget_rub,
+                    kwork_max_price_rub=kwork_max_price_rub,
+                    proposal_price_rub=proposal_price_rub,
+                )
+            else:
+                lead_id = storage.create_lead(
+                    post_id=post_id,
+                    score=judge_result.score,
+                    summary=summary,
+                    draft_reply="",
+                    contact=evaluation.contact,
+                    proposal_title=_proposal_title_from_text(post.text),
+                    proposal_price_rub=proposal_price_rub,
+                    proposal_days=judge_result.estimated_days or None,
+                    buyer_desired_budget_rub=buyer_desired_budget_rub,
+                    kwork_max_price_rub=kwork_max_price_rub,
+                )
+            storage.mark_failed(lead_id, error)
+            if project_info is not None:
+                storage.update_lead_live_status(
+                    lead_id,
+                    response_count=getattr(project_info, "response_count", None),
+                    reason=str(getattr(project_info, "reason", "") or ""),
+                )
+            if attachment_reports:
+                storage.replace_lead_attachments(lead_id, attachment_reports)
+            failed_lead = storage.get_lead(lead_id)
+            if rebuild_existing and lead_hub is not None:
+                storage.prepare_lead_hub_resync(lead_id)
+            if _deliver_new_lead(storage, lead_hub, email_client, failed_lead):
+                created += 1
+            continue
 
         if rebuild_existing and existing_lead is not None:
             lead_id = existing_lead.id
@@ -517,6 +568,15 @@ def _refresh_existing_lead_live_status(
         response_count=getattr(project_info, "response_count", None),
         reason=str(getattr(project_info, "reason", "") or ""),
     )
+    desired_budget = getattr(project_info, "buyer_desired_budget_rub", None)
+    maximum_budget = getattr(project_info, "kwork_max_price_rub", None)
+    if desired_budget is not None or maximum_budget is not None:
+        storage.update_lead_kwork_pricing(
+            lead.id,
+            buyer_desired_budget_rub=desired_budget,
+            kwork_max_price_rub=maximum_budget,
+            proposal_price_rub=_proposal_price_from_kwork_max(maximum_budget or desired_budget),
+        )
 
 
 def _build_attachment_processing_result(builder, attachments: tuple[str, ...], **kwargs) -> AttachmentProcessingResult:

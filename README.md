@@ -58,7 +58,7 @@ SCAN_INTERVAL_SECONDS=60
 KWORK_MAX_RESPONSES=5
 KWORK_MAX_AGE_HOURS=24
 LEAD_MAX_DAYS=7
-LEAD_BLOCKED_KEYWORDS=битрикс,bitrix
+LEAD_BLOCKED_KEYWORDS=битрикс,bitrix,tilda,тильда,elementor,элементор
 ```
 
 `KWORK_MAX_RESPONSES` проверяется при поиске и прямо перед отправкой. Если Kwork не показывает число предложений, заказ не получает автоматический отклик.

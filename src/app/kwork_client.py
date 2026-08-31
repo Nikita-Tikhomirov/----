@@ -264,9 +264,22 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
     title = _clean_title(_first_group(TITLE_PATTERN, html_text, "title"))
     description = _clean_text(_first_group(DESCRIPTION_PATTERN, html_text, "description"))
     attachments = tuple(_extract_attachments(url, html_text))
-    facts = tuple(_extract_facts(visible_text, response_count=count_match.group(1) if count_match else ""))
-    buyer_desired_budget_rub = _extract_budget_amount(BUYER_BUDGET_PATTERN, visible_text)
-    kwork_max_price_rub = _extract_budget_amount(KWORK_MAX_PRICE_PATTERN, visible_text)
+    buyer_desired_budget_rub = _extract_embedded_budget(html_text, "priceLimit") or _extract_budget_amount(
+        BUYER_BUDGET_PATTERN,
+        visible_text,
+    )
+    kwork_max_price_rub = _extract_embedded_budget(
+        html_text,
+        "possiblePriceLimit",
+    ) or _extract_budget_amount(KWORK_MAX_PRICE_PATTERN, visible_text)
+    facts = tuple(
+        _extract_facts(
+            visible_text,
+            response_count=count_match.group(1) if count_match else "",
+            buyer_budget=buyer_desired_budget_rub,
+            max_price=kwork_max_price_rub,
+        )
+    )
     page_text = _shorten(visible_text, 4000)
 
     if unavailable_project_message(visible_text):
@@ -423,7 +436,12 @@ def _extract_attachments(base_url: str, html_text: str) -> list[str]:
     return attachments[:10]
 
 
-def _extract_facts(visible_text: str, response_count: str = "") -> list[str]:
+def _extract_facts(
+    visible_text: str,
+    response_count: str = "",
+    buyer_budget: int | None = None,
+    max_price: int | None = None,
+) -> list[str]:
     facts: list[str] = []
     patterns = [
         ("Бюджет", r"\b(?:Бюджет|Цена)\s*:\s*[^.]{0,80}?(?:₽|руб\.?|р\b)"),
@@ -435,8 +453,8 @@ def _extract_facts(visible_text: str, response_count: str = "") -> list[str]:
         match = re.search(pattern, visible_text, re.IGNORECASE)
         if match:
             facts.append(_clean_text(match.group(0)))
-    buyer_budget = _extract_budget_amount(BUYER_BUDGET_PATTERN, visible_text)
-    max_price = _extract_budget_amount(KWORK_MAX_PRICE_PATTERN, visible_text)
+    buyer_budget = buyer_budget or _extract_budget_amount(BUYER_BUDGET_PATTERN, visible_text)
+    max_price = max_price or _extract_budget_amount(KWORK_MAX_PRICE_PATTERN, visible_text)
     if buyer_budget is not None:
         facts.append(f"Желаемый бюджет: до {buyer_budget:,} ₽".replace(",", " "))
     if max_price is not None:
@@ -452,6 +470,22 @@ def _extract_budget_amount(pattern: re.Pattern[str], text: str) -> int | None:
         return None
     try:
         amount = int(match.group("amount").replace(" ", ""))
+    except ValueError:
+        return None
+    return amount if amount > 0 else None
+
+
+def _extract_embedded_budget(html_text: str, key: str) -> int | None:
+    """Read Kwork's authoritative budget fields from the hydrated page state."""
+    pattern = re.compile(
+        rf'["\']{re.escape(key)}["\']\s*:\s*["\']?(?P<amount>\d+(?:\.\d+)?)',
+        re.IGNORECASE,
+    )
+    match = pattern.search(html_text)
+    if not match:
+        return None
+    try:
+        amount = int(float(match.group("amount")))
     except ValueError:
         return None
     return amount if amount > 0 else None

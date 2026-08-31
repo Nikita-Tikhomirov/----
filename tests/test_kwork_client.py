@@ -46,6 +46,29 @@ def test_parse_kwork_project_html_handles_line_breaks_inside_offer_count():
     assert result.response_count == 27
 
 
+def test_parse_kwork_project_html_prefers_embedded_desired_and_permitted_budgets():
+    html = """
+    <html>
+      <head><title>Восстановить работу сайта - Kwork</title></head>
+      <body><div>Предложений: 4</div></body>
+      <script>
+        window.stateData = {
+          "priceLimit": "500.00",
+          "possiblePriceLimit": 1500,
+          "name": "Восстановить работу сайта"
+        };
+      </script>
+    </html>
+    """
+
+    result = parse_kwork_project_html("https://kwork.ru/projects/3245183/view", html)
+
+    assert result.buyer_desired_budget_rub == 500
+    assert result.kwork_max_price_rub == 1500
+    assert "Желаемый бюджет: до 500 ₽" in result.facts
+    assert "Допустимый максимум: до 1 500 ₽" in result.facts
+
+
 def test_parse_kwork_project_html_does_not_use_worker_count_as_offer_count():
     html = '<script>window.stateData={"workerCount":0,"pageName":"view_project"};</script>'
 

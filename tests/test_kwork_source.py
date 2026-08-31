@@ -148,6 +148,96 @@ def test_kwork_web_source_uses_embedded_direct_html_without_waiting_for_browser_
     assert [post.message_id for post in posts] == [3219004]
 
 
+def test_kwork_web_source_fetches_embedded_projects_across_pages(monkeypatch):
+    import app.kwork_source as source
+
+    fetched_urls = []
+
+    def page_html(current_page, items):
+        return f"""
+        <script>
+          window.pageState = {{
+            "wantsListData": {{
+              "pagination": {{
+                "current_page": {current_page},
+                "last_page": 3,
+                "data": {items}
+              }}
+            }}
+          }};
+        </script>
+        """
+
+    pages = {
+        1: page_html(
+            1,
+            """[
+              {"id": 3219010, "name": "Новый заказ", "date_create": "2026-07-18 12:00:00", "status": "active", "isWantActive": true},
+              {"id": 3219009, "name": "Второй заказ", "date_create": "2026-07-18 11:00:00", "status": "active", "isWantActive": true}
+            ]""",
+        ),
+        2: page_html(
+            2,
+            """[
+              {"id": 3219009, "name": "Повтор", "date_create": "2026-07-18 11:00:00", "status": "active", "isWantActive": true},
+              {"id": 3219008, "name": "Третий заказ", "date_create": "2026-07-18 10:00:00", "status": "active", "isWantActive": true}
+            ]""",
+        ),
+    }
+
+    def fake_fetch(url, *_args, **_kwargs):
+        fetched_urls.append(url)
+        page = 2 if "page=2" in url else 1
+        return pages[page]
+
+    monkeypatch.setattr(source, "_fetch_html", fake_fetch)
+
+    posts = KworkWebSource(
+        projects_url="https://kwork.ru/projects?c=11",
+        max_posts=3,
+        max_age_hours=0,
+        use_browser=False,
+    ).fetch_recent_posts()
+
+    assert fetched_urls == [
+        "https://kwork.ru/projects?c=11",
+        "https://kwork.ru/projects?c=11&page=2",
+    ]
+    assert [post.message_id for post in posts] == [3219010, 3219009, 3219008]
+
+
+def test_kwork_web_source_stops_pagination_when_page_adds_no_projects(monkeypatch):
+    import app.kwork_source as source
+
+    fetched_urls = []
+    html = """
+    <script>
+      window.pageState = {
+        "wantsListData": {
+          "pagination": {
+            "current_page": 1,
+            "last_page": 9,
+            "data": [
+              {"id": 3219011, "name": "Один заказ", "date_create": "2026-07-18 12:00:00", "status": "active", "isWantActive": true}
+            ]
+          }
+        }
+      };
+    </script>
+    """
+
+    def fake_fetch(url, *_args, **_kwargs):
+        fetched_urls.append(url)
+        return html
+
+    monkeypatch.setattr(source, "_fetch_html", fake_fetch)
+
+    posts = KworkWebSource(max_posts=30, max_age_hours=0, use_browser=False).fetch_recent_posts()
+
+    assert [post.message_id for post in posts] == [3219011]
+    assert len(fetched_urls) == 2
+
+
 def test_embedded_kwork_projects_skip_old_active_cards():
     now = datetime(2026, 7, 18, 1, 30, tzinfo=timezone(timedelta(hours=3)))
     html = """

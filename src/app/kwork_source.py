@@ -74,34 +74,68 @@ class KworkWebSource:
         return self.enable_replies
 
     def fetch_recent_posts(self) -> list[TelegramPost]:
-        try:
-            html_text = _fetch_html(self.projects_url, self.timeout_seconds, self.cookie)
-        except Exception as exc:
-            logger.warning("Failed to fetch Kwork projects page %s: %s", self.projects_url, exc)
-            html_text = ""
-        posts = parse_kwork_project_cards(
-            html_text,
-            max_responses=self.max_responses,
-            max_age_hours=self.max_age_hours,
-            base_url=self.projects_url,
-        )
-        if not posts and self.use_browser:
+        posts: list[TelegramPost] = []
+        seen_ids: set[int] = set()
+        page = 1
+        last_page = 1
+
+        while len(posts) < self.max_posts and page <= last_page:
+            page_url = _projects_page_url(self.projects_url, page)
             try:
-                rendered_html = _fetch_rendered_html(
-                    self.projects_url,
-                    self.cdp_url,
-                    self.timeout_seconds,
-                    self.browser_profile_dir,
-                )
-                posts = parse_kwork_project_cards(
-                    rendered_html,
-                    max_responses=self.max_responses,
-                    max_age_hours=self.max_age_hours,
-                    base_url=self.projects_url,
-                )
+                html_text = _fetch_html(page_url, self.timeout_seconds, self.cookie)
             except Exception as exc:
-                logger.warning("Failed to fetch rendered Kwork projects page via Chrome: %s", exc)
-        return posts[: self.max_posts]
+                logger.warning("Failed to fetch Kwork projects page %s: %s", page_url, exc)
+                html_text = ""
+
+            pagination = _embedded_wants_pagination(html_text)
+            page_posts = parse_kwork_project_cards(
+                html_text,
+                max_responses=self.max_responses,
+                max_age_hours=self.max_age_hours,
+                base_url=page_url,
+            )
+            if page == 1 and pagination is None and not page_posts and self.use_browser:
+                page_posts = self._fetch_first_page_via_browser()
+
+            added = 0
+            for post in page_posts:
+                if post.message_id in seen_ids:
+                    continue
+                seen_ids.add(post.message_id)
+                posts.append(post)
+                added += 1
+
+            if pagination is None:
+                break
+            current_page = _positive_int(pagination.get("current_page"), page)
+            last_page = _positive_int(pagination.get("last_page"), current_page)
+            if current_page >= last_page or (page > 1 and added == 0):
+                break
+            page = current_page + 1
+
+        return sorted(
+            posts,
+            key=lambda post: (bool(post.posted_at), post.posted_at),
+            reverse=True,
+        )[: self.max_posts]
+
+    def _fetch_first_page_via_browser(self) -> list[TelegramPost]:
+        try:
+            rendered_html = _fetch_rendered_html(
+                self.projects_url,
+                self.cdp_url,
+                self.timeout_seconds,
+                self.browser_profile_dir,
+            )
+            return parse_kwork_project_cards(
+                rendered_html,
+                max_responses=self.max_responses,
+                max_age_hours=self.max_age_hours,
+                base_url=self.projects_url,
+            )
+        except Exception as exc:
+            logger.warning("Failed to fetch rendered Kwork projects page via Chrome: %s", exc)
+            return []
 
     def send_message(
         self,
@@ -206,6 +240,21 @@ def _posts_from_embedded_wants(
     now: datetime | None = None,
 ) -> list[TelegramPost] | None:
     """Read Kwork's hydrated list when the SPA has not rendered want-card nodes."""
+    pagination = _embedded_wants_pagination(html_text)
+    if pagination is None:
+        return None
+    items = pagination.get("data", [])
+    if not isinstance(items, list):
+        return []
+    posts = [
+        post
+        for item in items
+        if (post := _post_from_embedded_want(item, base_url, max_age_hours=max_age_hours, now=now)) is not None
+    ]
+    return sorted(posts, key=lambda post: (bool(post.posted_at), post.posted_at), reverse=True)
+
+
+def _embedded_wants_pagination(html_text: str) -> dict[str, object] | None:
     decoder = json.JSONDecoder()
     for match in re.finditer(r'"wantsListData"\s*:\s*', html_text):
         try:
@@ -214,16 +263,28 @@ def _posts_from_embedded_wants(
             continue
         if not isinstance(payload, dict):
             continue
-        items = payload.get("pagination", {}).get("data", [])
-        if not isinstance(items, list):
+        pagination = payload.get("pagination")
+        if not isinstance(pagination, dict):
             continue
-        posts = [
-            post
-            for item in items
-            if (post := _post_from_embedded_want(item, base_url, max_age_hours=max_age_hours, now=now)) is not None
-        ]
-        return sorted(posts, key=lambda post: (bool(post.posted_at), post.posted_at), reverse=True)
+        return pagination
     return None
+
+
+def _projects_page_url(projects_url: str, page: int) -> str:
+    if page <= 1:
+        return projects_url
+    parts = urlsplit(projects_url)
+    query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key != "page"]
+    query.append(("page", str(page)))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def _positive_int(value: object, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
 
 
 def _post_from_embedded_want(

@@ -26,6 +26,27 @@ def test_load_config_reads_mobile_lead_hub_settings_without_mail(tmp_path, monke
     assert config.lead_hub_owner_phone == "79679812438"
 
 
+def test_load_config_blocks_unsupported_site_builders_by_default(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "TELEGRAM_API_ID=0",
+                "TELEGRAM_API_HASH=fill_later",
+                "TELEGRAM_CHANNELS=@unused",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("LEAD_BLOCKED_KEYWORDS", raising=False)
+
+    config = load_config(env_file)
+
+    assert {"битрикс", "bitrix", "tilda", "тильда", "elementor", "элементор"} <= set(
+        config.lead_blocked_keywords
+    )
+
+
 def test_load_config_reads_optional_kwork_login_credentials(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     env_file.write_text(

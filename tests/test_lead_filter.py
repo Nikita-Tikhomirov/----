@@ -13,14 +13,15 @@ def test_accepts_simple_html_css_js_wordpress_task():
     assert result.contact == "@client_dev"
 
 
-def test_accepts_react_and_site_builders_except_bitrix():
-    result = evaluate_post(
-        "Ищу разработчика React для доработки сайта на Tilda/Webflow. "
-        "Контакт @builder_owner"
-    )
+def test_rejects_tilda_and_elementor_orders_by_default():
+    for platform in ("Tilda", "Тильда", "Elementor", "Элементор"):
+        result = evaluate_post(
+            f"Ищу разработчика для доработки сайта на {platform}. "
+            "Контакт @builder_owner"
+        )
 
-    assert result.accepted is True
-    assert result.contact == "@builder_owner"
+        assert result.accepted is False
+        assert platform.lower() in result.reasons.lower()
 
 
 def test_accepts_full_time_vacancies_from_kwork_feed():

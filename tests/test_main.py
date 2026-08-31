@@ -299,6 +299,35 @@ def test_scan_once_refreshes_live_kwork_count_for_existing_queued_lead(tmp_path)
     assert project_client.inspected == ["@client_dev", "@client_dev"]
 
 
+def test_scan_once_backfills_kwork_budgets_and_price_for_existing_lead(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    project_client = FakeKworkProjectClient(response_count=1)
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=project_client,
+        kwork_max_responses=5,
+    )
+
+    project_client.buyer_desired_budget_rub = 500
+    project_client.kwork_max_price_rub = 1500
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=project_client,
+        kwork_max_responses=5,
+    )
+
+    lead = storage.list_leads()[0]
+    assert lead.buyer_desired_budget_rub == 500
+    assert lead.kwork_max_price_rub == 1500
+    assert lead.proposal_price_rub == 1300
+
+
 def test_scan_once_keeps_new_lead_retryable_when_email_fails(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
@@ -608,7 +637,10 @@ def test_scan_once_keeps_post_retryable_when_cloud_reply_is_unavailable(tmp_path
     )
 
     assert first_created == 0
-    assert storage.list_leads() == []
+    retryable_leads = storage.list_leads()
+    assert len(retryable_leads) == 1
+    assert retryable_leads[0].status == "failed"
+    assert retryable_leads[0].draft_reply == ""
 
     second_created = scan_once(
         storage=storage,
@@ -1075,6 +1107,145 @@ def test_scan_once_prices_lead_fifteen_percent_below_kwork_maximum(tmp_path):
     assert lead.buyer_desired_budget_rub == 2000
     assert lead.kwork_max_price_rub == 6000
     assert lead.proposal_price_rub == 5100
+
+
+def test_scan_once_uses_desired_budget_when_kwork_maximum_is_missing(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=FakeKworkProjectClient(
+            response_count=1,
+            buyer_desired_budget_rub=5000,
+            kwork_max_price_rub=None,
+        ),
+        lead_judge=lambda *_args, **_kwargs: LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=86,
+            complexity="simple",
+            estimated_days=2,
+            price_rub=12000,
+            summary="Исправить форму",
+            reasons=["задача понятна"],
+            risks=[],
+            questions=[],
+            draft_reply="Здравствуйте!",
+        ),
+        reply_composer=lambda _context, reply, **_kwargs: reply,
+        deepseek_api_key="sk-test",
+    )
+
+    lead = storage.list_leads()[0]
+    assert lead.proposal_price_rub == 4300
+
+
+def test_scan_once_keeps_accepted_lead_retryable_when_reply_generation_fails(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    hub = FakeLeadHub()
+    project_client = FakeKworkProjectClient(
+        response_count=4,
+        buyer_desired_budget_rub=500,
+        kwork_max_price_rub=1500,
+    )
+
+    judge_result = LeadJudgeResult(
+        accepted=True,
+        decision="accept",
+        score=88,
+        complexity="simple",
+        estimated_days=1,
+        price_rub=500,
+        summary="Восстановить работу WordPress-сайта",
+        reasons=["локальная задача"],
+        risks=[],
+        questions=[],
+        draft_reply="Черновик анализатора не должен отправляться без проверки.",
+    )
+
+    def unavailable_reply(*_args, **_kwargs):
+        raise ReplyGenerationUnavailable("quality gate rejected the draft")
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=hub,
+        kwork_project_client=project_client,
+        lead_judge=lambda *_args, **_kwargs: judge_result,
+        reply_composer=unavailable_reply,
+        openrouter_api_key="sk-or-test",
+    )
+
+    lead = storage.list_leads()[0]
+    assert created == 1
+    assert lead.status == "failed"
+    assert lead.draft_reply == ""
+    assert lead.live_response_count == 4
+    assert lead.buyer_desired_budget_rub == 500
+    assert lead.kwork_max_price_rub == 1500
+    assert lead.proposal_price_rub == 1300
+    assert "AI-отклик" in lead.last_error
+    assert not storage.get_post_rejection(lead.post_id)
+    assert hub.published == [(lead.id, "", ())]
+
+
+def test_scan_once_retries_failed_reply_generation_without_creating_a_duplicate(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    hub = FakeLeadHub()
+    project_client = FakeKworkProjectClient(response_count=2, kwork_max_price_rub=6000)
+    judge_result = LeadJudgeResult(
+        accepted=True,
+        decision="accept",
+        score=90,
+        complexity="simple",
+        estimated_days=2,
+        price_rub=5000,
+        summary="Исправить форму заявки",
+        reasons=["понятная задача"],
+        risks=[],
+        questions=[],
+        draft_reply="Черновик анализатора.",
+    )
+
+    def unavailable_reply(*_args, **_kwargs):
+        raise ReplyGenerationUnavailable("quality gate rejected the draft")
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=hub,
+        kwork_project_client=project_client,
+        lead_judge=lambda *_args, **_kwargs: judge_result,
+        reply_composer=unavailable_reply,
+        openrouter_api_key="sk-or-test",
+    )
+    original_id = storage.list_leads()[0].id
+
+    created = scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        lead_hub=hub,
+        kwork_project_client=project_client,
+        lead_judge=lambda *_args, **_kwargs: judge_result,
+        reply_composer=lambda *_args, **_kwargs: (
+            "Здравствуйте! Проверю обработку формы заявки, найду причину сбоя и внесу точечные правки. "
+            "После исправления протестирую отправку и покажу рабочий результат. Могу приступить сразу."
+        ),
+        openrouter_api_key="sk-or-test",
+    )
+
+    leads = storage.list_leads()
+    assert created == 1
+    assert len(leads) == 1
+    assert leads[0].id == original_id
+    assert leads[0].status == "new"
+    assert leads[0].draft_reply.startswith("Здравствуйте!")
+    assert len(hub.published) == 2
 
 
 def test_scan_once_passes_kwork_page_details_and_attachments_to_ai_judge(tmp_path):

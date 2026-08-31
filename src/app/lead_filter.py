@@ -25,8 +25,17 @@ CORE_WEB_LABELS = {"HTML/CSS/JS", "верстка", "WordPress"}
 
 BLOCKED_PATTERNS = (
     ("Bitrix", re.compile(r"битрикс|bitrix", re.IGNORECASE)),
+    ("Tilda/Тильда", re.compile(r"tilda|тильд\w*", re.IGNORECASE)),
+    ("Elementor/Элементор", re.compile(r"elementor|элементор\w*", re.IGNORECASE)),
 )
-DEFAULT_BLOCKED_KEYWORDS = ("битрикс", "bitrix")
+DEFAULT_BLOCKED_KEYWORDS = (
+    "битрикс",
+    "bitrix",
+    "tilda",
+    "тильда",
+    "elementor",
+    "элементор",
+)
 
 SMALL_TASK_PATTERN = re.compile(
     r"1-2\s*дн|1\s*день|2\s*дн|за день|пару часов|быстро|небольш|прост|правк",

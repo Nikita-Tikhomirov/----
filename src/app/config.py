@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.lead_filter import DEFAULT_BLOCKED_KEYWORDS
+
 try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - optional during tests
@@ -38,7 +40,7 @@ class AppConfig:
     lead_min_score: int = 60
     lead_max_days: int = 7
     lead_accept_decisions: tuple[str, ...] = ("accept", "maybe")
-    lead_blocked_keywords: tuple[str, ...] = ("битрикс", "bitrix")
+    lead_blocked_keywords: tuple[str, ...] = DEFAULT_BLOCKED_KEYWORDS
     lead_hard_reject_keywords: tuple[str, ...] = ()
     lead_required_keywords: tuple[str, ...] = ()
     deepseek_api_key: str = ""
@@ -84,7 +86,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         lead_min_score=_int_env("LEAD_MIN_SCORE", 60),
         lead_max_days=_int_env("LEAD_MAX_DAYS", 7),
         lead_accept_decisions=_csv_env("LEAD_ACCEPT_DECISIONS", ("accept", "maybe")),
-        lead_blocked_keywords=_csv_env("LEAD_BLOCKED_KEYWORDS", ("битрикс", "bitrix")),
+        lead_blocked_keywords=_csv_env("LEAD_BLOCKED_KEYWORDS", DEFAULT_BLOCKED_KEYWORDS),
         lead_hard_reject_keywords=_csv_env("LEAD_HARD_REJECT_KEYWORDS", ()),
         lead_required_keywords=_csv_env("LEAD_REQUIRED_KEYWORDS", ()),
         deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
