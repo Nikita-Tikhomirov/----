@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from app.ai_lead_judge import (
     DEFAULT_ACCEPT_DECISIONS,
@@ -138,6 +138,7 @@ def scan_once(
     lead_blocked_keywords: tuple[str, ...] = DEFAULT_BLOCKED_KEYWORDS,
     lead_hard_reject_keywords: tuple[str, ...] = DEFAULT_HARD_REJECT_KEYWORDS,
     lead_required_keywords: tuple[str, ...] = (),
+    new_lead_handler: Callable[[object], None] | None = None,
 ) -> int:
     # Older extensions called scan_once(storage, source, email_client) positionally.
     # Keep that test seam while production always supplies LeadHubClient here.
@@ -510,6 +511,12 @@ def scan_once(
         lead = storage.get_lead(lead_id)
         if lead.status != "new":
             continue
+        if new_lead_handler is not None:
+            try:
+                new_lead_handler(lead)
+            except Exception:
+                logger.exception("Immediate lead handler failed for lead %s", lead.id)
+            lead = storage.get_lead(lead_id)
         if rebuild_existing and lead_hub is not None:
             storage.prepare_lead_hub_resync(lead.id)
             if _publish_lead(storage, lead_hub, storage.get_lead(lead.id)):
@@ -759,40 +766,44 @@ def _auto_send_new_leads(
         previous_status = previous_statuses.get(lead.id)
         if previous_status not in {None, "failed"}:
             continue
-
-        block_reason = _auto_send_block_reason(storage, lead)
-        if block_reason:
-            storage.mark_failed(lead.id, block_reason)
-            logger.warning("Auto-send blocked lead %s: %s", lead.id, block_reason)
-            continue
-        if not storage.begin_lead_send(lead.id):
-            logger.warning("Auto-send could not reserve lead %s", lead.id)
-            continue
-
-        try:
-            message_id = sender.send_reply(
-                lead.contact,
-                lead.draft_reply,
-                price_rub=lead.proposal_price_rub,
-                days=lead.proposal_days,
-                title=lead.proposal_title,
-                submit=True,
-            )
-        except Exception as exc:
-            storage.mark_failed(lead.id, str(exc))
-            logger.exception("Auto-send failed for Kwork lead %s", lead.id)
-            continue
-
-        try:
-            storage.mark_sent(lead.id, lead.contact, message_id)
-        except Exception:
-            # The browser may already have submitted the proposal. Keep the
-            # reserved sending state so a later pass cannot duplicate it.
-            logger.exception("Kwork accepted auto-send lead %s, but persistence failed", lead.id)
-            continue
-        logger.info("Auto-sent Kwork lead %s (%s)", lead.id, lead.contact)
-        sent += 1
+        sent += int(_auto_send_lead(storage, lead, sender))
     return sent
+
+
+def _auto_send_lead(storage: Storage, lead, sender: KworkReplySender) -> bool:
+    """Validate, reserve and submit one lead without waiting for the scan to finish."""
+    block_reason = _auto_send_block_reason(storage, lead)
+    if block_reason:
+        storage.mark_failed(lead.id, block_reason)
+        logger.warning("Auto-send blocked lead %s: %s", lead.id, block_reason)
+        return False
+    if not storage.begin_lead_send(lead.id):
+        logger.warning("Auto-send could not reserve lead %s", lead.id)
+        return False
+
+    try:
+        message_id = sender.send_reply(
+            lead.contact,
+            lead.draft_reply,
+            price_rub=lead.proposal_price_rub,
+            days=lead.proposal_days,
+            title=lead.proposal_title,
+            submit=True,
+        )
+    except Exception as exc:
+        storage.mark_failed(lead.id, str(exc))
+        logger.exception("Auto-send failed for Kwork lead %s", lead.id)
+        return False
+
+    try:
+        storage.mark_sent(lead.id, lead.contact, message_id)
+    except Exception:
+        # The browser may already have submitted the proposal. Keep the
+        # reserved sending state so a later pass cannot duplicate it.
+        logger.exception("Kwork accepted auto-send lead %s, but persistence failed", lead.id)
+        return False
+    logger.info("Auto-sent Kwork lead %s (%s)", lead.id, lead.contact)
+    return True
 
 
 def _auto_send_block_reason(storage: Storage, lead) -> str:
@@ -1122,6 +1133,26 @@ def _scan_runtime_once(
             return
         cookie = _resolve_kwork_cookie(config)
         previous_statuses = {lead.id: lead.status for lead in storage.list_leads()}
+        auto_sender = None
+        auto_send_daily_limit = max(1, getattr(config, "kwork_auto_send_daily_limit", 10))
+        if getattr(config, "kwork_auto_send", False):
+            auto_sender = KworkReplySender(
+                cdp_url=config.kwork_cdp_url,
+                browser_profile_dir=config.kwork_browser_profile_dir,
+                login_email=config.kwork_login_email,
+                login_password=config.kwork_login_password,
+                max_responses=config.kwork_max_responses,
+                cookie=cookie,
+            )
+
+        def send_immediately(lead) -> None:
+            if auto_sender is None:
+                return
+            if storage.count_sent_today_moscow() >= auto_send_daily_limit:
+                logger.info("Kwork auto-send daily limit %s is already reached", auto_send_daily_limit)
+                return
+            _auto_send_lead(storage, lead, auto_sender)
+
         scan_once(
             storage, telegram_client, lead_hub,
             deepseek_api_key=config.deepseek_api_key,
@@ -1145,21 +1176,14 @@ def _scan_runtime_once(
             lead_blocked_keywords=config.lead_blocked_keywords,
             lead_hard_reject_keywords=config.lead_hard_reject_keywords,
             lead_required_keywords=config.lead_required_keywords,
+            new_lead_handler=send_immediately if auto_sender is not None else None,
         )
-        if getattr(config, "kwork_auto_send", False):
-            sender = KworkReplySender(
-                cdp_url=config.kwork_cdp_url,
-                browser_profile_dir=config.kwork_browser_profile_dir,
-                login_email=config.kwork_login_email,
-                login_password=config.kwork_login_password,
-                max_responses=config.kwork_max_responses,
-                cookie=cookie,
-            )
+        if auto_sender is not None:
             _auto_send_new_leads(
                 storage,
                 previous_statuses,
-                sender,
-                daily_limit=max(1, getattr(config, "kwork_auto_send_daily_limit", 10)),
+                auto_sender,
+                daily_limit=auto_send_daily_limit,
             )
         _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
 

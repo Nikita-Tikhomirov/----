@@ -69,7 +69,7 @@ FILTER_SETTINGS = (
     ("KWORK_AUTO_SEND_DAILY_LIMIT", "Лимит автоотправок за сутки", "10"),
     ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
     ("KWORK_MAX_AGE_HOURS", "Возраст заказа, часов (0 = без лимита)", "24"),
-    ("SCAN_INTERVAL_SECONDS", "Интервал мониторинга, сек", "60"),
+    ("SCAN_INTERVAL_SECONDS", "Интервал мониторинга, сек", "10"),
     ("MAX_POSTS_PER_CHANNEL", "Заказов за проход", "30"),
     ("LEAD_MIN_SCORE", "Мин. AI score", "60"),
     ("LEAD_MAX_DAYS", "Макс. срок, дней", "7"),

@@ -675,6 +675,12 @@ async (payload) => {
   } else if (daysField && payload.days) {
     setValue(daysField, payload.days);
   }
+  const paymentTypeItems = Array.from(document.querySelectorAll('.offer-payment-type__item')).filter(visible);
+  const fullPaymentItem = paymentTypeItems.find(item => /целиком|после успешного завершения/i.test(norm(item.innerText)));
+  if (fullPaymentItem && !fullPaymentItem.classList.contains('active')) {
+    fullPaymentItem.click();
+    await pause(150);
+  }
   const messageFilled = matchesText(messageField, payload.text);
   const priceHasError = Boolean(priceField?.classList.contains('input-style--error'));
   const priceErrorText = priceHasError
@@ -687,11 +693,14 @@ async (payload) => {
   const daysFilled = !payload.days || (durationWidget
     ? matchesNumber(selectedDuration, payload.days)
     : matchesNumber(daysField, payload.days));
+  const paymentTypeFilled = !paymentTypeItems.length
+    || Boolean(fullPaymentItem && fullPaymentItem.classList.contains('active'));
   const missing = [];
   if (!messageFilled) missing.push('reply text');
   if (payload.title && !titleFilled) missing.push('order title');
   if (payload.price && !priceFilled) missing.push(priceErrorText || 'price');
   if (payload.days && !daysFilled) missing.push('deadline');
+  if (!paymentTypeFilled) missing.push('payment order');
   if (missing.length) {
     return JSON.stringify({
       ok: false,
@@ -701,6 +710,7 @@ async (payload) => {
       priceErrorText,
       titleFilled,
       daysFilled,
+      paymentTypeFilled,
       reason: 'Kwork did not accept required fields: ' + missing.join(', ')
     });
   }
@@ -712,7 +722,8 @@ async (payload) => {
       priceFilled,
       priceErrorText,
       titleFilled,
-      daysFilled
+      daysFilled,
+      paymentTypeFilled
     });
   }
   const form = messageField.closest('form') || document;
@@ -726,7 +737,8 @@ async (payload) => {
       messageFilled,
       priceFilled,
       titleFilled,
-      daysFilled
+      daysFilled,
+      paymentTypeFilled
   });
 }
 """

@@ -127,6 +127,10 @@ def test_reply_form_opener_supports_kwork_span_buttons():
     assert "input-style--error" in _FILL_AND_SUBMIT_SCRIPT
     assert "priceErrorText" in _FILL_AND_SUBMIT_SCRIPT
     assert "Стоимость может быть не более" in _FILL_AND_SUBMIT_SCRIPT
+    assert ".offer-payment-type__item" in _FILL_AND_SUBMIT_SCRIPT
+    assert "paymentTypeFilled" in _FILL_AND_SUBMIT_SCRIPT
+    assert "payment order" in _FILL_AND_SUBMIT_SCRIPT
+    assert "|| paymentTypeItems[0]" not in _FILL_AND_SUBMIT_SCRIPT
     assert ".duration-select__selected-option')" in _FILL_AND_SUBMIT_SCRIPT
     assert "|| durationWidget?.querySelector('.vs__selected')" in _FILL_AND_SUBMIT_SCRIPT
 

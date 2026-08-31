@@ -313,6 +313,51 @@ def test_scan_once_creates_lead_and_sends_email(tmp_path):
     assert email_client.sent_leads == [leads[0].id]
 
 
+def test_scan_once_hands_new_lead_to_sender_before_scanning_next_post(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    source = FakeTelegramClient()
+    first = source.fetch_recent_posts()[0]
+    source.fetch_recent_posts = lambda: [
+        first,
+        FakePost(
+            channel="jobs",
+            message_id=2,
+            url="https://t.me/jobs/2",
+            text="Нужно исправить HTML/CSS форму за один день. Контакт @second_client",
+            posted_at="2026-05-04T10:01:00+03:00",
+        ),
+    ]
+    events = []
+
+    def judge(text, **kwargs):
+        events.append("judge-2" if "second_client" in text else "judge-1")
+        return LeadJudgeResult(
+            accepted=True,
+            decision="accept",
+            score=90,
+            complexity="simple",
+            estimated_days=1,
+            price_rub=1500,
+            summary="Исправить форму",
+            reasons=["простая веб-задача"],
+            risks=[],
+            questions=[],
+            draft_reply="Исправлю форму и проверю отправку.",
+        )
+
+    scan_once(
+        storage=storage,
+        telegram_client=source,
+        email_client=FakeEmailClient(),
+        lead_judge=judge,
+        reply_composer=lambda context, seed_reply, **kwargs: seed_reply,
+        new_lead_handler=lambda lead: events.append(f"send-{lead.message_id}"),
+    )
+
+    assert events == ["judge-1", "send-1", "judge-2", "send-2"]
+
+
 def test_scan_once_skips_email_when_another_process_has_claimed_the_lead(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
