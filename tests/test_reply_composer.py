@@ -62,13 +62,7 @@ def test_composer_redacts_budget_before_calling_openrouter_and_keeps_good_reply(
     )
     with patch(
         "app.reply_composer.openrouter_chat",
-        side_effect=[
-            OpenRouterResult(content=good_reply, model="anthropic/claude-sonnet-4.5"),
-            OpenRouterResult(
-                content='{"approved": true, "issues": []}',
-                model="anthropic/claude-sonnet-4.5",
-            ),
-        ],
+        return_value=OpenRouterResult(content=good_reply, model="anthropic/claude-sonnet-4.5"),
     ) as gateway:
         reply = compose_customer_reply(
             _form_context(),
@@ -87,9 +81,10 @@ def test_composer_redacts_budget_before_calling_openrouter_and_keeps_good_reply(
     assert gateway.call_args_list[0].kwargs["primary_model"] == "anthropic/claude-sonnet-4.5"
     assert gateway.call_args_list[0].kwargs["fallback_models"] == ("openai/gpt-4.1",)
     assert gateway.call_args_list[0].kwargs["base_url"] == "https://openrouter.example/v1"
+    assert gateway.call_count == 1
 
 
-def test_composer_repairs_reply_rejected_by_ai_reviewer():
+def test_composer_repairs_reply_with_deterministic_delivery_blocker():
     repaired_reply = (
         "Здравствуйте! Вижу задачу по исправлению отправки формы заявки и адаптива лендинга. "
         "Сначала проверю текущую валидацию и обработку формы, затем внесу правки в разметку и стили для мобильных. "
@@ -103,42 +98,57 @@ def test_composer_repairs_reply_rejected_by_ai_reviewer():
                 content="Здравствуйте! Готов помочь, обсудим детали.",
                 model="anthropic/claude-sonnet-4.5",
             ),
-            OpenRouterResult(
-                content='{"approved": false, "issues": ["нет конкретных действий"]}',
-                model="anthropic/claude-sonnet-4.5",
-            ),
             OpenRouterResult(content=repaired_reply, model="anthropic/claude-sonnet-4.5"),
         ],
     ) as gateway:
         reply = compose_customer_reply(_form_context(), "", api_key="sk-test")
 
     assert reply == repaired_reply
-    assert gateway.call_count == 3
+    assert gateway.call_count == 2
 
 
-def test_composer_uses_safe_analysis_draft_when_writer_and_repair_are_unsafe():
+def test_composer_uses_safe_analysis_draft_without_a_second_model_call():
     analysis_draft = (
         "Здравствуйте! Исправлю отправку формы заявки на лендинге и приведу блок к корректному виду на мобильных. "
         "Проверю текущую валидацию и обработчик, затем внесу правки в разметку и логику отправки. "
         "После изменений протестирую заполнение и отправку формы на телефоне и в основных браузерах. "
         "Уложусь в два дня и могу приступить сразу."
     )
-    unsafe_writer_reply = "Здравствуйте! Готов помочь, давайте обсудим детали."
     with patch(
         "app.reply_composer.openrouter_chat",
-        side_effect=[
-            OpenRouterResult(content=unsafe_writer_reply, model="anthropic/claude-sonnet-4.5"),
-            OpenRouterResult(
-                content='{"approved": false, "issues": ["нет конкретных действий"]}',
-                model="anthropic/claude-sonnet-4.5",
-            ),
-            OpenRouterResult(content=unsafe_writer_reply, model="anthropic/claude-sonnet-4.5"),
-        ],
-    ):
+        side_effect=AssertionError("safe analysis draft must skip the writer"),
+    ) as gateway:
         reply = compose_customer_reply(_form_context(), analysis_draft, api_key="sk-test")
 
     assert reply == analysis_draft
     assert reply_quality_issues(reply, _form_context()) == ()
+    gateway.assert_not_called()
+
+
+def test_composer_sends_grounded_wordpress_service_reply_after_one_model_call():
+    context = ReplyDraftContext(
+        title="Сайт на WordPress",
+        task_summary="Новый сайт услуг грузчиков в Казани на WordPress",
+        source_text="Нужно сделать сайт на WordPress для услуг грузчиков в Казани.",
+        attachment_context="",
+        estimated_days=5,
+    )
+    reply = (
+        "Здравствуйте! Сделаю сайт услуг грузчиков в Казани на WordPress. "
+        "Подберу и настрою тему под нишу. "
+        "Соберу основные разделы с услугами и контактами. "
+        "Добавлю форму заявки. "
+        "Проверю страницы и основные сценарии перед сдачей. "
+        "Могу приступить сразу."
+    )
+    with patch(
+        "app.reply_composer.openrouter_chat",
+        return_value=OpenRouterResult(content=reply, model="anthropic/claude-sonnet-4.5"),
+    ) as gateway:
+        result = compose_customer_reply(context, "", api_key="or-test")
+
+    assert result == reply
+    assert gateway.call_count == 1
 
 
 def test_quality_gate_marks_ai_and_multiple_questions_as_unsafe():
@@ -309,10 +319,6 @@ def test_composer_blocks_when_provider_keeps_prohibited_clarification():
         "app.reply_composer.openrouter_chat",
         side_effect=[
             OpenRouterResult(content=unsafe_reply, model="anthropic/claude-sonnet-4.5"),
-            OpenRouterResult(
-                content='{"approved": true, "issues": []}',
-                model="anthropic/claude-sonnet-4.5",
-            ),
             OpenRouterResult(content=unsafe_reply, model="anthropic/claude-sonnet-4.5"),
         ],
     ):
@@ -333,14 +339,13 @@ def test_composer_never_publishes_generic_fallback_when_cloud_generation_fails()
             )
 
 
-def test_composer_keeps_grounded_draft_when_ai_reviewer_demands_unneeded_details():
+def test_composer_keeps_grounded_writer_draft_without_a_second_model_call():
     grounded_reply = (
         "Здравствуйте! Разберусь, почему данные сервера и Метрики расходятся, и настрою корректный учёт событий. "
         "Проверю код счётчика, сопоставлю серверные логи с событиями за контрольный период и найду точку расхождения. "
         "После правок повторно сравню статистику и зафиксирую результат проверки. "
         "Могу приступить сразу и выполнить работу за три дня."
     )
-    invalid_repair = grounded_reply + " Для работы понадобятся доступы к серверу и Метрике."
     context = replace(
         _form_context(),
         title="Починить аналитику лендинга",
@@ -350,19 +355,13 @@ def test_composer_keeps_grounded_draft_when_ai_reviewer_demands_unneeded_details
     )
     with patch(
         "app.reply_composer.openrouter_chat",
-        side_effect=[
-            OpenRouterResult(content=grounded_reply, model="anthropic/claude-sonnet-4.5"),
-            OpenRouterResult(
-                content='{"approved": false, "issues": ["нужно упомянуть доступы"]}',
-                model="anthropic/claude-sonnet-4.5",
-            ),
-            OpenRouterResult(content=invalid_repair, model="anthropic/claude-sonnet-4.5"),
-        ],
-    ):
+        return_value=OpenRouterResult(content=grounded_reply, model="anthropic/claude-sonnet-4.5"),
+    ) as gateway:
         reply = compose_customer_reply(context, "", api_key="or-test")
 
     assert reply == grounded_reply
     assert reply_quality_issues(reply, context) == ()
+    assert gateway.call_count == 1
 
 
 def test_fallback_uses_title_when_task_summary_judges_customer_skill():
@@ -598,6 +597,24 @@ def test_quality_gate_rejects_unmentioned_wordpress_theme_plugins_and_categories
     )
 
     assert "unsupported task action" in reply_quality_issues(reply, context)
+
+
+def test_quality_gate_allows_theme_and_lead_form_for_new_wordpress_service_site():
+    context = ReplyDraftContext(
+        title="Сайт на WordPress",
+        task_summary="Новый сайт услуг грузчиков в Казани на WordPress",
+        source_text="Нужно сделать сайт на WordPress для услуг грузчиков в Казани.",
+        attachment_context="",
+        estimated_days=5,
+    )
+    reply = (
+        "Здравствуйте! Сделаю сайт услуг грузчиков в Казани на WordPress. "
+        "Подберу и настрою тему под нишу, соберу основные разделы и добавлю форму заявки. "
+        "После сборки проверю страницы, ссылки и отправку заявки. "
+        "Могу приступить сразу."
+    )
+
+    assert "unsupported task action" not in reply_quality_issues(reply, context)
 
 
 def test_quality_gate_rejects_overly_detailed_reply():

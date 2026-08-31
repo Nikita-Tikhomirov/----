@@ -74,6 +74,9 @@ def test_judge_prompt_keeps_questions_internal_and_out_of_customer_draft():
     assert "blocking_question обычно оставляй пустой строкой" in prompt
     assert "только если без ответа невозможно" in prompt
     assert "никаких других вопросов" in prompt
+    assert "начни draft_reply с «здравствуйте!»" in prompt
+    assert "не пиши «план такой»" in prompt
+    assert "не добавляй каналы связи" in prompt
 
 
 def test_parse_judge_response_keeps_customer_goal_and_fact_grounded_work_plan():

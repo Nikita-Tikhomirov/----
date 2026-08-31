@@ -133,8 +133,13 @@ CATALOG_CATEGORY_ACTION_PATTERN = re.compile(r"\bкатегор\w*\b", re.IGNORE
 ALL_DEVICES_ACTION_PATTERN = re.compile(r"\b(?:на|для)\s+всех\s+устройств\w*\b", re.IGNORECASE)
 RESPONSIVE_FACT_PATTERN = re.compile(r"\b(?:адаптив\w*|мобиль\w*|устройств\w*|разрешени\w*|responsive)\b", re.IGNORECASE)
 DOMAIN_TASK_PATTERN = re.compile(r"\b(?:домен\w*|dns|vercel|хостинг\w*)\b", re.IGNORECASE)
+SITE_CREATION_TASK_PATTERN = re.compile(
+    r"\b(?:сделать|создать|разработать|собрать)\w*[^.!?\n]{0,100}\bсайт\w*\b|"
+    r"\bнов\w*\s+сайт\w*\b",
+    re.IGNORECASE,
+)
+SERVICE_SITE_PATTERN = re.compile(r"\bуслуг\w*\b", re.IGNORECASE)
 TASK_ACTION_REFERENCE_PATTERNS = (
-    FORM_TASK_PATTERN,
     WORDPRESS_TASK_PATTERN,
     INTEGRATION_TASK_PATTERN,
     PAYMENT_TASK_PATTERN,
@@ -215,6 +220,9 @@ def compose_customer_reply(
 ) -> str:
     """Return a concise proposal that is safe to show in email and send to Kwork."""
     seed_candidate = _remove_commercial_sentences(seed_reply)
+    if seed_candidate and not reply_delivery_issues(seed_candidate, context):
+        logger.info("Using the grounded analysis draft without a second model call")
+        return _normalize_reply(seed_candidate)
     candidate = seed_candidate
     if api_key.strip():
         generated = _compose_with_openrouter(
@@ -232,25 +240,12 @@ def compose_customer_reply(
             raise ReplyGenerationUnavailable("cloud AI reply unavailable")
         candidate = _remove_commercial_sentences(generated)
 
-    deterministic_issues = reply_quality_issues(candidate, context)
-    ai_review: ReplyQualityResult | None = None
-    if api_key.strip() and candidate:
-        ai_review = _review_with_openrouter(
-            candidate,
-            context,
-            api_key,
-            model,
-            base_url,
-            fallback_models,
-            timeout_seconds,
-        )
-
-    review_issues = ai_review.issues if ai_review is not None else ()
-    if deterministic_issues or (ai_review is not None and not ai_review.approved):
+    blocking_issues = reply_delivery_issues(candidate, context)
+    if blocking_issues:
         if api_key.strip():
             repaired = _repair_with_openrouter(
                 candidate,
-                tuple(dict.fromkeys((*deterministic_issues, *review_issues))),
+                blocking_issues,
                 context,
                 api_key,
                 model,
@@ -258,18 +253,11 @@ def compose_customer_reply(
                 fallback_models,
                 timeout_seconds,
             )
-            if not reply_quality_issues(repaired, context):
+            if repaired and not reply_delivery_issues(repaired, context):
                 return _normalize_reply(repaired)
-            if seed_candidate and not reply_quality_issues(seed_candidate, context):
+            if seed_candidate and not reply_delivery_issues(seed_candidate, context):
                 logger.warning("Cloud writer repair stayed unsafe; using the grounded analysis draft")
                 return _normalize_reply(seed_candidate)
-            if not deterministic_issues:
-                logger.warning(
-                    "AI reviewer repair failed deterministic checks; keeping the grounded original draft"
-                )
-                return _normalize_reply(candidate)
-            raise ReplyGenerationUnavailable("cloud AI reply unavailable: quality gate rejected the draft")
-        if api_key.strip():
             raise ReplyGenerationUnavailable("cloud AI reply unavailable: quality gate rejected the draft")
         return _fallback_reply(context)
 
@@ -653,9 +641,24 @@ def _has_unsupported_task_action(reply: str, context: ReplyDraftContext) -> bool
     facts = " ".join(
         (context.title, context.task_summary, context.source_text, context.attachment_context)
     )
+    creates_site = SITE_CREATION_TASK_PATTERN.search(facts) is not None
+    creates_wordpress_site = creates_site and WORDPRESS_TASK_PATTERN.search(facts) is not None
+    creates_service_site = creates_site and SERVICE_SITE_PATTERN.search(facts) is not None
+    if (
+        FORM_TASK_PATTERN.search(reply) is not None
+        and FORM_TASK_PATTERN.search(facts) is None
+        and not creates_service_site
+    ):
+        return True
     if any(
         pattern.search(reply) is not None and pattern.search(facts) is None
         for pattern in TASK_ACTION_REFERENCE_PATTERNS
+    ):
+        return True
+    if (
+        WORDPRESS_THEME_ACTION_PATTERN.search(reply) is not None
+        and WORDPRESS_THEME_ACTION_PATTERN.search(facts) is None
+        and not creates_wordpress_site
     ):
         return True
     if any(
@@ -663,7 +666,6 @@ def _has_unsupported_task_action(reply: str, context: ReplyDraftContext) -> bool
         for pattern in (
             CATALOG_FILL_ACTION_PATTERN,
             CATALOG_FILTER_ACTION_PATTERN,
-            WORDPRESS_THEME_ACTION_PATTERN,
             WORDPRESS_PLUGIN_ACTION_PATTERN,
             CATALOG_CATEGORY_ACTION_PATTERN,
         )
