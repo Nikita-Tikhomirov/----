@@ -168,6 +168,19 @@ def test_judge_lead_rejects_bitrix_without_api_call():
     assert "Bitrix" in result.reasons[0]
 
 
+def test_judge_lead_rejects_orders_that_forbid_ai_workflow_without_api_call():
+    with patch("app.ai_lead_judge.openrouter_chat") as chat:
+        result = judge_lead(
+            "Нужен сайт на WordPress. Не использовать AI/vibe-coding как основной способ разработки.",
+            api_key="or-test",
+        )
+
+    assert result.accepted is False
+    assert result.decision == "reject"
+    assert "AI" in result.reasons[0]
+    chat.assert_not_called()
+
+
 def test_judge_lead_uses_deepseek_json_verdict():
     with patch("openai.OpenAI") as mock_openai_class:
         mock_client = MagicMock()

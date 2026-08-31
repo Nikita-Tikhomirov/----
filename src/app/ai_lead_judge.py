@@ -16,6 +16,13 @@ class LeadAnalysisUnavailable(RuntimeError):
     """Raised when a configured cloud judge cannot return a usable verdict."""
 
 BITRIX_PATTERN = re.compile(r"битрикс|bitrix", re.IGNORECASE)
+AI_WORKFLOW_PROHIBITION_PATTERN = re.compile(
+    r"(?:не\s+(?:использовать|применять)|без\s+использования|запрещ\w*\s+использован\w*)"
+    r".{0,80}(?:\bai\b|\bии\b|vibe[\s-]*cod\w*)"
+    r"|(?:\bai\b|\bии\b|vibe[\s-]*cod\w*).{0,80}"
+    r"(?:не\s+(?:использовать|применять)|запрещ\w*)",
+    re.IGNORECASE,
+)
 SIMPLE_PATTERN = re.compile(
     r"верст|лендинг|landing|html|css|js|javascript|wordpress|вордпресс|wp|форма|"
     r"адаптив|правк|поправ|исправ|калькулятор|парсер|бот|интеграц",
@@ -80,6 +87,8 @@ def judge_lead(
     blocked = _matched_keywords(text, blocked_keywords)
     if BITRIX_PATTERN.search(text):
         return _reject("Bitrix/Битрикс исключен", text)
+    if AI_WORKFLOW_PROHIBITION_PATTERN.search(text):
+        return _reject("заказ запрещает рабочий процесс с AI-агентом", text)
     if blocked:
         return _reject(f"стоп-слова: {', '.join(blocked)}", text)
 
