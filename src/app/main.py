@@ -228,7 +228,7 @@ def scan_once(
             required_keywords=lead_required_keywords,
         )
         if not evaluation.accepted:
-            reason = "; ".join(evaluation.reasons)
+            reason = evaluation.reasons
             logger.info("Rejected post %s/%s: %s", post.channel, post.message_id, evaluation.reasons)
             storage.record_post_rejection(post_id, reason)
             if rebuild_existing and existing_lead is not None:
@@ -1028,7 +1028,7 @@ def build_runtime(config: AppConfig):
         login_password=config.kwork_login_password,
     )
     if config.kwork_source == "web":
-        logger.warning("Using Kwork web source with GUI-only replies")
+        logger.info("Using Kwork web source with replies through the active Chrome session")
         telegram_client = KworkWebSource(
             projects_url=config.kwork_projects_url,
             max_posts=config.max_posts_per_channel,
@@ -1184,7 +1184,10 @@ def run_mobile_control_loop(
             )
             requested = bool(monitor.get("scan_requested"))
             scheduled = (
-                monitor.get("desired_state") == "running"
+                (
+                    monitor.get("desired_state") == "running"
+                    or getattr(config, "kwork_auto_send", False)
+                )
                 and time.monotonic() >= next_scheduled_scan
             )
             if requested or scheduled:

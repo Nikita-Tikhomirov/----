@@ -2378,3 +2378,34 @@ def test_idle_mobile_control_resolves_chrome_cookie_only_once(monkeypatch):
 
     assert cookie_calls == [True]
     assert approval_cookies == ["session-cookie", "session-cookie"]
+
+
+def test_mobile_control_scans_when_local_autosend_is_enabled(monkeypatch):
+    config = SimpleNamespace(
+        scan_interval_seconds=60,
+        lead_hub_executor_id="desktop-main",
+        kwork_auto_send=True,
+    )
+    scans = []
+
+    class StoppedHub:
+        def fetch_monitor_control(self):
+            return {"desired_state": "stopped", "scan_requested": False}
+
+        def report_monitor_heartbeat(self, *_args, **_kwargs):
+            return {}
+
+    monkeypatch.setattr(main_module, "_resolve_kwork_cookie", lambda _config: "")
+    monkeypatch.setattr(main_module, "_process_mobile_approvals_from_runtime", lambda *_args: 0)
+    monkeypatch.setattr(main_module, "_scan_runtime_once", lambda *_args: scans.append(True))
+    def stop_loop(_seconds):
+        raise StopIteration
+
+    monkeypatch.setattr(main_module.time, "sleep", stop_loop)
+
+    try:
+        main_module.run_mobile_control_loop(object(), object(), StoppedHub(), object(), config)
+    except StopIteration:
+        pass
+
+    assert scans == [True]
