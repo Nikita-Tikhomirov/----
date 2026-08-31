@@ -138,6 +138,8 @@ class KworkReplySender:
                 if login_message:
                     raise RuntimeError(login_message)
             project_title = (title or self._project_title(ws)).strip()
+            if submit and self.max_responses is not None:
+                self._ensure_project_is_replyable(contact)
             submit_result = self._fill_and_submit(ws, clean_text, terms, project_title, submit=submit)
             if not submit_result.get("ok"):
                 reason = submit_result.get("reason") or "Kwork submit button was not found"

@@ -341,6 +341,59 @@ def test_kwork_reply_sender_preflights_live_count_before_opening_reply_form(monk
     assert chrome_actions == []
 
 
+def test_kwork_reply_sender_rechecks_live_count_immediately_before_submit(monkeypatch):
+    from app import kwork_source
+
+    checks = []
+
+    def check_live_count(_self, _contact):
+        checks.append("check")
+        if len(checks) == 2:
+            raise KworkProjectReplyabilityError(
+                "Kwork project now has 7 responses; limit is 6. Reply was not sent."
+            )
+
+    class FakeSocket:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(KworkReplySender, "_ensure_project_is_replyable", check_live_count)
+    monkeypatch.setattr(KworkReplySender, "_try_open_direct_offer", lambda *_args: True)
+    monkeypatch.setattr(
+        KworkReplySender,
+        "_fill_and_submit",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("form submitted before the final live-count check")
+        ),
+    )
+    monkeypatch.setattr(kwork_source, "_ensure_chrome_cdp", lambda *_args: None)
+    monkeypatch.setattr(
+        kwork_source,
+        "_find_or_create_page",
+        lambda *_args, **_kwargs: {"webSocketDebuggerUrl": "ws://fake"},
+    )
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda _ws, expression: True if "querySelector" in expression else "Оставить отзыв",
+    )
+    monkeypatch.setattr("app.kwork_sender.websocket.create_connection", lambda *_args, **_kwargs: FakeSocket())
+
+    sender = KworkReplySender(max_responses=6)
+
+    with pytest.raises(KworkProjectReplyabilityError, match=r"7.*6"):
+        sender.send_reply(
+            "https://kwork.ru/projects/123/view",
+            "Исправлю форму и проверю отправку.",
+            price_rub=3000,
+            days=1,
+            title="Исправить форму",
+            submit=True,
+        )
+
+    assert checks == ["check", "check"]
+
+
 def test_kwork_reply_sender_passes_structured_terms_from_approval(monkeypatch):
     captured = {}
 
