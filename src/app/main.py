@@ -1243,7 +1243,7 @@ def run_mobile_control_loop(
 ) -> None:
     """Keep the local Kwork session responsive to commands from the mobile app."""
     next_scheduled_scan = 0.0
-    poll_seconds = min(15, max(3, config.scan_interval_seconds // 12))
+    poll_seconds = min(15, max(1, config.scan_interval_seconds // 12))
     approval_cookie = _resolve_kwork_cookie(config)
     while True:
         try:

@@ -2570,4 +2570,4 @@ def test_mobile_control_keeps_scan_start_times_on_configured_interval(monkeypatc
     with pytest.raises(StopIteration):
         main_module.run_mobile_control_loop(object(), object(), StoppedHub(), object(), config)
 
-    assert scan_started_at == [0.0, 11.0]
+    assert scan_started_at == [0.0, 10.0]
