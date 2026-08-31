@@ -24,6 +24,26 @@ def test_rejects_tilda_and_elementor_orders_by_default():
         assert platform.lower() in result.reasons.lower()
 
 
+def test_rejects_visual_builders_before_ai_analysis():
+    platforms = (
+        "Яндекс Кит",
+        "Yandex Kit",
+        "Тимбли",
+        "Timbly",
+        "Webflow",
+        "Wix",
+        "визуальный конструктор",
+    )
+
+    for platform in platforms:
+        result = evaluate_post(
+            f"Нужно собрать сайт через {platform}. Отклик: https://example.com/order"
+        )
+
+        assert result.accepted is False
+        assert result.reasons
+
+
 def test_rejects_native_ios_app_orders_but_keeps_web_ios_compatibility_work():
     native = evaluate_post(
         "Нужно разработать приложение для iOS на Swift и собрать проект в Xcode. "

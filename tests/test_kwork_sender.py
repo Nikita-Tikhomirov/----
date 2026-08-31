@@ -7,6 +7,8 @@ from app.kwork_sender import (
     KworkReplySender,
     ReplyTerms,
     _AUTO_LOGIN_SCRIPT,
+    _INSTALL_OFFER_RESPONSE_PROBE_SCRIPT,
+    _OFFER_RESPONSE_PROBE_SCRIPT,
     _extract_reply_terms,
     _form_fill_errors,
     _is_kwork_reply_destination,
@@ -137,7 +139,16 @@ def test_reply_form_opener_supports_kwork_span_buttons():
     assert "|| durationWidget?.querySelector('.vs__selected')" in _FILL_AND_SUBMIT_SCRIPT
 
 
-def test_fill_and_submit_dispatches_a_trusted_cdp_click(monkeypatch):
+def test_fill_script_waits_for_kwork_vue_form_to_settle_before_submit():
+    from app.kwork_sender import _FILL_AND_SUBMIT_SCRIPT
+
+    settle_wait = "await new Promise(resolve => setTimeout(resolve, 1000))"
+
+    assert settle_wait in _FILL_AND_SUBMIT_SCRIPT
+    assert _FILL_AND_SUBMIT_SCRIPT.index(settle_wait) < _FILL_AND_SUBMIT_SCRIPT.index("submit.click()")
+
+
+def test_fill_and_submit_uses_kwork_dom_submit_without_slow_mouse_move(monkeypatch):
     from app import kwork_source
 
     calls = []
@@ -147,7 +158,7 @@ def test_fill_and_submit_dispatches_a_trusted_cdp_click(monkeypatch):
         lambda _ws, _script: json.dumps(
             {
                 "ok": True,
-                "submitted": False,
+                "submitted": True,
                 "messageFilled": True,
                 "titleFilled": True,
                 "priceFilled": True,
@@ -157,11 +168,7 @@ def test_fill_and_submit_dispatches_a_trusted_cdp_click(monkeypatch):
             }
         ),
     )
-    monkeypatch.setattr(
-        kwork_source,
-        "_send_cdp",
-        lambda _ws, method, params: calls.append((method, params)) or {},
-    )
+    monkeypatch.setattr(kwork_source, "_send_cdp", lambda *_args, **_kwargs: calls.append("cdp") or {})
 
     result = KworkReplySender()._fill_and_submit(
         object(),
@@ -172,14 +179,76 @@ def test_fill_and_submit_dispatches_a_trusted_cdp_click(monkeypatch):
     )
 
     assert result["submitted"] is True
-    assert [method for method, _params in calls] == [
-        "Input.dispatchMouseEvent",
-        "Input.dispatchMouseEvent",
-        "Input.dispatchMouseEvent",
-    ]
-    assert all(params["x"] == 420.5 and params["y"] == 730.25 for _method, params in calls)
-    assert calls[1][1]["type"] == "mousePressed"
-    assert calls[2][1]["type"] == "mouseReleased"
+    assert calls == []
+
+
+def test_offer_response_probe_tracks_real_createoffer_request():
+    assert "/api/offer/createoffer" in _INSTALL_OFFER_RESPONSE_PROBE_SCRIPT
+    assert "XMLHttpRequest" in _INSTALL_OFFER_RESPONSE_PROBE_SCRIPT
+    assert "window.fetch" in _INSTALL_OFFER_RESPONSE_PROBE_SCRIPT
+
+
+def test_wait_after_submit_accepts_successful_createoffer_response(monkeypatch):
+    from app import kwork_source
+
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda _ws, script: (
+            json.dumps({"requestCount": 1, "response": {"httpStatus": 200, "success": True}})
+            if script == _OFFER_RESPONSE_PROBE_SCRIPT
+            else (_ for _ in ()).throw(AssertionError(f"Unexpected script: {script}"))
+        ),
+    )
+
+    KworkReplySender(timeout_seconds=1)._wait_after_submit(object())
+
+
+def test_wait_after_submit_surfaces_createoffer_business_error(monkeypatch):
+    from app import kwork_source
+
+    message = "Покупатель уже заказал предложение от другого продавца. Сбор предложений прекращен."
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda _ws, script: (
+            json.dumps(
+                {
+                    "requestCount": 1,
+                    "response": {"httpStatus": 200, "success": False, "message": message},
+                }
+            )
+            if script == _OFFER_RESPONSE_PROBE_SCRIPT
+            else (_ for _ in ()).throw(AssertionError(f"Unexpected script: {script}"))
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Покупатель уже заказал"):
+        KworkReplySender(timeout_seconds=1)._wait_after_submit(object())
+
+
+def test_sender_retries_dom_submit_when_createoffer_activity_did_not_start(monkeypatch):
+    from app import kwork_source
+    from app.kwork_sender import _CLICK_OFFER_SUBMIT_SCRIPT
+
+    scripts = []
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda _ws, script: scripts.append(script)
+        or (
+            json.dumps({"activityCount": 0, "requestCount": 0, "response": None})
+            if script == _OFFER_RESPONSE_PROBE_SCRIPT
+            else True
+            if script == _CLICK_OFFER_SUBMIT_SCRIPT
+            else (_ for _ in ()).throw(AssertionError(f"Unexpected script: {script}"))
+        ),
+    )
+    monkeypatch.setattr("app.kwork_sender.time.sleep", lambda _seconds: None)
+
+    KworkReplySender()._ensure_offer_request_started(object(), {"x": 100, "y": 200})
+
+    assert scripts[-1] == _CLICK_OFFER_SUBMIT_SCRIPT
 
 
 def test_reply_field_detector_ignores_generic_kwork_header_inputs():
@@ -484,7 +553,11 @@ def test_wait_after_submit_raises_when_kwork_keeps_form_open(monkeypatch):
 
 def test_wait_after_submit_does_not_treat_project_page_with_open_form_as_sent(monkeypatch):
     from app import kwork_source
-    from app.kwork_sender import _HAS_MANUAL_VERIFICATION_SCRIPT, _HAS_REPLY_FIELD_SCRIPT
+    from app.kwork_sender import (
+        _HAS_MANUAL_VERIFICATION_SCRIPT,
+        _HAS_REPLY_FIELD_SCRIPT,
+        _OFFER_RESPONSE_PROBE_SCRIPT,
+    )
 
     project_url = "https://kwork.ru/projects/3190074/view"
 
@@ -495,6 +568,8 @@ def test_wait_after_submit_does_not_treat_project_page_with_open_form_as_sent(mo
             return True
         if script == _HAS_MANUAL_VERIFICATION_SCRIPT:
             return False
+        if script == _OFFER_RESPONSE_PROBE_SCRIPT:
+            return json.dumps({"requestCount": 0, "response": None})
         if "document.body" in script:
             return "Описание\nСтоимость\nНазвание заказа\nСрок выполнения"
         raise AssertionError(f"Unexpected script: {script}")
@@ -507,7 +582,11 @@ def test_wait_after_submit_does_not_treat_project_page_with_open_form_as_sent(mo
 
 def test_wait_after_submit_ignores_captcha_words_in_project_description(monkeypatch):
     from app import kwork_source
-    from app.kwork_sender import _HAS_MANUAL_VERIFICATION_SCRIPT, _HAS_REPLY_FIELD_SCRIPT
+    from app.kwork_sender import (
+        _HAS_MANUAL_VERIFICATION_SCRIPT,
+        _HAS_REPLY_FIELD_SCRIPT,
+        _OFFER_RESPONSE_PROBE_SCRIPT,
+    )
 
     location_reads = 0
 
@@ -522,6 +601,8 @@ def test_wait_after_submit_ignores_captcha_words_in_project_description(monkeypa
             return True
         if script == _HAS_MANUAL_VERIFICATION_SCRIPT:
             return False
+        if script == _OFFER_RESPONSE_PROBE_SCRIPT:
+            return json.dumps({"requestCount": 0, "response": None})
         if "document.body" in script:
             return "Заказ: подключить captcha и защитить форму от спама"
         raise AssertionError(f"Unexpected script: {script}")
@@ -599,7 +680,6 @@ def test_confirmation_dispatches_a_trusted_cdp_click(monkeypatch):
     KworkReplySender(timeout_seconds=1)._confirm_after_submit(object())
 
     assert [params["type"] for _method, params in calls] == [
-        "mouseMoved",
         "mousePressed",
         "mouseReleased",
     ]

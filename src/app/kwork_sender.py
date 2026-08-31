@@ -149,6 +149,7 @@ class KworkReplySender:
             if not submit:
                 return f"kwork-project-{project_id}-prepared"
             self._confirm_after_submit(ws)
+            self._ensure_offer_request_started(ws, submit_result.get("submitPoint"))
             self._wait_after_submit(ws)
             return f"kwork-project-{project_id}"
         finally:
@@ -319,10 +320,12 @@ class KworkReplySender:
             },
             ensure_ascii=False,
         )
+        if submit:
+            kwork_source._evaluate(ws, _INSTALL_OFFER_RESPONSE_PROBE_SCRIPT)
         result = kwork_source._evaluate(ws, f"({_FILL_AND_SUBMIT_SCRIPT})({payload})")
         if isinstance(result, str):
             data = json.loads(result)
-            if submit and data.get("ok"):
+            if submit and data.get("ok") and not data.get("submitted"):
                 point = data.get("submitPoint")
                 if not isinstance(point, dict):
                     return {
@@ -335,6 +338,34 @@ class KworkReplySender:
                 data["submitted"] = True
             return data
         return {"submitted": False, "reason": "Kwork submit script returned no result"}
+
+    def _offer_response_probe(self, ws) -> dict:
+        from app import kwork_source
+
+        result = kwork_source._evaluate(ws, _OFFER_RESPONSE_PROBE_SCRIPT)
+        if isinstance(result, str):
+            try:
+                parsed = json.loads(result)
+            except json.JSONDecodeError:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return result if isinstance(result, dict) else {}
+
+    def _ensure_offer_request_started(self, ws, submit_point: object) -> None:
+        """Retry one real click when the Kwork createoffer request never started."""
+        from app import kwork_source
+
+        if not isinstance(submit_point, dict):
+            return
+        for _ in range(4):
+            status = self._offer_response_probe(ws)
+            if status.get("activityCount") or status.get("requestCount") or status.get("response") is not None:
+                return
+            time.sleep(0.1)
+        logger.warning("Kwork submit click produced no offer activity; retrying DOM submit once")
+        retried = kwork_source._evaluate(ws, _CLICK_OFFER_SUBMIT_SCRIPT)
+        if not retried:
+            _dispatch_trusted_click(ws, submit_point)
 
     def _confirm_after_submit(self, ws) -> None:
         from app import kwork_source
@@ -354,6 +385,8 @@ class KworkReplySender:
                 continue
             if not data.get("hasDialog"):
                 return
+            if self._offer_response_probe(ws).get("response") is not None:
+                return
             time.sleep(0.4)
 
     def _wait_after_submit(self, ws) -> None:
@@ -361,6 +394,25 @@ class KworkReplySender:
 
         deadline = time.monotonic() + min(self.timeout_seconds, 10)
         while time.monotonic() < deadline:
+            probe = self._offer_response_probe(ws)
+            response = probe.get("response")
+            if isinstance(response, dict):
+                if response.get("success") is True:
+                    return
+                if response.get("success") is False:
+                    reason = str(
+                        response.get("message")
+                        or response.get("error")
+                        or response.get("response")
+                        or "Kwork rejected the reply"
+                    ).strip()
+                    raise RuntimeError(reason)
+                try:
+                    http_status = int(response.get("httpStatus") or 0)
+                except (TypeError, ValueError):
+                    http_status = 0
+                if http_status >= 400:
+                    raise RuntimeError(f"Kwork createoffer failed with HTTP {http_status}")
             current_url = str(kwork_source._evaluate(ws, "location.href") or "")
             if _is_kwork_inbox_url(current_url):
                 return
@@ -408,9 +460,8 @@ def _dispatch_trusted_click(ws, point: dict) -> None:
         raise RuntimeError("Kwork button is outside the visible page")
 
     events = (
-        {"type": "mouseMoved", "x": x, "y": y},
-        {"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1},
-        {"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1},
+        {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1},
+        {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1},
     )
     for event in events:
         response = kwork_source._send_cdp(ws, "Input.dispatchMouseEvent", event)
@@ -638,6 +689,92 @@ _HAS_MANUAL_VERIFICATION_SCRIPT = r"""
 })()
 """
 
+_INSTALL_OFFER_RESPONSE_PROBE_SCRIPT = r"""
+(() => {
+  const matches = url => String(url || '').includes('/api/offer/createoffer');
+  const matchesActivity = url => matches(url) || String(url || '').includes('/projects/check_is_template');
+  const state = window.__leadFunnelOfferProbe || {
+    installed: false,
+    activityCount: 0,
+    requestCount: 0,
+    response: null
+  };
+  state.activityCount = 0;
+  state.requestCount = 0;
+  state.response = null;
+  window.__leadFunnelOfferProbe = state;
+  if (state.installed) return true;
+  state.installed = true;
+
+  const parse = (text, httpStatus) => {
+    let payload = {};
+    try {
+      payload = JSON.parse(text || '{}');
+    } catch (_error) {
+      payload = {message: String(text || '').slice(0, 1000)};
+    }
+    state.response = {httpStatus, ...payload};
+  };
+
+  const originalOpen = XMLHttpRequest.prototype.open;
+  const originalSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function(method, url, ...args) {
+    this.__leadFunnelOfferUrl = url;
+    return originalOpen.call(this, method, url, ...args);
+  };
+  XMLHttpRequest.prototype.send = function(...args) {
+    if (matchesActivity(this.__leadFunnelOfferUrl)) state.activityCount += 1;
+    if (matches(this.__leadFunnelOfferUrl)) {
+      state.requestCount += 1;
+      this.addEventListener('loadend', () => {
+        let text = '';
+        try { text = this.responseText || ''; } catch (_error) {}
+        parse(text, Number(this.status || 0));
+      }, {once: true});
+    }
+    return originalSend.apply(this, args);
+  };
+
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
+    if (matchesActivity(url)) state.activityCount += 1;
+    if (matches(url)) state.requestCount += 1;
+    const response = await originalFetch(...args);
+    if (matches(url)) {
+      try {
+        parse(await response.clone().text(), Number(response.status || 0));
+      } catch (_error) {
+        state.response = {httpStatus: Number(response.status || 0), message: 'Unable to read Kwork response'};
+      }
+    }
+    return response;
+  };
+  return true;
+})()
+"""
+
+_OFFER_RESPONSE_PROBE_SCRIPT = r"""
+JSON.stringify(window.__leadFunnelOfferProbe || {requestCount: 0, response: null})
+"""
+
+_CLICK_OFFER_SUBMIT_SCRIPT = r"""
+(() => {
+  const norm = value => (value || '').replace(/\s+/g, ' ').trim();
+  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const messageField = document.querySelector('textarea[name="description"]')
+    || document.querySelector('.trumbowyg-editor');
+  const root = messageField?.closest('form') || document;
+  const submit = Array.from(root.querySelectorAll('button,input[type=submit],input[type=button],a')).find(el => {
+    const text = norm(el.innerText || el.value || el.getAttribute('aria-label'));
+    return visible(el) && /отправить|предложить|оставить предложение|разместить|подать/i.test(text);
+  });
+  if (!submit) return false;
+  submit.click();
+  return true;
+})()
+"""
+
 _FILL_AND_SUBMIT_SCRIPT = r"""
 async (payload) => {
   const norm = value => (value || '').replace(/\s+/g, ' ').trim();
@@ -799,9 +936,12 @@ async (payload) => {
   if (!submit) return JSON.stringify({ok: false, submitted: false, reason: 'Kwork submit button was not found'});
   submit.scrollIntoView({block: 'center', inline: 'center'});
   const submitRect = submit.getBoundingClientRect();
+  // Kwork applies input events to the Vue offer model with a debounce.
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  submit.click();
   return JSON.stringify({
       ok: true,
-      submitted: false,
+      submitted: true,
       messageFilled,
       priceFilled,
       titleFilled,

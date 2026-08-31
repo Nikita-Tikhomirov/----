@@ -49,6 +49,13 @@ def test_load_config_blocks_unsupported_site_builders_by_default(tmp_path, monke
         "тильда",
         "elementor",
         "элементор",
+        "yandex kit",
+        "яндекс кит",
+        "timbly",
+        "тимбли",
+        "webflow",
+        "wix",
+        "визуальный конструктор",
         "swift",
         "xcode",
     } <= set(config.lead_blocked_keywords)

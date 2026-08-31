@@ -78,7 +78,7 @@ FILTER_SETTINGS = (
     (
         "LEAD_BLOCKED_KEYWORDS",
         "Стоп-слова",
-        "битрикс, bitrix, tilda, тильда, elementor, элементор, приложение ios, ios приложение, swift, xcode",
+        "битрикс, bitrix, tilda, тильда, elementor, элементор, yandex kit, яндекс кит, timbly, тимбли, webflow, wix, визуальный конструктор, no-code, nocode, приложение ios, ios приложение, swift, xcode",
     ),
     (
         "LEAD_HARD_REJECT_KEYWORDS",

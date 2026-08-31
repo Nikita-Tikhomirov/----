@@ -63,7 +63,7 @@ KWORK_AUTO_SEND_DAILY_LIMIT=10
 LEAD_MIN_SCORE=70
 LEAD_MAX_DAYS=7
 LEAD_ACCEPT_DECISIONS=accept
-LEAD_BLOCKED_KEYWORDS=битрикс,bitrix,tilda,тильда,elementor,элементор,приложение ios,ios приложение,swift,xcode
+LEAD_BLOCKED_KEYWORDS=битрикс,bitrix,tilda,тильда,elementor,элементор,yandex kit,яндекс кит,timbly,тимбли,webflow,wix,визуальный конструктор,no-code,nocode,приложение ios,ios приложение,swift,xcode
 ```
 
 `KWORK_MAX_RESPONSES` проверяется при поиске и прямо перед отправкой. Если Kwork не показывает число предложений, заказ не получает автоматический отклик.
