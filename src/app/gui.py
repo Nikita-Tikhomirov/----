@@ -67,7 +67,7 @@ class LiveRejudgeOutcome:
 FILTER_SETTINGS = (
     ("KWORK_AUTO_SEND", "Автоотправка новых лидов (1 = да, 0 = нет)", "0"),
     ("KWORK_AUTO_SEND_DAILY_LIMIT", "Лимит автоотправок за сутки", "10"),
-    ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
+    ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "6"),
     ("KWORK_MAX_AGE_HOURS", "Возраст заказа, часов (0 = без лимита)", "24"),
     ("SCAN_INTERVAL_SECONDS", "Интервал мониторинга, сек", "10"),
     ("MAX_POSTS_PER_CHANNEL", "Заказов за проход", "30"),

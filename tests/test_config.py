@@ -77,6 +77,28 @@ def test_load_config_reads_kwork_autosend_settings(tmp_path, monkeypatch):
     assert config.kwork_auto_send_daily_limit == 10
 
 
+def test_load_config_uses_fast_kwork_monitoring_defaults(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "TELEGRAM_API_ID=0",
+                "TELEGRAM_API_HASH=fill_later",
+                "TELEGRAM_CHANNELS=@unused",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for name in ("SCAN_INTERVAL_SECONDS", "KWORK_MAX_PAGES", "KWORK_MAX_RESPONSES"):
+        monkeypatch.delenv(name, raising=False)
+
+    config = load_config(env_file)
+
+    assert config.scan_interval_seconds == 10
+    assert config.kwork_max_pages == 1
+    assert config.kwork_max_responses == 6
+
+
 def test_load_config_reads_optional_kwork_login_credentials(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     env_file.write_text(
