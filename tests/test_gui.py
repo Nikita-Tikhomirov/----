@@ -1302,6 +1302,11 @@ def test_kwork_form_validation_requires_price_and_deadline_before_opening_form()
     validate_kwork_form_terms({"title": "Доработать форму", "price": 5000, "days": 3})
 
 
+def test_kwork_form_validation_rejects_price_below_platform_minimum():
+    with pytest.raises(ValueError, match="не меньше 500"):
+        validate_kwork_form_terms({"title": "Доработать форму", "price": 400, "days": 1})
+
+
 def test_action_queue_separates_live_over_limit_leads_from_available_work():
     now = datetime(2026, 7, 18, 12, 0, tzinfo=timezone.utc)
     available = Lead(

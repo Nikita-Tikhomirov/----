@@ -12,6 +12,7 @@ import websocket
 from app.kwork_status import unavailable_project_message
 
 logger = logging.getLogger(__name__)
+KWORK_MIN_PRICE_RUB = 500
 
 PRICE_PATTERN = re.compile(
     r"(?:цена|бюджет|стоимост[ьи]|ориентир|за)\D{0,24}(\d[\d\s]{2,9})(?:\s*(?:руб|р\b|₽))",
@@ -393,6 +394,8 @@ def _validate_required_terms(terms: ReplyTerms) -> None:
     """Avoid opening Chrome when Kwork's required price or deadline is missing."""
     if terms.price_rub is None or terms.days is None:
         raise ValueError("Kwork reply requires price and execution days")
+    if terms.price_rub < KWORK_MIN_PRICE_RUB:
+        raise ValueError(f"Цена отклика на Kwork должна быть не меньше {KWORK_MIN_PRICE_RUB} руб.")
 
 
 def _first_int(pattern: re.Pattern[str], text: str) -> int | None:

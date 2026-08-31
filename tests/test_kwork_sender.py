@@ -31,6 +31,24 @@ def test_extract_reply_terms_ignores_phone_like_numbers():
     assert terms.days == 2
 
 
+def test_sender_rejects_explicit_price_below_kwork_minimum_before_browser(monkeypatch):
+    from app import kwork_source
+
+    monkeypatch.setattr(
+        kwork_source,
+        "_ensure_chrome_cdp",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("browser must not be opened")),
+    )
+    with pytest.raises(ValueError, match="не меньше 500"):
+        KworkReplySender().prepare_reply(
+            "https://kwork.ru/projects/3245238/view",
+            "Установлю Яндекс Капчу и проверю отправку формы.",
+            price_rub=400,
+            days=1,
+            title="Установить Яндекс Капчу",
+        )
+
+
 def test_login_required_message_detects_logged_out_kwork_page():
     page_text = "ФРИЛАНС МАРКЕТПЛЕЙС\nВход\nРегистрация\nПредложить услугу"
 

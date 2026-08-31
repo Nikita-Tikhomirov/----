@@ -3,10 +3,13 @@ import sys
 from dataclasses import dataclass
 from types import SimpleNamespace
 
+import pytest
+
 import app.main as main_module
 
 from app.main import (
     _auto_send_new_leads,
+    _mobile_command_payload,
     _proposal_price_from_kwork_max,
     _proposal_title_from_text,
     _scan_execution_lock,
@@ -38,7 +41,20 @@ class FakePost:
 def test_proposal_price_uses_fifteen_percent_below_kwork_maximum():
     assert _proposal_price_from_kwork_max(6000) == 5100
     assert _proposal_price_from_kwork_max(6150) == 5200
+    assert _proposal_price_from_kwork_max(500) == 500
     assert _proposal_price_from_kwork_max(None) is None
+
+
+def test_mobile_command_rejects_price_below_kwork_minimum():
+    with pytest.raises(ValueError, match="не меньше 500"):
+        _mobile_command_payload(
+            {
+                "draft_reply": "Исправлю форму и проверю отправку заявки.",
+                "proposal_title": "Исправить форму",
+                "proposal_price_rub": 400,
+                "proposal_days": 1,
+            }
+        )
 
 
 def test_auto_send_only_submits_newly_discovered_kwork_leads(tmp_path):

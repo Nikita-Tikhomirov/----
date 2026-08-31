@@ -23,7 +23,7 @@ from app.chrome_cookies import chrome_cookie_header
 from app.config import AppConfig, load_config
 from app.handoff import write_codex_handoff
 from app.kwork_client import KworkProjectClient
-from app.kwork_sender import KworkReplySender
+from app.kwork_sender import KWORK_MIN_PRICE_RUB, KworkReplySender
 from app.kwork_source import KworkWebSource
 from app.lead_filter import evaluate_post
 from app.lead_api_client import LeadHubClient
@@ -542,7 +542,8 @@ def _proposal_price_from_kwork_max(maximum_rub: int | None) -> int | None:
     if maximum_rub is None or maximum_rub <= 0:
         return None
     discounted = maximum_rub * 0.85
-    return int((discounted + 50) // 100) * 100
+    rounded = int((discounted + 50) // 100) * 100
+    return max(KWORK_MIN_PRICE_RUB, rounded)
 
 
 def _refresh_existing_lead_live_status(
@@ -844,6 +845,8 @@ def _mobile_command_payload(command: dict[str, object]) -> dict[str, str | int]:
         raise ValueError("В мобильной карточке не заполнено название заказа")
     if price is None or days is None:
         raise ValueError("В мобильной карточке нужно указать цену и срок")
+    if price < KWORK_MIN_PRICE_RUB:
+        raise ValueError(f"Цена отклика должна быть не меньше {KWORK_MIN_PRICE_RUB} руб.")
     return {"reply": reply, "title": title, "price": price, "days": days}
 
 

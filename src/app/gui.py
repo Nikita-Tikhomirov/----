@@ -17,7 +17,7 @@ from urllib.request import urlopen
 from app.ai_lead_judge import sanitize_customer_reply
 from app.config import load_config
 from app.kwork_client import KworkProjectReplyabilityError
-from app.kwork_sender import KworkReplySender, _extract_reply_terms
+from app.kwork_sender import KWORK_MIN_PRICE_RUB, KworkReplySender, _extract_reply_terms
 from app.kwork_status import UNAVAILABLE_PROJECT_REASON
 from app.reply_composer import (
     ReplyDraftContext,
@@ -2553,6 +2553,8 @@ def validate_kwork_form_terms(payload: dict) -> None:
         missing.append("срок")
     if missing:
         raise ValueError("Перед Kwork укажи " + " и ".join(missing) + ".")
+    if payload["price"] < KWORK_MIN_PRICE_RUB:
+        raise ValueError(f"Цена отклика должна быть не меньше {KWORK_MIN_PRICE_RUB} руб.")
 
 
 def _kwork_price_limit(error: str) -> int | None:
