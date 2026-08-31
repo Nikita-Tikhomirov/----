@@ -214,7 +214,8 @@ def compose_customer_reply(
     timeout_seconds: float = 45.0,
 ) -> str:
     """Return a concise proposal that is safe to show in email and send to Kwork."""
-    candidate = _remove_commercial_sentences(seed_reply)
+    seed_candidate = _remove_commercial_sentences(seed_reply)
+    candidate = seed_candidate
     if api_key.strip():
         generated = _compose_with_openrouter(
             context,
@@ -225,6 +226,9 @@ def compose_customer_reply(
             timeout_seconds,
         )
         if not generated:
+            if seed_candidate and not reply_quality_issues(seed_candidate, context):
+                logger.warning("Cloud writer failed; using the grounded analysis draft")
+                return _normalize_reply(seed_candidate)
             raise ReplyGenerationUnavailable("cloud AI reply unavailable")
         candidate = _remove_commercial_sentences(generated)
 
@@ -256,6 +260,9 @@ def compose_customer_reply(
             )
             if not reply_quality_issues(repaired, context):
                 return _normalize_reply(repaired)
+            if seed_candidate and not reply_quality_issues(seed_candidate, context):
+                logger.warning("Cloud writer repair stayed unsafe; using the grounded analysis draft")
+                return _normalize_reply(seed_candidate)
             if not deterministic_issues:
                 logger.warning(
                     "AI reviewer repair failed deterministic checks; keeping the grounded original draft"

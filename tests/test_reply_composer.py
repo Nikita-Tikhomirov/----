@@ -116,6 +116,31 @@ def test_composer_repairs_reply_rejected_by_ai_reviewer():
     assert gateway.call_count == 3
 
 
+def test_composer_uses_safe_analysis_draft_when_writer_and_repair_are_unsafe():
+    analysis_draft = (
+        "Здравствуйте! Исправлю отправку формы заявки на лендинге и приведу блок к корректному виду на мобильных. "
+        "Проверю текущую валидацию и обработчик, затем внесу правки в разметку и логику отправки. "
+        "После изменений протестирую заполнение и отправку формы на телефоне и в основных браузерах. "
+        "Уложусь в два дня и могу приступить сразу."
+    )
+    unsafe_writer_reply = "Здравствуйте! Готов помочь, давайте обсудим детали."
+    with patch(
+        "app.reply_composer.openrouter_chat",
+        side_effect=[
+            OpenRouterResult(content=unsafe_writer_reply, model="anthropic/claude-sonnet-4.5"),
+            OpenRouterResult(
+                content='{"approved": false, "issues": ["нет конкретных действий"]}',
+                model="anthropic/claude-sonnet-4.5",
+            ),
+            OpenRouterResult(content=unsafe_writer_reply, model="anthropic/claude-sonnet-4.5"),
+        ],
+    ):
+        reply = compose_customer_reply(_form_context(), analysis_draft, api_key="sk-test")
+
+    assert reply == analysis_draft
+    assert reply_quality_issues(reply, _form_context()) == ()
+
+
 def test_quality_gate_marks_ai_and_multiple_questions_as_unsafe():
     issues = reply_quality_issues(
         "Привет! AI-агент всё сделает. Какой у вас макет? Какая CMS? Давайте обсудим детали.",
