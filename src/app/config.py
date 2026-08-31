@@ -28,7 +28,7 @@ class AppConfig:
     max_posts_per_channel: int = 20
     kwork_max_pages: int = 1
     kwork_max_responses: int = 6
-    kwork_max_age_hours: int = 24
+    kwork_max_age_hours: int = 1
     kwork_cookie: str = ""
     kwork_source: str = "web"
     kwork_projects_url: str = "https://kwork.ru/projects?c=11"
@@ -77,7 +77,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         max_posts_per_channel=_int_env("MAX_POSTS_PER_CHANNEL", 20),
         kwork_max_pages=_int_env("KWORK_MAX_PAGES", 1),
         kwork_max_responses=_int_env("KWORK_MAX_RESPONSES", 6),
-        kwork_max_age_hours=_int_env("KWORK_MAX_AGE_HOURS", 24),
+        kwork_max_age_hours=_int_env("KWORK_MAX_AGE_HOURS", 1),
         kwork_cookie=os.getenv("KWORK_COOKIE", ""),
         kwork_source=os.getenv("KWORK_SOURCE", "web"),
         kwork_projects_url=os.getenv("KWORK_PROJECTS_URL", "https://kwork.ru/projects?c=11"),
