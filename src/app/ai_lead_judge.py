@@ -220,10 +220,12 @@ def _apply_acceptance_settings(
     accept_decisions: tuple[str, ...],
 ) -> LeadJudgeResult:
     allowed_decisions = {decision.strip().lower() for decision in accept_decisions if decision.strip()}
+    allowed_complexities = {"simple", "medium"}
     accepted = (
         result.decision in allowed_decisions
         and result.score >= min_score
         and result.estimated_days <= max_estimated_days
+        and result.complexity in allowed_complexities
     )
     if accepted == result.accepted:
         return result
@@ -235,6 +237,8 @@ def _apply_acceptance_settings(
             reasons.append(f"score {result.score} ниже порога {min_score}")
         if result.estimated_days > max_estimated_days:
             reasons.append(f"срок {result.estimated_days} дн. больше лимита {max_estimated_days}")
+        if result.complexity not in allowed_complexities:
+            reasons.append(f"сложность {result.complexity} не разрешена")
     return LeadJudgeResult(
         accepted=accepted,
         decision=result.decision,

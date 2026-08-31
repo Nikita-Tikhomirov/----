@@ -3,7 +3,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.ai_lead_judge import _build_prompt, judge_lead, parse_judge_response, sanitize_customer_reply
+from app.ai_lead_judge import (
+    LeadJudgeResult,
+    _apply_acceptance_settings,
+    _build_prompt,
+    judge_lead,
+    parse_judge_response,
+    sanitize_customer_reply,
+)
 from app.llm_client import OpenRouterResult
 
 
@@ -32,6 +39,33 @@ def test_parse_judge_response_accepts_medium_week_task():
     assert result.price_rub == 18000
     assert "WordPress" in result.summary
     assert "доступ" in result.questions[0]
+
+
+@pytest.mark.parametrize("complexity", ["too_complex", "unknown"])
+def test_acceptance_gate_rejects_non_simple_complexity(complexity):
+    result = LeadJudgeResult(
+        accepted=True,
+        decision="maybe",
+        score=85,
+        complexity=complexity,
+        estimated_days=3,
+        price_rub=10000,
+        summary="Неопределённый проект",
+        reasons=["часть объёма неизвестна"],
+        risks=[],
+        questions=[],
+        draft_reply="Здравствуйте! Проверю задачу и выполню работу.",
+    )
+
+    gated = _apply_acceptance_settings(
+        result,
+        min_score=60,
+        max_estimated_days=7,
+        accept_decisions=("accept", "maybe"),
+    )
+
+    assert gated.accepted is False
+    assert f"сложность {complexity} не разрешена" in gated.reasons
 
 
 def test_judge_prompt_keeps_questions_internal_and_out_of_customer_draft():
