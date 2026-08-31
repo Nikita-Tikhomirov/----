@@ -321,7 +321,19 @@ class KworkReplySender:
         )
         result = kwork_source._evaluate(ws, f"({_FILL_AND_SUBMIT_SCRIPT})({payload})")
         if isinstance(result, str):
-            return json.loads(result)
+            data = json.loads(result)
+            if submit and data.get("ok"):
+                point = data.get("submitPoint")
+                if not isinstance(point, dict):
+                    return {
+                        **data,
+                        "ok": False,
+                        "submitted": False,
+                        "reason": "Kwork submit button coordinates were not returned",
+                    }
+                _dispatch_trusted_click(ws, point)
+                data["submitted"] = True
+            return data
         return {"submitted": False, "reason": "Kwork submit script returned no result"}
 
     def _confirm_after_submit(self, ws) -> None:
@@ -334,6 +346,10 @@ class KworkReplySender:
             if data.get("blocked"):
                 raise RuntimeError(str(data.get("reason") or "Kwork requires manual confirmation"))
             if data.get("clicked"):
+                point = data.get("submitPoint")
+                if not isinstance(point, dict):
+                    raise RuntimeError("Kwork confirmation button coordinates were not returned")
+                _dispatch_trusted_click(ws, point)
                 time.sleep(0.8)
                 continue
             if not data.get("hasDialog"):
@@ -377,6 +393,29 @@ def _extract_reply_terms(text: str) -> ReplyTerms:
     if days is not None and not 1 <= days <= 30:
         days = None
     return ReplyTerms(price_rub=price, days=days)
+
+
+def _dispatch_trusted_click(ws, point: dict) -> None:
+    """Send a real DevTools mouse click so Kwork receives a trusted browser event."""
+    from app import kwork_source
+
+    try:
+        x = float(point["x"])
+        y = float(point["y"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Kwork button coordinates are invalid") from exc
+    if x < 0 or y < 0:
+        raise RuntimeError("Kwork button is outside the visible page")
+
+    events = (
+        {"type": "mouseMoved", "x": x, "y": y},
+        {"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1},
+        {"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1},
+    )
+    for event in events:
+        response = kwork_source._send_cdp(ws, "Input.dispatchMouseEvent", event)
+        if response.get("error"):
+            raise RuntimeError(f"Chrome could not click the Kwork button: {response['error']}")
 
 
 def _form_fill_errors(result: dict, terms: ReplyTerms, title: str) -> list[str]:
@@ -563,8 +602,15 @@ _CONFIRM_SUBMIT_SCRIPT = r"""
       return /(подтверд|отправить|продолжить|да|ок|ok|соглас|разместить|предложить|оставить)/i.test(text);
     });
     if (button) {
-      button.click();
-      return JSON.stringify({ok: true, clicked: true, hasDialog: true, text: textOf(button)});
+      button.scrollIntoView({block: 'center', inline: 'center'});
+      const rect = button.getBoundingClientRect();
+      return JSON.stringify({
+        ok: true,
+        clicked: true,
+        hasDialog: true,
+        text: textOf(button),
+        submitPoint: {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2}
+      });
     }
   }
   return JSON.stringify({ok: true, clicked: false, hasDialog: roots.length > 0});
@@ -730,15 +776,17 @@ async (payload) => {
   const buttons = Array.from(form.querySelectorAll('button,input[type=submit],input[type=button],a')).filter(visible);
   const submit = buttons.find(el => /отправить|предложить|оставить предложение|разместить|подать/i.test(norm(el.innerText || el.value || el.getAttribute('aria-label'))));
   if (!submit) return JSON.stringify({ok: false, submitted: false, reason: 'Kwork submit button was not found'});
-  submit.click();
+  submit.scrollIntoView({block: 'center', inline: 'center'});
+  const submitRect = submit.getBoundingClientRect();
   return JSON.stringify({
       ok: true,
-      submitted: true,
+      submitted: false,
       messageFilled,
       priceFilled,
       titleFilled,
       daysFilled,
-      paymentTypeFilled
+      paymentTypeFilled,
+      submitPoint: {x: submitRect.left + submitRect.width / 2, y: submitRect.top + submitRect.height / 2}
   });
 }
 """

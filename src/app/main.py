@@ -122,7 +122,7 @@ def scan_once(
     openrouter_reply_model: str = "anthropic/claude-sonnet-4.5",
     openrouter_fallback_models: tuple[str, ...] = (),
     openrouter_vision_model: str = "",
-    openrouter_vision_mode: str = "smart",
+    openrouter_vision_mode: str = "fallback",
     kwork_project_client: ProjectInspector | None = None,
     kwork_max_responses: int = 5,
     lead_judge=judge_lead,
@@ -1219,6 +1219,7 @@ def run_mobile_control_loop(
                 and time.monotonic() >= next_scheduled_scan
             )
             if requested or scheduled:
+                scan_started_at = time.monotonic()
                 lead_hub.report_monitor_heartbeat(
                     config.lead_hub_executor_id,
                     scan_event="started",
@@ -1243,7 +1244,7 @@ def run_mobile_control_loop(
                         config.lead_hub_executor_id,
                         scan_event="finished",
                     )
-                next_scheduled_scan = time.monotonic() + config.scan_interval_seconds
+                next_scheduled_scan = scan_started_at + config.scan_interval_seconds
         except Exception:
             logger.exception("Mobile Kwork control poll failed")
         time.sleep(poll_seconds)

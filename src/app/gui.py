@@ -179,7 +179,7 @@ def build_component_check_report(
 
     vision_key = text_key
     vision_model = values.get("OPENROUTER_VISION_MODEL", "").strip()
-    vision_mode = values.get("OPENROUTER_VISION_MODE", "smart").strip().lower() or "smart"
+    vision_mode = values.get("OPENROUTER_VISION_MODE", "fallback").strip().lower() or "fallback"
     if vision_key and vision_model and vision_mode != "off":
         lines.append(f"OpenRouter vision: настроен ({vision_model}, {vision_mode})")
     elif vision_mode == "off":

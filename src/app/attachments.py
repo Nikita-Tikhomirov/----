@@ -48,6 +48,7 @@ IMPORTANT_ARCHIVE_NAME_PARTS = (
 PASSWORD_ERROR_MARKERS = ("password", "парол", "encrypted", "encryption", "шифр")
 MAX_ARCHIVE_LIST_ENTRIES = 200
 MAX_ARCHIVE_LIST_BYTES = 256_000
+DEFAULT_ATTACHMENT_MAX_BYTES = 100_000_000
 WORD_PATTERN = re.compile(r"[A-Za-zА-Яа-яЁё]{3,}")
 
 
@@ -101,7 +102,7 @@ def build_attachment_context(
     attachments: tuple[str, ...],
     cookie: str = "",
     max_files: int = 3,
-    max_bytes: int = 2_000_000,
+    max_bytes: int = DEFAULT_ATTACHMENT_MAX_BYTES,
     use_browser: bool = False,
     cdp_url: str = "http://127.0.0.1:9222",
     browser_profile_dir: str = "",
@@ -140,7 +141,7 @@ def build_attachment_report(
     attachments: tuple[str, ...],
     cookie: str = "",
     max_files: int = 3,
-    max_bytes: int = 2_000_000,
+    max_bytes: int = DEFAULT_ATTACHMENT_MAX_BYTES,
     use_browser: bool = False,
     cdp_url: str = "http://127.0.0.1:9222",
     browser_profile_dir: str = "",
@@ -304,7 +305,11 @@ def _matching_saved_attachment(path: Path, content: bytes) -> Path | None:
     return None
 
 
-def download_attachment(url: str, cookie: str = "", max_bytes: int = 2_000_000) -> bytes:
+def download_attachment(
+    url: str,
+    cookie: str = "",
+    max_bytes: int = DEFAULT_ATTACHMENT_MAX_BYTES,
+) -> bytes:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept-Encoding": "identity",
@@ -334,7 +339,7 @@ def download_attachment_via_browser(
     url: str,
     cdp_url: str,
     browser_profile_dir: str = "",
-    max_bytes: int = 2_000_000,
+    max_bytes: int = DEFAULT_ATTACHMENT_MAX_BYTES,
 ) -> bytes:
     """Download a private attachment through the logged-in Chrome session."""
     from app.kwork_source import _ensure_chrome_cdp, _find_or_create_page, _send_cdp
@@ -395,7 +400,7 @@ def extract_attachment_text(ref: AttachmentRef, content: bytes) -> str:
 def inspect_attachment(
     ref: AttachmentRef,
     content: bytes,
-    max_bytes: int = 2_000_000,
+    max_bytes: int = DEFAULT_ATTACHMENT_MAX_BYTES,
     lead_context: str = "",
     deepseek_api_key: str = "",
     deepseek_model: str = "deepseek-chat",

@@ -2470,3 +2470,40 @@ def test_mobile_control_scans_when_local_autosend_is_enabled(monkeypatch):
         pass
 
     assert scans == [True]
+
+
+def test_mobile_control_keeps_scan_start_times_on_configured_interval(monkeypatch):
+    config = SimpleNamespace(
+        scan_interval_seconds=10,
+        lead_hub_executor_id="desktop-main",
+        kwork_auto_send=True,
+    )
+    clock = {"now": 0.0}
+    scan_started_at = []
+
+    class StoppedHub:
+        def fetch_monitor_control(self):
+            return {"desired_state": "stopped", "scan_requested": False}
+
+        def report_monitor_heartbeat(self, *_args, **_kwargs):
+            return {}
+
+    def run_scan(*_args):
+        scan_started_at.append(clock["now"])
+        clock["now"] += 8.0
+
+    def advance_clock(seconds):
+        clock["now"] += seconds
+        if len(scan_started_at) >= 2:
+            raise StopIteration
+
+    monkeypatch.setattr(main_module, "_resolve_kwork_cookie", lambda _config: "")
+    monkeypatch.setattr(main_module, "_process_mobile_approvals_from_runtime", lambda *_args: 0)
+    monkeypatch.setattr(main_module, "_scan_runtime_once", run_scan)
+    monkeypatch.setattr(main_module.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(main_module.time, "sleep", advance_clock)
+
+    with pytest.raises(StopIteration):
+        main_module.run_mobile_control_loop(object(), object(), StoppedHub(), object(), config)
+
+    assert scan_started_at == [0.0, 11.0]

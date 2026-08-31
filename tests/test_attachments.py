@@ -95,7 +95,7 @@ def test_build_attachment_context_can_download_with_browser_session(monkeypatch)
         raise PermissionError("HTTP Error 403: Forbidden")
 
     def fake_browser(url, cdp_url, browser_profile_dir="", max_bytes=2_000_000):
-        browser_calls.append((url, cdp_url))
+        browser_calls.append((url, cdp_url, max_bytes))
         return b"private brief from logged account"
 
     monkeypatch.setattr("app.attachments.download_attachment", fake_direct)
@@ -108,7 +108,9 @@ def test_build_attachment_context_can_download_with_browser_session(monkeypatch)
     )
 
     assert direct_calls == ["https://kwork.ru/files/private.txt"]
-    assert browser_calls == [("https://kwork.ru/files/private.txt", "http://127.0.0.1:9222")]
+    assert browser_calls == [
+        ("https://kwork.ru/files/private.txt", "http://127.0.0.1:9222", 100_000_000)
+    ]
     assert "private brief from logged account" in context
 
 

@@ -54,7 +54,7 @@ class AppConfig:
     openrouter_reply_model: str = "anthropic/claude-sonnet-4.5"
     openrouter_fallback_models: tuple[str, ...] = ("openai/gpt-4.1",)
     openrouter_vision_model: str = ""
-    openrouter_vision_mode: str = "smart"
+    openrouter_vision_mode: str = "fallback"
 
 
 def load_config(env_path: str | Path = ".env") -> AppConfig:
@@ -112,7 +112,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
             ("openai/gpt-4.1",),
         ),
         openrouter_vision_model=os.getenv("OPENROUTER_VISION_MODEL", ""),
-        openrouter_vision_mode=_vision_mode(os.getenv("OPENROUTER_VISION_MODE", "smart")),
+        openrouter_vision_mode=_vision_mode(os.getenv("OPENROUTER_VISION_MODE", "fallback")),
     )
 
 
@@ -155,4 +155,4 @@ def _csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 def _vision_mode(value: str) -> str:
     normalized = value.strip().lower()
-    return normalized if normalized in {"off", "fallback", "smart"} else "smart"
+    return normalized if normalized in {"off", "fallback", "smart"} else "fallback"

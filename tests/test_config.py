@@ -89,7 +89,13 @@ def test_load_config_uses_fast_kwork_monitoring_defaults(tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    for name in ("SCAN_INTERVAL_SECONDS", "KWORK_MAX_PAGES", "KWORK_MAX_RESPONSES", "KWORK_MAX_AGE_HOURS"):
+    for name in (
+        "SCAN_INTERVAL_SECONDS",
+        "KWORK_MAX_PAGES",
+        "KWORK_MAX_RESPONSES",
+        "KWORK_MAX_AGE_HOURS",
+        "OPENROUTER_VISION_MODE",
+    ):
         monkeypatch.delenv(name, raising=False)
 
     config = load_config(env_file)
@@ -98,6 +104,7 @@ def test_load_config_uses_fast_kwork_monitoring_defaults(tmp_path, monkeypatch):
     assert config.kwork_max_pages == 1
     assert config.kwork_max_responses == 6
     assert config.kwork_max_age_hours == 1
+    assert config.openrouter_vision_mode == "fallback"
 
 
 def test_load_config_reads_optional_kwork_login_credentials(tmp_path, monkeypatch):

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.kwork_client import KworkProjectInfo, KworkProjectReplyabilityError
@@ -133,6 +135,51 @@ def test_reply_form_opener_supports_kwork_span_buttons():
     assert "|| paymentTypeItems[0]" not in _FILL_AND_SUBMIT_SCRIPT
     assert ".duration-select__selected-option')" in _FILL_AND_SUBMIT_SCRIPT
     assert "|| durationWidget?.querySelector('.vs__selected')" in _FILL_AND_SUBMIT_SCRIPT
+
+
+def test_fill_and_submit_dispatches_a_trusted_cdp_click(monkeypatch):
+    from app import kwork_source
+
+    calls = []
+    monkeypatch.setattr(
+        kwork_source,
+        "_evaluate",
+        lambda _ws, _script: json.dumps(
+            {
+                "ok": True,
+                "submitted": False,
+                "messageFilled": True,
+                "titleFilled": True,
+                "priceFilled": True,
+                "daysFilled": True,
+                "paymentTypeFilled": True,
+                "submitPoint": {"x": 420.5, "y": 730.25},
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        kwork_source,
+        "_send_cdp",
+        lambda _ws, method, params: calls.append((method, params)) or {},
+    )
+
+    result = KworkReplySender()._fill_and_submit(
+        object(),
+        "Сделаю правки по вашему ТЗ.",
+        ReplyTerms(price_rub=5100, days=2),
+        "Доработка сайта",
+        submit=True,
+    )
+
+    assert result["submitted"] is True
+    assert [method for method, _params in calls] == [
+        "Input.dispatchMouseEvent",
+        "Input.dispatchMouseEvent",
+        "Input.dispatchMouseEvent",
+    ]
+    assert all(params["x"] == 420.5 and params["y"] == 730.25 for _method, params in calls)
+    assert calls[1][1]["type"] == "mousePressed"
+    assert calls[2][1]["type"] == "mouseReleased"
 
 
 def test_reply_field_detector_ignores_generic_kwork_header_inputs():
@@ -462,7 +509,42 @@ def test_confirmation_script_clicks_kwork_modal_confirmation():
     assert "role=dialog" in _CONFIRM_SUBMIT_SCRIPT
     assert "подтверд" in _CONFIRM_SUBMIT_SCRIPT
     assert "верификац" in _CONFIRM_SUBMIT_SCRIPT
-    assert "button.click()" in _CONFIRM_SUBMIT_SCRIPT
+    assert "getBoundingClientRect" in _CONFIRM_SUBMIT_SCRIPT
+    assert "button.click()" not in _CONFIRM_SUBMIT_SCRIPT
+
+
+def test_confirmation_dispatches_a_trusted_cdp_click(monkeypatch):
+    from app import kwork_source
+
+    evaluations = iter(
+        (
+            json.dumps(
+                {
+                    "ok": True,
+                    "clicked": True,
+                    "hasDialog": True,
+                    "submitPoint": {"x": 300, "y": 500},
+                }
+            ),
+            json.dumps({"ok": True, "clicked": False, "hasDialog": False}),
+        )
+    )
+    calls = []
+    monkeypatch.setattr(kwork_source, "_evaluate", lambda _ws, _script: next(evaluations))
+    monkeypatch.setattr(
+        kwork_source,
+        "_send_cdp",
+        lambda _ws, method, params: calls.append((method, params)) or {},
+    )
+    monkeypatch.setattr("app.kwork_sender.time.sleep", lambda _seconds: None)
+
+    KworkReplySender(timeout_seconds=1)._confirm_after_submit(object())
+
+    assert [params["type"] for _method, params in calls] == [
+        "mouseMoved",
+        "mousePressed",
+        "mouseReleased",
+    ]
 
 
 def test_switch_to_offer_page_fails_when_kwork_opens_new_inbox_tab(monkeypatch):
