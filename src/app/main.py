@@ -560,7 +560,7 @@ def _refresh_existing_lead_live_status(
     kwork_max_responses: int,
 ) -> None:
     """Refresh competition data for an actionable lead without recreating it."""
-    if kwork_project_client is None or lead.status == "sent" or lead.sent_at:
+    if kwork_project_client is None or lead.status in {"sent", "rejected"} or lead.sent_at:
         return
     if lead.live_response_count is not None and lead.live_response_count > kwork_max_responses:
         return

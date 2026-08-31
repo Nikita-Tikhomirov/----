@@ -433,6 +433,32 @@ def test_scan_once_refreshes_live_kwork_count_for_existing_queued_lead(tmp_path)
     assert project_client.inspected == ["@client_dev", "@client_dev"]
 
 
+def test_scan_once_does_not_reinspect_rejected_lead(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    project_client = FakeKworkProjectClient(response_count=1)
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=project_client,
+        kwork_max_responses=5,
+    )
+    lead = storage.list_leads()[0]
+    storage.mark_rejected(lead.id, "не подходит")
+
+    scan_once(
+        storage=storage,
+        telegram_client=FakeTelegramClient(),
+        email_client=FakeEmailClient(),
+        kwork_project_client=project_client,
+        kwork_max_responses=5,
+    )
+
+    assert project_client.inspected == ["@client_dev"]
+
+
 def test_scan_once_backfills_kwork_budgets_and_price_for_existing_lead(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
