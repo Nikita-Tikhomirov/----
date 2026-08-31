@@ -219,6 +219,26 @@ def test_parse_kwork_project_html_extracts_attachments():
     assert "screen.png" in result.attachments[1]
 
 
+def test_parse_kwork_project_html_adds_google_docs_spec_as_readable_docx():
+    html = """
+    <html>
+      <body>
+        <div class="description">
+          Полное ТЗ:
+          <a href="https://docs.google.com/document/d/1AbC_def-234/edit?usp=sharing">открыть документ</a>
+        </div>
+        <span>Предложений: 2</span>
+      </body>
+    </html>
+    """
+
+    result = parse_kwork_project_html("https://kwork.ru/projects/1", html)
+
+    assert result.attachments == (
+        "ТЗ Google Docs 1.docx: https://docs.google.com/document/d/1AbC_def-234/export?format=docx",
+    )
+
+
 def test_parse_kwork_project_html_extracts_actionable_facts():
     html = """
     <html>

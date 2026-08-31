@@ -41,6 +41,10 @@ ATTACHMENT_LINK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 FILE_EXT_PATTERN = re.compile(r"\.(?:pdf|docx?|xlsx?|txt|zip|rar|7z|png|jpe?g|webp)\b", re.IGNORECASE)
+GOOGLE_DOC_PATTERN = re.compile(
+    r"https://docs\.google\.com/document/d/(?P<document_id>[A-Za-z0-9_-]+)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -263,7 +267,14 @@ def parse_kwork_project_html(url: str, html_text: str) -> KworkProjectInfo:
     count_match = OFFER_COUNT_PATTERN.search(visible_text)
     title = _clean_title(_first_group(TITLE_PATTERN, html_text, "title"))
     description = _clean_text(_first_group(DESCRIPTION_PATTERN, html_text, "description"))
-    attachments = tuple(_extract_attachments(url, html_text))
+    attachments = tuple(
+        dict.fromkeys(
+            (
+                *_extract_attachments(url, html_text),
+                *_extract_linked_google_docs(html_text),
+            )
+        )
+    )[:10]
     buyer_desired_budget_rub = _extract_embedded_budget(html_text, "priceLimit") or _extract_budget_amount(
         BUYER_BUDGET_PATTERN,
         visible_text,
@@ -434,6 +445,20 @@ def _extract_attachments(base_url: str, html_text: str) -> list[str]:
             seen.add(item)
             attachments.append(item)
     return attachments[:10]
+
+
+def _extract_linked_google_docs(html_text: str) -> list[str]:
+    """Expose public Google Docs task specs through the existing DOCX reader."""
+    attachments: list[str] = []
+    seen_ids: set[str] = set()
+    for match in GOOGLE_DOC_PATTERN.finditer(html.unescape(html_text)):
+        document_id = match.group("document_id")
+        if document_id in seen_ids:
+            continue
+        seen_ids.add(document_id)
+        export_url = f"https://docs.google.com/document/d/{document_id}/export?format=docx"
+        attachments.append(f"ТЗ Google Docs {len(attachments) + 1}.docx: {export_url}")
+    return attachments
 
 
 def _extract_facts(
