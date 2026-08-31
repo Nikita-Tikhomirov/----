@@ -45,6 +45,7 @@ class KworkWebSource:
         self,
         projects_url: str = DEFAULT_KWORK_PROJECTS_URL,
         max_posts: int = 30,
+        max_pages: int = 0,
         max_responses: int = 5,
         max_age_hours: int = 24,
         cookie: str = "",
@@ -58,6 +59,7 @@ class KworkWebSource:
     ):
         self.projects_url = projects_url
         self.max_posts = max_posts
+        self.max_pages = max(0, max_pages)
         self.max_responses = max_responses
         self.max_age_hours = max(0, max_age_hours)
         self.cookie = cookie
@@ -79,7 +81,11 @@ class KworkWebSource:
         page = 1
         last_page = 1
 
-        while len(posts) < self.max_posts and page <= last_page:
+        while (
+            len(posts) < self.max_posts
+            and page <= last_page
+            and (self.max_pages == 0 or page <= self.max_pages)
+        ):
             page_url = _projects_page_url(self.projects_url, page)
             try:
                 html_text = _fetch_html(page_url, self.timeout_seconds, self.cookie)

@@ -206,6 +206,43 @@ def test_kwork_web_source_fetches_embedded_projects_across_pages(monkeypatch):
     assert [post.message_id for post in posts] == [3219010, 3219009, 3219008]
 
 
+def test_kwork_web_source_can_limit_live_monitoring_to_first_page(monkeypatch):
+    import app.kwork_source as source
+
+    fetched_urls = []
+    html = """
+    <script>
+      window.pageState = {
+        "wantsListData": {
+          "pagination": {
+            "current_page": 1,
+            "last_page": 10,
+            "data": [
+              {"id": 3219012, "name": "Самый свежий заказ", "date_create": "2026-07-18 12:00:00", "status": "active", "isWantActive": true}
+            ]
+          }
+        }
+      };
+    </script>
+    """
+
+    def fake_fetch(url, *_args, **_kwargs):
+        fetched_urls.append(url)
+        return html
+
+    monkeypatch.setattr(source, "_fetch_html", fake_fetch)
+
+    posts = KworkWebSource(
+        max_posts=30,
+        max_pages=1,
+        max_age_hours=0,
+        use_browser=False,
+    ).fetch_recent_posts()
+
+    assert [post.message_id for post in posts] == [3219012]
+    assert fetched_urls == ["https://kwork.ru/projects?c=11"]
+
+
 def test_kwork_web_source_stops_pagination_when_page_adds_no_projects(monkeypatch):
     import app.kwork_source as source
 

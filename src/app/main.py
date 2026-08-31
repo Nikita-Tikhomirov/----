@@ -1046,6 +1046,7 @@ def build_runtime(config: AppConfig):
         telegram_client = KworkWebSource(
             projects_url=config.kwork_projects_url,
             max_posts=config.max_posts_per_channel,
+            max_pages=config.kwork_max_pages,
             max_responses=config.kwork_max_responses,
             max_age_hours=config.kwork_max_age_hours,
             cookie=kwork_cookie,

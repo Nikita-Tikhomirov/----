@@ -26,6 +26,7 @@ class AppConfig:
     lead_hub_executor_id: str = "kwork-desktop"
     scan_interval_seconds: int = 10
     max_posts_per_channel: int = 20
+    kwork_max_pages: int = 1
     kwork_max_responses: int = 5
     kwork_max_age_hours: int = 24
     kwork_cookie: str = ""
@@ -74,6 +75,7 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         database_path=Path(os.getenv("DATABASE_PATH", "data/leads.sqlite3")),
         scan_interval_seconds=_int_env("SCAN_INTERVAL_SECONDS", 10),
         max_posts_per_channel=_int_env("MAX_POSTS_PER_CHANNEL", 20),
+        kwork_max_pages=_int_env("KWORK_MAX_PAGES", 1),
         kwork_max_responses=_int_env("KWORK_MAX_RESPONSES", 5),
         kwork_max_age_hours=_int_env("KWORK_MAX_AGE_HOURS", 24),
         kwork_cookie=os.getenv("KWORK_COOKIE", ""),
