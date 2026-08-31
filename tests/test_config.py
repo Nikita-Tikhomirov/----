@@ -42,9 +42,39 @@ def test_load_config_blocks_unsupported_site_builders_by_default(tmp_path, monke
 
     config = load_config(env_file)
 
-    assert {"битрикс", "bitrix", "tilda", "тильда", "elementor", "элементор"} <= set(
-        config.lead_blocked_keywords
+    assert {
+        "битрикс",
+        "bitrix",
+        "tilda",
+        "тильда",
+        "elementor",
+        "элементор",
+        "swift",
+        "xcode",
+    } <= set(config.lead_blocked_keywords)
+
+
+def test_load_config_reads_kwork_autosend_settings(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "TELEGRAM_API_ID=0",
+                "TELEGRAM_API_HASH=fill_later",
+                "TELEGRAM_CHANNELS=@unused",
+                "KWORK_AUTO_SEND=1",
+                "KWORK_AUTO_SEND_DAILY_LIMIT=10",
+            ]
+        ),
+        encoding="utf-8",
     )
+    monkeypatch.delenv("KWORK_AUTO_SEND", raising=False)
+    monkeypatch.delenv("KWORK_AUTO_SEND_DAILY_LIMIT", raising=False)
+
+    config = load_config(env_file)
+
+    assert config.kwork_auto_send is True
+    assert config.kwork_auto_send_daily_limit == 10
 
 
 def test_load_config_reads_optional_kwork_login_credentials(tmp_path, monkeypatch):

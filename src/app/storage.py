@@ -381,6 +381,18 @@ class Storage:
             ).fetchone()
         return row is not None
 
+    def count_sent_today_moscow(self) -> int:
+        """Count durable external sends in the current Moscow calendar day."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM sent_messages
+                WHERE sent_at >= datetime('now', '+3 hours', 'start of day', '-3 hours')
+                """
+            ).fetchone()
+        return int(row["total"] if row is not None else 0)
+
     def claim_lead_email_delivery(self, lead_id: int) -> bool:
         """Atomically reserve a new lead so concurrent scans cannot email it twice."""
         with self._connect() as conn:

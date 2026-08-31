@@ -27,6 +27,14 @@ BLOCKED_PATTERNS = (
     ("Bitrix", re.compile(r"битрикс|bitrix", re.IGNORECASE)),
     ("Tilda/Тильда", re.compile(r"tilda|тильд\w*", re.IGNORECASE)),
     ("Elementor/Элементор", re.compile(r"elementor|элементор\w*", re.IGNORECASE)),
+    (
+        "iOS-приложение",
+        re.compile(
+            r"(?:\bios\b|iphone|ipad|swift|xcode).{0,50}(?:прилож\w*|\bapp\b|разработ\w*|тестир\w*)"
+            r"|(?:прилож\w*|\bapp\b).{0,50}(?:\bios\b|iphone|ipad|swift|xcode)",
+            re.IGNORECASE,
+        ),
+    ),
 )
 DEFAULT_BLOCKED_KEYWORDS = (
     "битрикс",
@@ -35,6 +43,10 @@ DEFAULT_BLOCKED_KEYWORDS = (
     "тильда",
     "elementor",
     "элементор",
+    "приложение ios",
+    "ios приложение",
+    "swift",
+    "xcode",
 )
 
 SMALL_TASK_PATTERN = re.compile(

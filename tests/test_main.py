@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import app.main as main_module
 
 from app.main import (
+    _auto_send_new_leads,
     _proposal_price_from_kwork_max,
     _proposal_title_from_text,
     _scan_execution_lock,
@@ -38,6 +39,78 @@ def test_proposal_price_uses_fifteen_percent_below_kwork_maximum():
     assert _proposal_price_from_kwork_max(6000) == 5100
     assert _proposal_price_from_kwork_max(6150) == 5200
     assert _proposal_price_from_kwork_max(None) is None
+
+
+def test_auto_send_only_submits_newly_discovered_kwork_leads(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=3246001,
+        post_url="https://kwork.ru/projects/3246001/view",
+        text=(
+            "Нужно исправить отправку формы заявки на WordPress и проверить адаптив. "
+            "Предложений: 2"
+        ),
+        posted_at="2026-08-31 12:00:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=88,
+        summary=(
+            "Задача: Исправить отправку формы заявки на WordPress\n"
+            "Боль клиента: Заявки с мобильных устройств сейчас теряются\n"
+            "План работ: Проверить обработчик; исправить отправку; протестировать адаптив"
+        ),
+        draft_reply=(
+            "Здравствуйте! Проверю обработчик формы WordPress и найду, на каком шаге теряются заявки. "
+            "Исправлю отправку и сообщения об ошибках, затем прогоню форму на компьютере и телефоне. "
+            "В результате заявки будут стабильно доходить, а пользователь увидит понятное подтверждение."
+        ),
+        contact="https://kwork.ru/projects/3246001/view",
+        proposal_title="Исправить форму WordPress",
+        proposal_price_rub=5100,
+        proposal_days=2,
+    )
+    storage.update_lead_live_status(lead_id, 2)
+    sender = FakeKworkSender()
+
+    assert _auto_send_new_leads(storage, {}, sender, daily_limit=10) == 1
+    assert storage.get_lead(lead_id).status == "sent"
+    assert len(sender.sent) == 1
+
+    assert _auto_send_new_leads(storage, {}, sender, daily_limit=10) == 0
+    assert len(sender.sent) == 1
+
+
+def test_auto_send_does_not_submit_leads_that_were_already_waiting(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=3246002,
+        post_url="https://kwork.ru/projects/3246002/view",
+        text="Нужно поправить форму WordPress. Предложений: 1",
+        posted_at="2026-08-30 12:00:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=90,
+        summary="Задача: Поправить форму WordPress",
+        draft_reply=(
+            "Здравствуйте! Проверю текущую отправку формы и исправлю обработчик заявки. "
+            "После изменений протестирую успешный и ошибочный сценарии на компьютере и телефоне."
+        ),
+        contact="https://kwork.ru/projects/3246002/view",
+        proposal_title="Исправить форму WordPress",
+        proposal_price_rub=3000,
+        proposal_days=2,
+    )
+    sender = FakeKworkSender()
+
+    assert _auto_send_new_leads(storage, {lead_id: "new"}, sender, daily_limit=10) == 0
+    assert storage.get_lead(lead_id).status == "new"
+    assert sender.sent == []
 
 
 class FakeTelegramClient:

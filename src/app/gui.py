@@ -65,6 +65,8 @@ class LiveRejudgeOutcome:
     attachment_reports: tuple
 
 FILTER_SETTINGS = (
+    ("KWORK_AUTO_SEND", "Автоотправка новых лидов (1 = да, 0 = нет)", "0"),
+    ("KWORK_AUTO_SEND_DAILY_LIMIT", "Лимит автоотправок за сутки", "10"),
     ("KWORK_MAX_RESPONSES", "Макс. откликов в заказе", "5"),
     ("KWORK_MAX_AGE_HOURS", "Возраст заказа, часов (0 = без лимита)", "24"),
     ("SCAN_INTERVAL_SECONDS", "Интервал мониторинга, сек", "60"),
@@ -72,7 +74,11 @@ FILTER_SETTINGS = (
     ("LEAD_MIN_SCORE", "Мин. AI score", "60"),
     ("LEAD_MAX_DAYS", "Макс. срок, дней", "7"),
     ("LEAD_ACCEPT_DECISIONS", "AI решения принимать", "accept, maybe"),
-    ("LEAD_BLOCKED_KEYWORDS", "Стоп-слова", "битрикс, bitrix"),
+    (
+        "LEAD_BLOCKED_KEYWORDS",
+        "Стоп-слова",
+        "битрикс, bitrix, tilda, тильда, elementor, элементор, приложение ios, ios приложение, swift, xcode",
+    ),
     (
         "LEAD_HARD_REJECT_KEYWORDS",
         "Доп. жёсткие стоп-слова (можно пусто)",
@@ -86,6 +92,8 @@ FILTER_SETTINGS = (
 )
 
 INTEGER_LIMITS = {
+    "KWORK_AUTO_SEND": (0, 1),
+    "KWORK_AUTO_SEND_DAILY_LIMIT": (1, 100),
     "KWORK_MAX_RESPONSES": (0, 100),
     "KWORK_MAX_AGE_HOURS": (0, 720),
     "SCAN_INTERVAL_SECONDS": (10, 3600),
@@ -1506,6 +1514,7 @@ class LeadFunnelGui:
         values = {key: var.get() for key, var in self.setting_vars.items()}
         return (
             "Текущий отбор: "
+            f"автоотправка: {'да' if values.get('KWORK_AUTO_SEND', '0') == '1' else 'нет'}, "
             f"откликов <= {values.get('KWORK_MAX_RESPONSES', '5')}, "
             f"возраст <= {values.get('KWORK_MAX_AGE_HOURS', '24')} ч., "
             f"AI score >= {values.get('LEAD_MIN_SCORE', '60')}, "

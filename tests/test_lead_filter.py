@@ -24,6 +24,21 @@ def test_rejects_tilda_and_elementor_orders_by_default():
         assert platform.lower() in result.reasons.lower()
 
 
+def test_rejects_native_ios_app_orders_but_keeps_web_ios_compatibility_work():
+    native = evaluate_post(
+        "Нужно разработать приложение для iOS на Swift и собрать проект в Xcode. "
+        "Отклик: https://example.com/order"
+    )
+    web = evaluate_post(
+        "Нужно поправить HTML/CSS адаптив сайта в Safari на iPhone. "
+        "Отклик: https://example.com/order"
+    )
+
+    assert native.accepted is False
+    assert "iOS" in native.reasons
+    assert web.accepted is True
+
+
 def test_accepts_full_time_vacancies_from_kwork_feed():
     result = evaluate_post(
         "Вакансия WordPress разработчик, зарплата 150 000 руб/мес, "

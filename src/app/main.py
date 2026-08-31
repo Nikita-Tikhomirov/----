@@ -736,6 +736,103 @@ def process_mobile_approvals(
     return processed
 
 
+def _auto_send_new_leads(
+    storage: Storage,
+    previous_statuses: dict[int, str],
+    sender: KworkReplySender,
+    *,
+    daily_limit: int,
+) -> int:
+    """Send only Kwork leads first created or rebuilt by the current scan."""
+    remaining = max(0, daily_limit - storage.count_sent_today_moscow())
+    if remaining <= 0:
+        logger.info("Kwork auto-send daily limit %s is already reached", daily_limit)
+        return 0
+
+    sent = 0
+    for lead in storage.list_leads():
+        if sent >= remaining:
+            break
+        if lead.channel != "kwork-web" or lead.status != "new":
+            continue
+        previous_status = previous_statuses.get(lead.id)
+        if previous_status not in {None, "failed"}:
+            continue
+
+        block_reason = _auto_send_block_reason(storage, lead)
+        if block_reason:
+            storage.mark_failed(lead.id, block_reason)
+            logger.warning("Auto-send blocked lead %s: %s", lead.id, block_reason)
+            continue
+        if not storage.begin_lead_send(lead.id):
+            logger.warning("Auto-send could not reserve lead %s", lead.id)
+            continue
+
+        try:
+            message_id = sender.send_reply(
+                lead.contact,
+                lead.draft_reply,
+                price_rub=lead.proposal_price_rub,
+                days=lead.proposal_days,
+                title=lead.proposal_title,
+                submit=True,
+            )
+        except Exception as exc:
+            storage.mark_failed(lead.id, str(exc))
+            logger.exception("Auto-send failed for Kwork lead %s", lead.id)
+            continue
+
+        try:
+            storage.mark_sent(lead.id, lead.contact, message_id)
+        except Exception:
+            # The browser may already have submitted the proposal. Keep the
+            # reserved sending state so a later pass cannot duplicate it.
+            logger.exception("Kwork accepted auto-send lead %s, but persistence failed", lead.id)
+            continue
+        logger.info("Auto-sent Kwork lead %s (%s)", lead.id, lead.contact)
+        sent += 1
+    return sent
+
+
+def _auto_send_block_reason(storage: Storage, lead) -> str:
+    if not lead.draft_reply.strip():
+        return "Автоотправка: текст отклика не сформирован"
+    if not lead.proposal_title.strip():
+        return "Автоотправка: название заказа не сформировано"
+    if not lead.proposal_price_rub or not lead.proposal_days:
+        return "Автоотправка: цена или срок не определены"
+    if lead.live_response_count is None:
+        return "Автоотправка: не удалось подтвердить число предложений на Kwork"
+
+    attachment_issue = _auto_send_attachment_issue(storage, lead.id)
+    if attachment_issue:
+        return attachment_issue
+    quality_context = _mobile_reply_context(
+        storage,
+        lead,
+        title=lead.proposal_title,
+        days=lead.proposal_days,
+    )
+    quality_issue = reply_delivery_issue_summary(lead.draft_reply, quality_context)
+    return f"Автоотправка: {quality_issue}" if quality_issue else ""
+
+
+def _auto_send_attachment_issue(storage: Storage, lead_id: int) -> str:
+    unsafe_markers = (
+        "не скачан",
+        "не прочитан",
+        "не открыт",
+        "не выполнен",
+        "текст не извлечен",
+        "тип не поддержан",
+    )
+    for attachment in storage.list_lead_attachments(lead_id):
+        status = attachment.status.strip().lower()
+        if any(marker in status for marker in unsafe_markers):
+            return f"Автоотправка: вложение «{attachment.label}» обработано не полностью ({attachment.status})"
+    return ""
+
+
 def _mobile_command_payload(command: dict[str, object]) -> dict[str, str | int]:
     reply = str(command.get("draft_reply") or "").strip()
     title = str(command.get("proposal_title") or command.get("title") or "").strip()[:70]
@@ -1021,6 +1118,7 @@ def _scan_runtime_once(
             logger.warning("Сканирование уже выполняется из другого окна или с мобильного приложения")
             return
         cookie = _resolve_kwork_cookie(config)
+        previous_statuses = {lead.id: lead.status for lead in storage.list_leads()}
         scan_once(
             storage, telegram_client, lead_hub,
             deepseek_api_key=config.deepseek_api_key,
@@ -1045,6 +1143,21 @@ def _scan_runtime_once(
             lead_hard_reject_keywords=config.lead_hard_reject_keywords,
             lead_required_keywords=config.lead_required_keywords,
         )
+        if getattr(config, "kwork_auto_send", False):
+            sender = KworkReplySender(
+                cdp_url=config.kwork_cdp_url,
+                browser_profile_dir=config.kwork_browser_profile_dir,
+                login_email=config.kwork_login_email,
+                login_password=config.kwork_login_password,
+                max_responses=config.kwork_max_responses,
+                cookie=cookie,
+            )
+            _auto_send_new_leads(
+                storage,
+                previous_statuses,
+                sender,
+                daily_limit=max(1, getattr(config, "kwork_auto_send_daily_limit", 10)),
+            )
         _process_mobile_approvals_from_runtime(storage, lead_hub, config, cookie)
 
 

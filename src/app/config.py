@@ -37,6 +37,8 @@ class AppConfig:
     kwork_auto_chrome_cookies: bool = True
     kwork_login_email: str = ""
     kwork_login_password: str = ""
+    kwork_auto_send: bool = False
+    kwork_auto_send_daily_limit: int = 10
     lead_min_score: int = 60
     lead_max_days: int = 7
     lead_accept_decisions: tuple[str, ...] = ("accept", "maybe")
@@ -83,6 +85,8 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         kwork_auto_chrome_cookies=_bool_env("KWORK_AUTO_CHROME_COOKIES", True),
         kwork_login_email=os.getenv("KWORK_LOGIN_EMAIL", ""),
         kwork_login_password=os.getenv("KWORK_LOGIN_PASSWORD", ""),
+        kwork_auto_send=_bool_env("KWORK_AUTO_SEND", False),
+        kwork_auto_send_daily_limit=_int_env("KWORK_AUTO_SEND_DAILY_LIMIT", 10),
         lead_min_score=_int_env("LEAD_MIN_SCORE", 60),
         lead_max_days=_int_env("LEAD_MAX_DAYS", 7),
         lead_accept_decisions=_csv_env("LEAD_ACCEPT_DECISIONS", ("accept", "maybe")),
