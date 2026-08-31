@@ -138,6 +138,7 @@ def scan_once(
     lead_blocked_keywords: tuple[str, ...] = DEFAULT_BLOCKED_KEYWORDS,
     lead_hard_reject_keywords: tuple[str, ...] = DEFAULT_HARD_REJECT_KEYWORDS,
     lead_required_keywords: tuple[str, ...] = (),
+    lead_hub_executor_id: str = "kwork-desktop",
     new_lead_handler: Callable[[object], None] | None = None,
 ) -> int:
     # Older extensions called scan_once(storage, source, email_client) positionally.
@@ -200,7 +201,13 @@ def scan_once(
                 kwork_project_client=kwork_project_client,
                 kwork_max_responses=kwork_max_responses,
             )
-            if _deliver_new_lead(storage, lead_hub, email_client, existing_lead):
+            if _deliver_new_lead(
+                storage,
+                lead_hub,
+                email_client,
+                existing_lead,
+                executor_id=lead_hub_executor_id,
+            ):
                 created += 1
             else:
                 logger.info("Skipping existing lead for post %s/%s", post.channel, post.message_id)
@@ -466,7 +473,13 @@ def scan_once(
             failed_lead = storage.get_lead(lead_id)
             if rebuild_existing and lead_hub is not None:
                 storage.prepare_lead_hub_resync(lead_id)
-            if _deliver_new_lead(storage, lead_hub, email_client, failed_lead):
+            if _deliver_new_lead(
+                storage,
+                lead_hub,
+                email_client,
+                failed_lead,
+                executor_id=lead_hub_executor_id,
+            ):
                 created += 1
             continue
 
@@ -519,10 +532,21 @@ def scan_once(
             lead = storage.get_lead(lead_id)
         if rebuild_existing and lead_hub is not None:
             storage.prepare_lead_hub_resync(lead.id)
-            if _publish_lead(storage, lead_hub, storage.get_lead(lead.id)):
+            if _publish_lead(
+                storage,
+                lead_hub,
+                storage.get_lead(lead.id),
+                executor_id=lead_hub_executor_id,
+            ):
                 created += 1
             continue
-        if _deliver_new_lead(storage, lead_hub, email_client, lead):
+        if _deliver_new_lead(
+            storage,
+            lead_hub,
+            email_client,
+            lead,
+            executor_id=lead_hub_executor_id,
+        ):
             created += 1
     return created
 
@@ -631,7 +655,13 @@ def _reply_source_text(
     )
 
 
-def _publish_lead(storage: Storage, lead_hub: LeadHubClient, lead) -> bool:
+def _publish_lead(
+    storage: Storage,
+    lead_hub: LeadHubClient,
+    lead,
+    *,
+    executor_id: str = "kwork-desktop",
+) -> bool:
     if not storage.claim_lead_hub_delivery(lead.id):
         logger.info("Skipping already synced lead %s", lead.id)
         return False
@@ -641,6 +671,13 @@ def _publish_lead(storage: Storage, lead_hub: LeadHubClient, lead) -> bool:
         storage.release_lead_hub_delivery(lead.id)
         logger.warning("Failed to publish lead %s to mobile hub: %s", lead.id, exc)
         return False
+    if lead.status == "sent":
+        try:
+            lead_hub.report_auto_sent(hub_lead_id, executor_id)
+        except Exception as exc:
+            storage.release_lead_hub_delivery(lead.id)
+            logger.warning("Failed to sync auto-sent lead %s to mobile hub: %s", lead.id, exc)
+            return False
     storage.mark_lead_hub_synced(lead.id, hub_lead_id)
     logger.info("Published lead %s to mobile hub as %s", lead.id, hub_lead_id)
     return True
@@ -906,9 +943,16 @@ def _lead_summary_items(summary: str, label: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(";") if item.strip())[:5]
 
 
-def _deliver_new_lead(storage: Storage, lead_hub: LeadHubClient | None, email_client, lead) -> bool:
+def _deliver_new_lead(
+    storage: Storage,
+    lead_hub: LeadHubClient | None,
+    email_client,
+    lead,
+    *,
+    executor_id: str = "kwork-desktop",
+) -> bool:
     if lead_hub is not None:
-        return _publish_lead(storage, lead_hub, lead)
+        return _publish_lead(storage, lead_hub, lead, executor_id=executor_id)
     if email_client is None:
         raise RuntimeError("Mobile lead hub is not configured")
     return _legacy_email_delivery(storage, email_client, lead)
@@ -1177,6 +1221,7 @@ def _scan_runtime_once(
             lead_blocked_keywords=config.lead_blocked_keywords,
             lead_hard_reject_keywords=config.lead_hard_reject_keywords,
             lead_required_keywords=config.lead_required_keywords,
+            lead_hub_executor_id=config.lead_hub_executor_id,
             new_lead_handler=send_immediately if auto_sender is not None else None,
         )
         if auto_sender is not None:

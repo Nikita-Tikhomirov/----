@@ -484,7 +484,7 @@ def test_wait_after_submit_raises_when_kwork_keeps_form_open(monkeypatch):
 
 def test_wait_after_submit_does_not_treat_project_page_with_open_form_as_sent(monkeypatch):
     from app import kwork_source
-    from app.kwork_sender import _HAS_REPLY_FIELD_SCRIPT
+    from app.kwork_sender import _HAS_MANUAL_VERIFICATION_SCRIPT, _HAS_REPLY_FIELD_SCRIPT
 
     project_url = "https://kwork.ru/projects/3190074/view"
 
@@ -493,6 +493,8 @@ def test_wait_after_submit_does_not_treat_project_page_with_open_form_as_sent(mo
             return project_url
         if script == _HAS_REPLY_FIELD_SCRIPT:
             return True
+        if script == _HAS_MANUAL_VERIFICATION_SCRIPT:
+            return False
         if "document.body" in script:
             return "Описание\nСтоимость\nНазвание заказа\nСрок выполнения"
         raise AssertionError(f"Unexpected script: {script}")
@@ -501,6 +503,62 @@ def test_wait_after_submit_does_not_treat_project_page_with_open_form_as_sent(mo
 
     with pytest.raises(RuntimeError, match="not confirmed as sent"):
         KworkReplySender(timeout_seconds=0.1)._wait_after_submit(object())
+
+
+def test_wait_after_submit_ignores_captcha_words_in_project_description(monkeypatch):
+    from app import kwork_source
+    from app.kwork_sender import _HAS_MANUAL_VERIFICATION_SCRIPT, _HAS_REPLY_FIELD_SCRIPT
+
+    location_reads = 0
+
+    def fake_evaluate(_ws, script):
+        nonlocal location_reads
+        if script == "location.href":
+            location_reads += 1
+            if location_reads == 1:
+                return "https://kwork.ru/new_offer?project=3190074"
+            return "https://kwork.ru/inbox/customer"
+        if script == _HAS_REPLY_FIELD_SCRIPT:
+            return True
+        if script == _HAS_MANUAL_VERIFICATION_SCRIPT:
+            return False
+        if "document.body" in script:
+            return "Заказ: подключить captcha и защитить форму от спама"
+        raise AssertionError(f"Unexpected script: {script}")
+
+    monkeypatch.setattr(kwork_source, "_evaluate", fake_evaluate)
+    monkeypatch.setattr("app.kwork_sender.time.monotonic", lambda: 0.0)
+    monkeypatch.setattr("app.kwork_sender.time.sleep", lambda _seconds: None)
+
+    KworkReplySender(timeout_seconds=1)._wait_after_submit(object())
+
+
+def test_wait_after_submit_detects_visible_verification_controls(monkeypatch):
+    from app import kwork_source
+    from app.kwork_sender import _HAS_MANUAL_VERIFICATION_SCRIPT
+
+    def fake_evaluate(_ws, script):
+        if script == "location.href":
+            return "https://kwork.ru/new_offer?project=3190074"
+        if script == _HAS_MANUAL_VERIFICATION_SCRIPT:
+            return True
+        if "document.body" in script:
+            return "Предложить услугу"
+        return True
+
+    monkeypatch.setattr(kwork_source, "_evaluate", fake_evaluate)
+
+    with pytest.raises(RuntimeError, match="manual confirmation"):
+        KworkReplySender(timeout_seconds=1)._wait_after_submit(object())
+
+
+def test_manual_verification_detector_uses_visible_controls_and_dialogs():
+    from app.kwork_sender import _HAS_MANUAL_VERIFICATION_SCRIPT
+
+    assert 'autocomplete="one-time-code"' in _HAS_MANUAL_VERIFICATION_SCRIPT
+    assert 'iframe[src*="captcha" i]' in _HAS_MANUAL_VERIFICATION_SCRIPT
+    assert "role=dialog" in _HAS_MANUAL_VERIFICATION_SCRIPT
+    assert "document.body.innerText" not in _HAS_MANUAL_VERIFICATION_SCRIPT
 
 
 def test_confirmation_script_clicks_kwork_modal_confirmation():

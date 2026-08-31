@@ -373,7 +373,7 @@ class KworkReplySender:
                 lowered,
             ):
                 return
-            if any(marker in lowered for marker in ("sms", "смс", "captcha", "капч", "верификац", "код подтверждения")):
+            if kwork_source._evaluate(ws, _HAS_MANUAL_VERIFICATION_SCRIPT) is True:
                 raise RuntimeError("Kwork requires manual confirmation before sending the reply")
             if any(marker in lowered for marker in ("обязательное поле", "заполните", "ошибка")):
                 raise RuntimeError("Kwork did not accept the reply; check required fields in the opened project tab")
@@ -614,6 +614,27 @@ _CONFIRM_SUBMIT_SCRIPT = r"""
     }
   }
   return JSON.stringify({ok: true, clicked: false, hasDialog: roots.length > 0});
+})()
+"""
+
+_HAS_MANUAL_VERIFICATION_SCRIPT = r"""
+(() => {
+  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const verificationControl = Array.from(document.querySelectorAll([
+    'input[autocomplete="one-time-code"]',
+    'input[name*="sms" i]',
+    'input[id*="sms" i]',
+    'input[name*="captcha" i]',
+    'input[id*="captcha" i]',
+    'iframe[src*="captcha" i]',
+    '.g-recaptcha'
+  ].join(','))).some(visible);
+  if (verificationControl) return true;
+  const dialogSelector = '[role=dialog],.modal,.modal-dialog,.popup,.kw-modal,.modal-wrapper,.v--modal-box,.swal2-popup,.js-modal,.js-popup';
+  return Array.from(document.querySelectorAll(dialogSelector)).filter(visible).some(root => {
+    const text = (root.innerText || root.textContent || '').replace(/\s+/g, ' ').trim();
+    return /(sms|смс|captcha|капч|верификац|подтвердите телефон|код подтверждения|код из сообщения)/i.test(text);
+  });
 })()
 """
 

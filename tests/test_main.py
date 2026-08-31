@@ -175,6 +175,7 @@ class FakeLeadHub:
         self.claimed = []
         self.results = []
         self.published = []
+        self.auto_sent = []
 
     def publish_lead(self, lead, attachments=()):
         self.published.append((lead.id, lead.draft_reply, tuple(attachments)))
@@ -193,6 +194,10 @@ class FakeLeadHub:
     def report_result(self, lead_id, executor_id, *, sent, error=""):
         self.results.append((lead_id, executor_id, sent, error))
 
+    def report_auto_sent(self, lead_id, executor_id):
+        self.auto_sent.append((lead_id, executor_id))
+        return True
+
 
 class FakeKworkSender:
     def __init__(self):
@@ -201,6 +206,39 @@ class FakeKworkSender:
     def send_reply(self, contact, text, *, price_rub, days, title, submit):
         self.sent.append((contact, text, price_rub, days, title, submit))
         return "kwork-project-1"
+
+
+def test_publishing_already_auto_sent_lead_syncs_mobile_status(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    post_id = storage.save_post(
+        channel="kwork-web",
+        message_id=3246009,
+        post_url="https://kwork.ru/projects/3246009/view",
+        text="Исправить форму WordPress",
+        posted_at="2026-08-31 12:00:00",
+    )
+    lead_id = storage.create_lead(
+        post_id=post_id,
+        score=90,
+        summary="Задача: Исправить форму WordPress",
+        draft_reply="Здравствуйте! Исправлю отправку формы и проверю результат на компьютере и телефоне.",
+        contact="https://kwork.ru/projects/3246009/view",
+        proposal_title="Исправить форму WordPress",
+        proposal_price_rub=3000,
+        proposal_days=1,
+    )
+    storage.mark_sent(lead_id, "https://kwork.ru/projects/3246009/view", "kwork-project-3246009")
+    hub = FakeLeadHub()
+
+    assert main_module._publish_lead(
+        storage,
+        hub,
+        storage.get_lead(lead_id),
+        executor_id="desktop-main",
+    ) is True
+    assert hub.auto_sent == [(91, "desktop-main")]
+    assert storage.get_lead(lead_id).hub_lead_id == 91
 
 
 class FlakyEmailClient(FakeEmailClient):

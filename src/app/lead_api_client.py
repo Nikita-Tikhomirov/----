@@ -154,6 +154,17 @@ class LeadHubClient:
             },
         )
 
+    def report_auto_sent(self, lead_id: int, executor_id: str) -> bool:
+        """Synchronize a Kwork send that was confirmed outside the mobile claim flow."""
+        payload = self._request(
+            "/leads/auto-sent",
+            {
+                "lead_id": lead_id,
+                "executor_id": executor_id,
+            },
+        )
+        return bool(payload.get("changed"))
+
     def _request(
         self,
         path: str,

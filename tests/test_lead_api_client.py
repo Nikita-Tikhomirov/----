@@ -91,6 +91,36 @@ def test_lead_hub_claims_mobile_approval_and_reports_result(monkeypatch):
     ]
 
 
+def test_lead_hub_reports_confirmed_automatic_send_without_mobile_claim(monkeypatch):
+    requests = []
+
+    class Response:
+        def read(self):
+            return json.dumps({"ok": True, "changed": True, "lead": {"id": 91, "status": "sent"}}).encode(
+                "utf-8"
+            )
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_urlopen(request, timeout):
+        requests.append((request.full_url, request.method, request.data, timeout))
+        return Response()
+
+    monkeypatch.setattr("app.lead_api_client.urlopen", fake_urlopen)
+    client = LeadHubClient("http://hub.test", "test-key", "79679812438")
+
+    assert client.report_auto_sent(91, "desktop-main") is True
+    assert requests[0][0:2] == ("http://hub.test/leads/auto-sent", "POST")
+    assert json.loads(requests[0][2].decode("utf-8")) == {
+        "lead_id": 91,
+        "executor_id": "desktop-main",
+    }
+
+
 def test_lead_hub_reads_mobile_monitor_command_and_reports_heartbeat(monkeypatch):
     requests = []
 
