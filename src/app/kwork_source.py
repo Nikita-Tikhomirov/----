@@ -86,7 +86,7 @@ class KworkWebSource:
             and page <= last_page
             and (self.max_pages == 0 or page <= self.max_pages)
         ):
-            page_url = _projects_page_url(self.projects_url, page)
+            page_url = _cache_busted_url(_projects_page_url(self.projects_url, page))
             try:
                 html_text = _fetch_html(page_url, self.timeout_seconds, self.cookie)
             except Exception as exc:
@@ -354,6 +354,8 @@ def _fetch_html(url: str, timeout_seconds: float, cookie: str = "") -> str:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept-Encoding": "identity",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
     if cookie:
         headers["Cookie"] = cookie

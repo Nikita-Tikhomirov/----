@@ -199,10 +199,11 @@ def test_kwork_web_source_fetches_embedded_projects_across_pages(monkeypatch):
         use_browser=False,
     ).fetch_recent_posts()
 
-    assert fetched_urls == [
-        "https://kwork.ru/projects?c=11",
-        "https://kwork.ru/projects?c=11&page=2",
-    ]
+    assert len(fetched_urls) == 2
+    assert fetched_urls[0].startswith("https://kwork.ru/projects?c=11&_lf_refresh=")
+    assert "c=11" in fetched_urls[1]
+    assert "page=2" in fetched_urls[1]
+    assert "_lf_refresh=" in fetched_urls[1]
     assert [post.message_id for post in posts] == [3219010, 3219009, 3219008]
 
 
@@ -240,7 +241,63 @@ def test_kwork_web_source_can_limit_live_monitoring_to_first_page(monkeypatch):
     ).fetch_recent_posts()
 
     assert [post.message_id for post in posts] == [3219012]
-    assert fetched_urls == ["https://kwork.ru/projects?c=11"]
+    assert len(fetched_urls) == 1
+    assert fetched_urls[0].startswith("https://kwork.ru/projects?c=11&_lf_refresh=")
+
+
+def test_kwork_web_source_cache_busts_each_projects_page_request(monkeypatch):
+    import app.kwork_source as source
+
+    fetched_urls = []
+    html = """
+    <script>
+      window.pageState = {
+        "wantsListData": {
+          "pagination": {
+            "current_page": 1,
+            "last_page": 1,
+            "data": []
+          }
+        }
+      };
+    </script>
+    """
+    monkeypatch.setattr(source, "_fetch_html", lambda url, *_args, **_kwargs: fetched_urls.append(url) or html)
+    monkeypatch.setattr(source.time, "time", lambda: 1_788_178_000.123)
+
+    KworkWebSource(max_pages=1, max_age_hours=0, use_browser=False).fetch_recent_posts()
+
+    assert fetched_urls == [
+        "https://kwork.ru/projects?c=11&_lf_refresh=1788178000123",
+    ]
+
+
+def test_fetch_html_disables_intermediary_http_caches(monkeypatch):
+    import app.kwork_source as source
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b"ok"
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+    monkeypatch.setattr(source.urllib.request, "build_opener", lambda *_handlers: FakeOpener())
+
+    assert source._fetch_html("https://kwork.ru/projects?c=11", 7) == "ok"
+    assert captured["request"].get_header("Cache-control") == "no-cache"
+    assert captured["request"].get_header("Pragma") == "no-cache"
 
 
 def test_kwork_web_source_stops_pagination_when_page_adds_no_projects(monkeypatch):
