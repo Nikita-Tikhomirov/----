@@ -998,6 +998,12 @@ def test_normalize_filter_settings_rejects_bad_kwork_url():
         normalize_filter_settings({"KWORK_PROJECTS_URL": "https://example.com/projects"})
 
 
+def test_normalize_filter_settings_accepts_five_second_monitoring():
+    values = normalize_filter_settings({"SCAN_INTERVAL_SECONDS": "5"})
+
+    assert values["SCAN_INTERVAL_SECONDS"] == "5"
+
+
 def test_lead_gui_helpers_extract_editable_fields():
     lead = Lead(
         id=12,

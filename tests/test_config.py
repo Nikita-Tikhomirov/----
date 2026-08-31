@@ -107,7 +107,7 @@ def test_load_config_uses_fast_kwork_monitoring_defaults(tmp_path, monkeypatch):
 
     config = load_config(env_file)
 
-    assert config.scan_interval_seconds == 10
+    assert config.scan_interval_seconds == 5
     assert config.kwork_max_pages == 1
     assert config.kwork_max_responses == 6
     assert config.kwork_max_age_hours == 1
