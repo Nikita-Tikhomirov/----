@@ -187,6 +187,8 @@ def _judge_with_openrouter(
             temperature=0.25,
             max_tokens=1200,
             timeout_seconds=timeout_seconds,
+            reasoning_effort="minimal",
+            response_format={"type": "json_object"},
         )
         logger.info("OpenRouter analysis completed with model %s", result.model)
         return parse_judge_response(result.content)

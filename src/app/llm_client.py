@@ -22,6 +22,8 @@ def openrouter_chat(
     temperature: float = 0.2,
     max_tokens: int = 1000,
     timeout_seconds: float = 45.0,
+    reasoning_effort: str = "",
+    response_format: dict[str, str] | None = None,
 ) -> OpenRouterResult:
     """Return one completion, letting OpenRouter fail over between models."""
     if not api_key.strip():
@@ -44,9 +46,17 @@ def openrouter_chat(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    extra_body: dict[str, object] = {}
     fallbacks = _clean_fallback_models(model, fallback_models)
     if fallbacks:
-        request["extra_body"] = {"models": list(fallbacks)}
+        extra_body["models"] = list(fallbacks)
+    effort = reasoning_effort.strip().lower()
+    if effort:
+        extra_body["reasoning"] = {"effort": effort, "exclude": True}
+    if extra_body:
+        request["extra_body"] = extra_body
+    if response_format:
+        request["response_format"] = dict(response_format)
     response = client.chat.completions.create(**request)
     content = str(response.choices[0].message.content or "").strip()
     used_model = str(getattr(response, "model", "") or model).strip()
@@ -66,4 +76,3 @@ def _clean_fallback_models(
         seen.add(model)
         result.append(model)
     return tuple(result)
-

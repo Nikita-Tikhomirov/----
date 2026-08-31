@@ -256,6 +256,8 @@ def test_judge_lead_routes_analysis_through_openrouter_with_fallbacks():
         "anthropic/claude-sonnet-4.5",
         "openai/gpt-4.1",
     )
+    assert call["reasoning_effort"] == "minimal"
+    assert call["response_format"] == {"type": "json_object"}
 
 
 def test_judge_lead_never_publishes_rule_fallback_when_cloud_analysis_fails():

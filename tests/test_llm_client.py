@@ -64,3 +64,28 @@ def test_openrouter_chat_omits_fallback_body_when_no_models_are_configured():
 
     assert "extra_body" not in mock_client.chat.completions.create.call_args.kwargs
 
+
+def test_openrouter_chat_combines_reasoning_with_fallbacks_and_json_format():
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = SimpleNamespace(
+        model="openai/gpt-5.1",
+        choices=[SimpleNamespace(message=SimpleNamespace(content='{"decision":"accept"}'))],
+    )
+
+    with patch("openai.OpenAI", return_value=mock_client):
+        openrouter_chat(
+            api_key="or-test",
+            base_url="https://openrouter.ai/api/v1",
+            primary_model="openai/gpt-5.1",
+            fallback_models=("openai/gpt-4.1",),
+            messages=[{"role": "user", "content": "test"}],
+            reasoning_effort="minimal",
+            response_format={"type": "json_object"},
+        )
+
+    call = mock_client.chat.completions.create.call_args.kwargs
+    assert call["extra_body"] == {
+        "models": ["openai/gpt-4.1"],
+        "reasoning": {"effort": "minimal", "exclude": True},
+    }
+    assert call["response_format"] == {"type": "json_object"}
