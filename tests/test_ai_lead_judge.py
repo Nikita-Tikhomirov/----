@@ -77,6 +77,7 @@ def test_judge_prompt_keeps_questions_internal_and_out_of_customer_draft():
     assert "начни draft_reply с «здравствуйте!»" in prompt
     assert "не пиши «план такой»" in prompt
     assert "не добавляй каналы связи" in prompt
+    assert "регистрация и верификация аккаунтов" in prompt
 
 
 def test_judge_allows_builder_name_when_the_spec_explicitly_forbids_it():
@@ -192,6 +193,20 @@ def test_judge_lead_rejects_orders_that_forbid_ai_workflow_without_api_call():
     assert result.accepted is False
     assert result.decision == "reject"
     assert "AI" in result.reasons[0]
+    chat.assert_not_called()
+
+
+def test_judge_lead_rejects_third_party_account_registration_without_api_call():
+    with patch("app.ai_lead_judge.openrouter_chat") as chat:
+        result = judge_lead(
+            "Создать акаунт в гугл плей консоль с привязкой к моему номеру "
+            "и электронной почте.",
+            api_key="or-test",
+        )
+
+    assert result.accepted is False
+    assert result.decision == "reject"
+    assert "регистрация стороннего аккаунта" in result.reasons[0]
     chat.assert_not_called()
 
 

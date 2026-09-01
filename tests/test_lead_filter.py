@@ -69,6 +69,25 @@ def test_rejects_native_ios_app_orders_but_keeps_web_ios_compatibility_work():
     assert web.accepted is True
 
 
+def test_rejects_third_party_developer_account_registration():
+    result = evaluate_post(
+        "Создать акаунт в гугл плей консоль с привязкой к моему номеру "
+        "и электронной почте. Отклик: https://kwork.ru/projects/3245756/view"
+    )
+
+    assert result.accepted is False
+    assert "регистрация стороннего аккаунта" in result.reasons
+
+
+def test_keeps_user_account_feature_development_in_scope():
+    result = evaluate_post(
+        "Нужно реализовать регистрацию аккаунта пользователя на WordPress-сайте "
+        "с подтверждением почты. Отклик: https://kwork.ru/projects/10/view"
+    )
+
+    assert result.accepted is True
+
+
 def test_accepts_full_time_vacancies_from_kwork_feed():
     result = evaluate_post(
         "Вакансия WordPress разработчик, зарплата 150 000 руб/мес, "

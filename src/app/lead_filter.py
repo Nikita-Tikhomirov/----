@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from app.keyword_matching import has_non_excluded_keyword, has_non_excluded_match
+from app.lead_scope import non_development_rejection
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,9 @@ def evaluate_post(
     scored_text = re.sub(r"https?://\S+", "", normalized)
     positive = [label for label, pattern in POSITIVE_PATTERNS if pattern.search(scored_text)]
     blocked = _matched_blocked_labels(scored_text, blocked_keywords)
+    scope_rejection = non_development_rejection(scored_text)
+    if scope_rejection:
+        blocked.append(scope_rejection)
     contact = _extract_contact(normalized)
     has_core_web = any(label in CORE_WEB_LABELS for label in positive)
     reasons: list[str] = []

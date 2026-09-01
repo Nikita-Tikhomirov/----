@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.keyword_matching import has_non_excluded_keyword, has_non_excluded_match
+from app.lead_scope import non_development_rejection
 from app.llm_client import openrouter_chat
 from app.reply_policy import COMMERCIAL_REPLY_PATTERN
 
@@ -86,6 +87,9 @@ def judge_lead(
 ) -> LeadJudgeResult:
     """Score a Kwork lead against the user's week-with-AI fit criteria."""
     blocked = _matched_keywords(text, blocked_keywords)
+    scope_rejection = non_development_rejection(text)
+    if scope_rejection:
+        return _reject(scope_rejection, text)
     if has_non_excluded_match(text, BITRIX_PATTERN):
         return _reject("Bitrix/Битрикс исключен", text)
     if AI_WORKFLOW_PROHIBITION_PATTERN.search(text):
@@ -308,6 +312,8 @@ def _build_prompt(text: str) -> str:
         "- не требует глубокого senior-опыта.\n\n"
         "Критерии reject:\n"
         "- Bitrix/Битрикс, 1C/1С, мобильные приложения, React Native/Flutter, DevOps, blockchain, сложная CRM/ERP;\n"
+        "- чисто административные действия без создания или изменения ПО: регистрация и верификация аккаунтов "
+        "в Google Play Console, App Store и других сторонних сервисах, операции с чужими документами, SMS или оплатой;\n"
         "- нет понятного результата;\n"
         "- явно больше недели: укажи реальный estimated_days и решение reject, не сокращай оценку до 7 дней;\n"
         "- слишком низкая цена при большом объёме.\n\n"
