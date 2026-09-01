@@ -138,6 +138,11 @@ def test_reply_form_opener_ignores_kwork_project_feedback_button():
     assert "|| paymentTypeItems[0]" not in _FILL_AND_SUBMIT_SCRIPT
     assert ".duration-select__selected-option')" in _FILL_AND_SUBMIT_SCRIPT
     assert "|| durationWidget?.querySelector('.vs__selected')" in _FILL_AND_SUBMIT_SCRIPT
+    direct_duration = "const directDaysField = document.querySelector('input[placeholder=\"Срок выполнения\"], input.vs__search')"
+    generic_duration = "const daysField = daysSelect || directDaysField || fields.find"
+    assert direct_duration in _FILL_AND_SUBMIT_SCRIPT
+    assert generic_duration in _FILL_AND_SUBMIT_SCRIPT
+    assert _FILL_AND_SUBMIT_SCRIPT.index(direct_duration) < _FILL_AND_SUBMIT_SCRIPT.index(generic_duration)
 
 
 def test_fill_script_waits_for_kwork_vue_form_to_settle_before_submit():

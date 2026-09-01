@@ -856,7 +856,10 @@ async (payload) => {
     return visible(el) && (/срок|дн|day|days|duration|deadline/.test(meta(el))
       || Array.from(el.options || []).some(option => /\d+\s*д(?:н|ень|ня|ней)/i.test(option.text)));
   });
-  const daysField = daysSelect || fields.find(el => /срок|дн|day|days|duration|deadline/.test(meta(el))) || document.querySelector('input[placeholder="Срок выполнения"], input.vs__search');
+  const directDaysField = document.querySelector('input[placeholder="Срок выполнения"], input.vs__search');
+  const daysField = daysSelect || directDaysField || fields.find(el => {
+    return el.tagName === 'INPUT' && /срок|дн|day|days|duration|deadline/.test(meta(el));
+  });
   const durationWidget = daysField?.closest('.v-select');
   if (daysSelect && payload.days) {
     const option = Array.from(daysSelect.options || []).find(item => {
