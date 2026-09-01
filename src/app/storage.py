@@ -151,11 +151,12 @@ class Storage:
 
                 CREATE TABLE IF NOT EXISTS kwork_inbox_messages (
                     message_key TEXT PRIMARY KEY,
-                    lead_id INTEGER NOT NULL REFERENCES leads(id),
+                    lead_id INTEGER REFERENCES leads(id),
                     conversation TEXT NOT NULL,
-                    project_id INTEGER NOT NULL,
+                    project_id INTEGER,
                     incoming_text TEXT NOT NULL,
                     incoming_time TEXT NOT NULL DEFAULT '',
+                    attachments_json TEXT NOT NULL DEFAULT '[]',
                     reply_text TEXT NOT NULL DEFAULT '',
                     confirmation TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'pending',
@@ -216,6 +217,13 @@ class Storage:
             _ensure_column(conn, "leads", "hub_lead_id", "INTEGER")
             _ensure_column(conn, "leads", "hub_synced_at", "TEXT NOT NULL DEFAULT ''")
             _ensure_column(conn, "leads", "hub_claimed_at", "TEXT NOT NULL DEFAULT ''")
+            _ensure_column(
+                conn,
+                "kwork_inbox_messages",
+                "attachments_json",
+                "TEXT NOT NULL DEFAULT '[]'",
+            )
+            _ensure_kwork_inbox_nullable_references(conn)
             _backfill_missing_failed_errors(conn)
             _deduplicate_lead_attachment_urls(conn)
             conn.execute(
@@ -640,27 +648,29 @@ class Storage:
     def claim_kwork_inbox_message(
         self,
         message_key: str,
-        lead_id: int,
+        lead_id: int | None,
         conversation: str,
-        project_id: int,
+        project_id: int | None,
         incoming_text: str,
         incoming_time: str = "",
+        attachments_json: str = "[]",
     ) -> bool:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO kwork_inbox_messages (
                     message_key, lead_id, conversation, project_id,
-                    incoming_text, incoming_time
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    incoming_text, incoming_time, attachments_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     message_key,
-                    lead_id,
+                    None if lead_id is None else int(lead_id),
                     conversation.strip(),
-                    int(project_id),
+                    None if project_id is None else int(project_id),
                     incoming_text.strip(),
                     incoming_time.strip(),
+                    str(attachments_json or "[]").strip()[:20_000],
                 ),
             )
             cursor = conn.execute(
@@ -1229,6 +1239,54 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
     columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _ensure_kwork_inbox_nullable_references(conn: sqlite3.Connection) -> None:
+    columns = {
+        str(row["name"]): row
+        for row in conn.execute("PRAGMA table_info(kwork_inbox_messages)").fetchall()
+    }
+    if not columns or (
+        not bool(columns["lead_id"]["notnull"])
+        and not bool(columns["project_id"]["notnull"])
+    ):
+        return
+
+    conn.execute("ALTER TABLE kwork_inbox_messages RENAME TO kwork_inbox_messages_legacy")
+    conn.execute(
+        """
+        CREATE TABLE kwork_inbox_messages (
+            message_key TEXT PRIMARY KEY,
+            lead_id INTEGER REFERENCES leads(id),
+            conversation TEXT NOT NULL,
+            project_id INTEGER,
+            incoming_text TEXT NOT NULL,
+            incoming_time TEXT NOT NULL DEFAULT '',
+            attachments_json TEXT NOT NULL DEFAULT '[]',
+            reply_text TEXT NOT NULL DEFAULT '',
+            confirmation TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO kwork_inbox_messages (
+            message_key, lead_id, conversation, project_id, incoming_text,
+            incoming_time, attachments_json, reply_text, confirmation, status,
+            attempts, last_error, created_at, updated_at
+        )
+        SELECT message_key, lead_id, conversation, project_id, incoming_text,
+               incoming_time, attachments_json, reply_text, confirmation, status,
+               attempts, last_error, created_at, updated_at
+        FROM kwork_inbox_messages_legacy
+        """
+    )
+    conn.execute("DROP TABLE kwork_inbox_messages_legacy")
 
 
 def _backfill_generated_order_titles(conn: sqlite3.Connection) -> None:

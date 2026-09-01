@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import app.kwork_inbox as kwork_inbox_module
@@ -126,6 +127,41 @@ def test_parse_conversation_previews_keeps_only_current_incoming_messages():
     assert previews == [InboxPreview(username="new-client", preview="Когда сможете начать?", date_label="10:05")]
 
 
+def test_inbox_client_keeps_attachment_only_messages(monkeypatch):
+    payload = {
+        "project_url": "",
+        "project_title": "",
+        "messages": [
+            {
+                "author": "customer",
+                "text": "",
+                "time_label": "10:05",
+                "attachments": [
+                    {
+                        "label": "ТЗ.docx",
+                        "url": "https://kwork.ru/files/uploaded/tz.docx",
+                        "size_label": "12 Кб",
+                    }
+                ],
+            }
+        ],
+    }
+    client = KworkInboxClient()
+    monkeypatch.setattr(client, "_inbox_page", lambda: {"webSocketDebuggerUrl": "ws://monitor"})
+    monkeypatch.setattr(client, "_navigate_to_conversation", lambda *_args: None)
+    monkeypatch.setattr(client, "_wait_for", lambda *_args: None)
+    monkeypatch.setattr(kwork_inbox_module.websocket, "create_connection", lambda *_args, **_kwargs: FakeWebSocket())
+    monkeypatch.setattr(kwork_inbox_module, "_evaluate", lambda *_args: json.dumps(payload, ensure_ascii=False))
+
+    conversation = client.load_conversation("customer")
+
+    assert len(conversation.messages) == 1
+    assert conversation.messages[0].text == ""
+    assert len(conversation.messages[0].attachments) == 1
+    assert conversation.messages[0].attachments[0].label == "ТЗ.docx"
+    assert conversation.messages[0].attachments[0].url.endswith("/tz.docx")
+
+
 def test_inbox_service_replies_once_to_a_message_for_a_sent_project(tmp_path: Path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
@@ -155,6 +191,84 @@ def test_inbox_service_replies_once_to_a_message_for_a_sent_project(tmp_path: Pa
         ("customer", "Могу начать сегодня. Прикрепите, пожалуйста, доступы к сайту в заказе.")
     ]
     assert composed == [(conversation, lead.id)]
+
+
+def test_inbox_service_replies_once_to_a_direct_conversation(tmp_path: Path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+    conversation = InboxConversation(
+        username="direct-customer",
+        project_id=None,
+        project_title="",
+        messages=(
+            InboxMessage(
+                author="direct-customer",
+                text="Сколько времени займёт настройка?",
+                time_label="10:05",
+            ),
+        ),
+    )
+    client = FakeInboxClient(conversation)
+    composed_with = []
+
+    def compose(current: InboxConversation, lead):
+        composed_with.append((current, lead))
+        return "Обычно такая настройка занимает один рабочий день."
+
+    service = KworkInboxService(storage, client, compose)
+
+    assert service.process_once() == 1
+    assert service.process_once() == 0
+    assert client.sent == [
+        ("direct-customer", "Обычно такая настройка занимает один рабочий день.")
+    ]
+    assert composed_with == [(conversation, None)]
+
+    with storage._connect() as conn:
+        row = conn.execute(
+            "SELECT lead_id, project_id, status FROM kwork_inbox_messages"
+        ).fetchone()
+    assert row["lead_id"] is None
+    assert row["project_id"] is None
+    assert row["status"] == "sent"
+
+
+def test_attachment_identity_participates_in_inbox_message_key():
+    first = InboxMessage(
+        author="customer",
+        text="",
+        time_label="10:05",
+        attachments=(
+            kwork_inbox_module.InboxAttachment(
+                label="first.docx",
+                url="https://kwork.ru/files/first.docx",
+                size_label="12 Кб",
+            ),
+        ),
+    )
+    second = InboxMessage(
+        author="customer",
+        text="",
+        time_label="10:05",
+        attachments=(
+            kwork_inbox_module.InboxAttachment(
+                label="second.docx",
+                url="https://kwork.ru/files/second.docx",
+                size_label="12 Кб",
+            ),
+        ),
+    )
+    conversation = InboxConversation(
+        username="customer",
+        project_id=None,
+        project_title="",
+        messages=(first, second),
+    )
+
+    assert kwork_inbox_module._message_key(conversation, first) != kwork_inbox_module._message_key(
+        conversation,
+        second,
+    )
 
 
 def test_inbox_service_ignores_conversations_not_linked_to_a_sent_lead(tmp_path: Path):

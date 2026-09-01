@@ -467,6 +467,84 @@ def test_initialize_adds_proposal_fields_to_existing_leads_database(tmp_path):
     assert {"proposal_title", "proposal_price_rub", "proposal_days"} <= columns
 
 
+def test_kwork_direct_message_can_be_claimed_once_without_lead_or_project(tmp_path):
+    storage = Storage(tmp_path / "leads.sqlite3")
+    storage.initialize()
+
+    assert storage.claim_kwork_inbox_message(
+        "direct-message",
+        None,
+        "customer",
+        None,
+        "Когда сможете начать?",
+        "10:05",
+        '[{"label":"ТЗ.docx","url":"https://kwork.ru/files/tz.docx"}]',
+    ) is True
+    assert storage.claim_kwork_inbox_message(
+        "direct-message",
+        None,
+        "customer",
+        None,
+        "Когда сможете начать?",
+        "10:05",
+        '[{"label":"ТЗ.docx","url":"https://kwork.ru/files/tz.docx"}]',
+    ) is False
+
+    with storage._connect() as conn:
+        row = conn.execute(
+            "SELECT lead_id, project_id, attachments_json FROM kwork_inbox_messages"
+        ).fetchone()
+    assert row["lead_id"] is None
+    assert row["project_id"] is None
+    assert "ТЗ.docx" in row["attachments_json"]
+
+
+def test_initialize_makes_legacy_kwork_inbox_references_nullable(tmp_path):
+    database_path = tmp_path / "leads.sqlite3"
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE kwork_inbox_messages (
+                message_key TEXT PRIMARY KEY,
+                lead_id INTEGER NOT NULL,
+                conversation TEXT NOT NULL,
+                project_id INTEGER NOT NULL,
+                incoming_text TEXT NOT NULL,
+                incoming_time TEXT NOT NULL DEFAULT '',
+                reply_text TEXT NOT NULL DEFAULT '',
+                confirmation TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO kwork_inbox_messages (
+                message_key, lead_id, conversation, project_id, incoming_text, status
+            ) VALUES ('existing', 7, 'customer', 123, 'Старое сообщение', 'sent')
+            """
+        )
+
+    Storage(database_path).initialize()
+
+    with sqlite3.connect(database_path) as conn:
+        columns = {
+            row[1]: row[3]
+            for row in conn.execute("PRAGMA table_info(kwork_inbox_messages)")
+        }
+        row = conn.execute(
+            "SELECT message_key, lead_id, project_id, status FROM kwork_inbox_messages"
+        ).fetchone()
+    assert columns["lead_id"] == 0
+    assert columns["project_id"] == 0
+    assert columns["attachments_json"] == 1
+    assert row == ("existing", 7, 123, "sent")
+
+
 def test_approval_can_be_recorded_only_once(tmp_path):
     storage = Storage(tmp_path / "leads.sqlite3")
     storage.initialize()
