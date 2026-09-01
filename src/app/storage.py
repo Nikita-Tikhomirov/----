@@ -149,6 +149,22 @@ class Storage:
                     telegram_message_id TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS kwork_inbox_messages (
+                    message_key TEXT PRIMARY KEY,
+                    lead_id INTEGER NOT NULL REFERENCES leads(id),
+                    conversation TEXT NOT NULL,
+                    project_id INTEGER NOT NULL,
+                    incoming_text TEXT NOT NULL,
+                    incoming_time TEXT NOT NULL DEFAULT '',
+                    reply_text TEXT NOT NULL DEFAULT '',
+                    confirmation TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS lead_attachments (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     lead_id INTEGER NOT NULL REFERENCES leads(id),
@@ -600,6 +616,95 @@ class Storage:
                 (post_id,),
             ).fetchone()
         return _lead_from_row(row) if row is not None else None
+
+    def get_sent_lead_by_kwork_project_id(self, project_id: int) -> Lead | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT leads.*, posts.post_url, posts.raw_text,
+                       posts.channel AS post_channel,
+                       posts.message_id AS post_message_id,
+                       posts.posted_at AS post_posted_at,
+                       sent_messages.sent_at AS sent_at
+                FROM leads
+                JOIN posts ON posts.id = leads.post_id
+                JOIN sent_messages ON sent_messages.lead_id = leads.id
+                WHERE posts.channel = 'kwork-web' AND posts.message_id = ?
+                ORDER BY leads.id DESC
+                LIMIT 1
+                """,
+                (int(project_id),),
+            ).fetchone()
+        return _lead_from_row(row) if row is not None else None
+
+    def claim_kwork_inbox_message(
+        self,
+        message_key: str,
+        lead_id: int,
+        conversation: str,
+        project_id: int,
+        incoming_text: str,
+        incoming_time: str = "",
+    ) -> bool:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO kwork_inbox_messages (
+                    message_key, lead_id, conversation, project_id,
+                    incoming_text, incoming_time
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    message_key,
+                    lead_id,
+                    conversation.strip(),
+                    int(project_id),
+                    incoming_text.strip(),
+                    incoming_time.strip(),
+                ),
+            )
+            cursor = conn.execute(
+                """
+                UPDATE kwork_inbox_messages
+                SET status = 'processing', attempts = attempts + 1,
+                    last_error = '', updated_at = CURRENT_TIMESTAMP
+                WHERE message_key = ? AND (
+                    status = 'pending'
+                    OR (status = 'failed' AND updated_at <= datetime('now', '-10 seconds'))
+                    OR (status = 'processing' AND updated_at <= datetime('now', '-60 seconds'))
+                )
+                """,
+                (message_key,),
+            )
+        return cursor.rowcount == 1
+
+    def finish_kwork_inbox_message(
+        self,
+        message_key: str,
+        status: str,
+        *,
+        reply_text: str = "",
+        confirmation: str = "",
+        error: str = "",
+    ) -> None:
+        if status not in {"sent", "skipped", "failed"}:
+            raise ValueError(f"Unsupported Kwork inbox status: {status}")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE kwork_inbox_messages
+                SET status = ?, reply_text = ?, confirmation = ?, last_error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE message_key = ?
+                """,
+                (
+                    status,
+                    reply_text.strip()[:4000],
+                    confirmation.strip()[:500],
+                    error.strip()[:2000],
+                    message_key,
+                ),
+            )
 
     def record_approval(self, lead_id: int, email_message_id: str) -> bool:
         with self._connect() as conn:

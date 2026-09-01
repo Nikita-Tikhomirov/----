@@ -43,6 +43,14 @@ def test_rejects_visual_builders_before_ai_analysis():
         "Webflow",
         "Wix",
         "визуальный конструктор",
+        "Oxygen Builder",
+        "Bricks Builder",
+        "WPBakery",
+        "Divi Builder",
+        "Beaver Builder",
+        "Visual Composer",
+        "Breakdance",
+        "Thrive Architect",
     )
 
     for platform in platforms:
@@ -52,6 +60,15 @@ def test_rejects_visual_builders_before_ai_analysis():
 
         assert result.accepted is False
         assert result.reasons
+
+
+def test_allows_visual_builder_names_when_the_order_explicitly_forbids_them():
+    result = evaluate_post(
+        "Нужна разработка темы WordPress без Oxygen Builder, Bricks и WPBakery. "
+        "Только PHP, HTML и CSS. Отклик: https://example.com/order"
+    )
+
+    assert result.accepted is True
 
 
 def test_rejects_native_ios_app_orders_but_keeps_web_ios_compatibility_work():

@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import re
+import threading
 import time
 from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
@@ -23,6 +24,7 @@ from app.chrome_cookies import chrome_cookie_header
 from app.config import AppConfig, load_config
 from app.handoff import write_codex_handoff
 from app.kwork_client import KworkProjectClient
+from app.kwork_inbox import KworkInboxClient, KworkInboxService, compose_inbox_reply
 from app.kwork_sender import KWORK_MIN_PRICE_RUB, KworkReplySender
 from app.kwork_source import KworkWebSource
 from app.lead_filter import evaluate_post
@@ -1295,6 +1297,53 @@ def run_mobile_control_loop(
         time.sleep(poll_seconds)
 
 
+def _start_kwork_inbox_monitor(storage: Storage, config: AppConfig) -> threading.Thread:
+    client = KworkInboxClient(
+        cdp_url=config.kwork_cdp_url,
+        browser_profile_dir=config.kwork_browser_profile_dir,
+    )
+
+    def compose(conversation, lead):
+        return compose_inbox_reply(
+            conversation,
+            lead,
+            api_key=config.openrouter_api_key,
+            base_url=config.openrouter_base_url,
+            model=config.openrouter_reply_model,
+            fallback_models=config.openrouter_fallback_models,
+        )
+
+    service = KworkInboxService(storage, client, compose)
+    thread = threading.Thread(
+        target=_run_kwork_inbox_monitor,
+        args=(service, config.database_path.parent / "kwork-inbox.lock", config.kwork_inbox_poll_seconds),
+        name="kwork-inbox-monitor",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+def _run_kwork_inbox_monitor(
+    service: KworkInboxService,
+    lock_path: Path,
+    poll_seconds: float,
+) -> None:
+    delay = max(0.5, float(poll_seconds))
+    while True:
+        with _scan_execution_lock(lock_path) as acquired:
+            if not acquired:
+                time.sleep(delay)
+                continue
+            logger.info("Kwork inbox auto-reply monitor started; poll interval %.1f sec", delay)
+            while True:
+                try:
+                    service.process_once()
+                except Exception:
+                    logger.exception("Kwork inbox auto-reply poll failed")
+                time.sleep(delay)
+
+
 def _configure_runtime_logging(
     database_path: Path,
     *,
@@ -1350,6 +1399,9 @@ def main() -> int:
         raise
     _configure_runtime_logging(config.database_path)
     storage, telegram_client, lead_hub, kwork_project_client = build_runtime(config)
+
+    if args.command in {"watch", "mobile-control"} and getattr(config, "kwork_inbox_auto_reply", False):
+        _start_kwork_inbox_monitor(storage, config)
 
     if args.command == "scan":
         _scan_runtime_once(storage, telegram_client, lead_hub, kwork_project_client, config)

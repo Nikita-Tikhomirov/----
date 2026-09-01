@@ -312,6 +312,8 @@ def _build_prompt(text: str) -> str:
         "- не требует глубокого senior-опыта.\n\n"
         "Критерии reject:\n"
         "- Bitrix/Битрикс, 1C/1С, мобильные приложения, React Native/Flutter, DevOps, blockchain, сложная CRM/ERP;\n"
+        "- визуальные конструкторы сайтов и страниц: Tilda, Elementor, Oxygen, Bricks, WPBakery, Divi, "
+        "Beaver Builder, Visual Composer, Breakdance, Thrive Architect;\n"
         "- чисто административные действия без создания или изменения ПО: регистрация и верификация аккаунтов "
         "в Google Play Console, App Store и других сторонних сервисах, операции с чужими документами, SMS или оплатой;\n"
         "- нет понятного результата;\n"

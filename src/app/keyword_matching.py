@@ -18,6 +18,11 @@ DIRECT_EXCLUSION_BEFORE_PATTERN = re.compile(
     r"(?:\bбез(?:\s+использования)?|\bне\s+(?:на|через|в))\s*[\s(\[{'\"«]*$",
     re.IGNORECASE,
 )
+LIST_EXCLUSION_BEFORE_PATTERN = re.compile(
+    r"\bбез(?:\s+(?:использования|применения|подключения|установки|внедрения))?\s+"
+    r"(?:[\w.+#/-]+(?:\s+[\w.+#/-]+){0,2}\s*(?:,\s*|\s+(?:и|или)\s+))+$",
+    re.IGNORECASE,
+)
 EXCLUSION_AFTER_PATTERN = re.compile(
     r"^[\s)\]}\"'»,:;-]{0,12}(?:"
     r"не\s+(?:использовать|применять|подключать|устанавливать|нужен|нужна|нужно|рассматриваем|рассматривается)"
@@ -45,5 +50,6 @@ def _is_excluded(text: str, start: int, end: int) -> bool:
     return bool(
         EXCLUSION_BEFORE_PATTERN.search(before)
         or DIRECT_EXCLUSION_BEFORE_PATTERN.search(before)
+        or LIST_EXCLUSION_BEFORE_PATTERN.search(before)
         or EXCLUSION_AFTER_PATTERN.search(after)
     )
