@@ -41,7 +41,10 @@ class AppConfig:
     kwork_auto_send: bool = False
     kwork_auto_send_daily_limit: int = 10
     kwork_inbox_auto_reply: bool = True
-    kwork_inbox_poll_seconds: float = 2.0
+    kwork_inbox_poll_seconds: float = 300.0
+    kwork_inbox_night_poll_seconds: float = 14_400.0
+    kwork_inbox_night_start_hour: int = 0
+    kwork_inbox_night_end_hour: int = 8
     lead_min_score: int = 60
     lead_max_days: int = 7
     lead_accept_decisions: tuple[str, ...] = ("accept", "maybe")
@@ -92,7 +95,13 @@ def load_config(env_path: str | Path = ".env") -> AppConfig:
         kwork_auto_send=_bool_env("KWORK_AUTO_SEND", False),
         kwork_auto_send_daily_limit=_int_env("KWORK_AUTO_SEND_DAILY_LIMIT", 10),
         kwork_inbox_auto_reply=_bool_env("KWORK_INBOX_AUTO_REPLY", True),
-        kwork_inbox_poll_seconds=_float_env("KWORK_INBOX_POLL_SECONDS", 2.0),
+        kwork_inbox_poll_seconds=_float_env("KWORK_INBOX_POLL_SECONDS", 300.0),
+        kwork_inbox_night_poll_seconds=_float_env(
+            "KWORK_INBOX_NIGHT_POLL_SECONDS",
+            14_400.0,
+        ),
+        kwork_inbox_night_start_hour=_int_env("KWORK_INBOX_NIGHT_START_HOUR", 0),
+        kwork_inbox_night_end_hour=_int_env("KWORK_INBOX_NIGHT_END_HOUR", 8),
         lead_min_score=_int_env("LEAD_MIN_SCORE", 60),
         lead_max_days=_int_env("LEAD_MAX_DAYS", 7),
         lead_accept_decisions=_csv_env("LEAD_ACCEPT_DECISIONS", ("accept", "maybe")),

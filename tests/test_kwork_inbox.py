@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import app.kwork_inbox as kwork_inbox_module
+
 from app.kwork_inbox import (
     InboxConversation,
     InboxMessage,
     InboxPreview,
+    KworkInboxClient,
     KworkInboxService,
     parse_conversation_previews,
 )
@@ -55,6 +58,59 @@ class FakeInboxClient:
     def send_reply(self, username: str, text: str) -> str:
         self.sent.append((username, text))
         return f"kwork-inbox-{username}-verified"
+
+
+class FakeWebSocket:
+    def close(self) -> None:
+        pass
+
+
+def test_inbox_client_owns_a_dedicated_tab_instead_of_reusing_user_chat(monkeypatch):
+    existing_user_tab = {
+        "id": "user-chat",
+        "type": "page",
+        "url": "https://kwork.ru/inbox/mashtc",
+        "webSocketDebuggerUrl": "ws://user-chat",
+    }
+    monitor_tab = {
+        "id": "monitor-chat",
+        "type": "page",
+        "url": "https://kwork.ru/inbox",
+        "webSocketDebuggerUrl": "ws://monitor-chat",
+    }
+    created = False
+    create_calls = 0
+
+    def fake_cdp_json(_cdp_url, path, timeout):
+        assert timeout in {5, 10}
+        if path == "/json/version":
+            return {"webSocketDebuggerUrl": "ws://browser"}
+        if path == "/json/list":
+            return [existing_user_tab, monitor_tab] if created else [existing_user_tab]
+        raise AssertionError(f"Unexpected CDP path: {path}")
+
+    def fake_send_cdp(_ws, method, params):
+        nonlocal created, create_calls
+        assert method == "Target.createTarget"
+        assert params == {"url": "https://kwork.ru/inbox"}
+        created = True
+        create_calls += 1
+        return {"result": {"targetId": "monitor-chat"}}
+
+    monkeypatch.setattr(kwork_inbox_module, "_ensure_chrome_cdp", lambda *_args: None)
+    monkeypatch.setattr(kwork_inbox_module, "_cdp_json", fake_cdp_json)
+    monkeypatch.setattr(kwork_inbox_module, "_send_cdp", fake_send_cdp)
+    monkeypatch.setattr(
+        kwork_inbox_module.websocket,
+        "create_connection",
+        lambda *_args, **_kwargs: FakeWebSocket(),
+    )
+
+    client = KworkInboxClient()
+
+    assert client._inbox_page()["id"] == "monitor-chat"
+    assert client._inbox_page()["id"] == "monitor-chat"
+    assert create_calls == 1
 
 
 def test_parse_conversation_previews_keeps_only_current_incoming_messages():

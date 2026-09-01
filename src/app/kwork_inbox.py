@@ -68,6 +68,7 @@ class KworkInboxClient:
         self.cdp_url = cdp_url.rstrip("/")
         self.browser_profile_dir = browser_profile_dir
         self.timeout_seconds = timeout_seconds
+        self._target_id: str | None = None
 
     def list_incoming_previews(self) -> list[InboxPreview]:
         page = self._inbox_page()
@@ -136,11 +137,15 @@ class KworkInboxClient:
         inbox_url = "https://kwork.ru/inbox"
         _ensure_chrome_cdp(self.cdp_url, inbox_url, self.browser_profile_dir)
         pages = _cdp_json(self.cdp_url, "/json/list", timeout=5) or []
-        for page in pages:
-            if page.get("type") != "page" or not page.get("webSocketDebuggerUrl"):
-                continue
-            if _is_inbox_url(str(page.get("url", ""))):
-                return page
+        if self._target_id:
+            for page in pages:
+                if (
+                    str(page.get("id", "")) == self._target_id
+                    and page.get("type") == "page"
+                    and page.get("webSocketDebuggerUrl")
+                ):
+                    return page
+            self._target_id = None
 
         version = _cdp_json(self.cdp_url, "/json/version", timeout=5)
         if not version or not version.get("webSocketDebuggerUrl"):
@@ -151,6 +156,9 @@ class KworkInboxClient:
         finally:
             browser_ws.close()
         target_id = str(response.get("result", {}).get("targetId", ""))
+        if not target_id:
+            raise RuntimeError("Chrome did not return a target for the Kwork inbox monitor")
+        self._target_id = target_id
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:
             pages = _cdp_json(self.cdp_url, "/json/list", timeout=5) or []

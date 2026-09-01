@@ -84,6 +84,38 @@ def test_load_config_reads_kwork_autosend_settings(tmp_path, monkeypatch):
     assert config.kwork_auto_send_daily_limit == 10
 
 
+def test_load_config_reads_kwork_inbox_schedule(tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "TELEGRAM_API_ID=0",
+                "TELEGRAM_API_HASH=fill_later",
+                "TELEGRAM_CHANNELS=@unused",
+                "KWORK_INBOX_POLL_SECONDS=300",
+                "KWORK_INBOX_NIGHT_POLL_SECONDS=14400",
+                "KWORK_INBOX_NIGHT_START_HOUR=0",
+                "KWORK_INBOX_NIGHT_END_HOUR=8",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for name in (
+        "KWORK_INBOX_POLL_SECONDS",
+        "KWORK_INBOX_NIGHT_POLL_SECONDS",
+        "KWORK_INBOX_NIGHT_START_HOUR",
+        "KWORK_INBOX_NIGHT_END_HOUR",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    config = load_config(env_file)
+
+    assert config.kwork_inbox_poll_seconds == 300
+    assert config.kwork_inbox_night_poll_seconds == 14_400
+    assert config.kwork_inbox_night_start_hour == 0
+    assert config.kwork_inbox_night_end_hour == 8
+
+
 def test_load_config_uses_fast_kwork_monitoring_defaults(tmp_path, monkeypatch):
     env_file = tmp_path / ".env"
     env_file.write_text(

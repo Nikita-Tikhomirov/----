@@ -7,9 +7,11 @@ import re
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Callable, Protocol
+from zoneinfo import ZoneInfo
 
 from app.ai_lead_judge import (
     DEFAULT_ACCEPT_DECISIONS,
@@ -42,6 +44,7 @@ from app.telegram_client import TelegramLeadClient
 
 logger = logging.getLogger(__name__)
 REPLY_GENERATION_ERROR_PREFIX = "AI-отклик не готов: "
+MOSCOW_TIMEZONE = ZoneInfo("Europe/Moscow")
 
 
 @contextmanager
@@ -1316,7 +1319,14 @@ def _start_kwork_inbox_monitor(storage: Storage, config: AppConfig) -> threading
     service = KworkInboxService(storage, client, compose)
     thread = threading.Thread(
         target=_run_kwork_inbox_monitor,
-        args=(service, config.database_path.parent / "kwork-inbox.lock", config.kwork_inbox_poll_seconds),
+        args=(
+            service,
+            config.database_path.parent / "kwork-inbox.lock",
+            config.kwork_inbox_poll_seconds,
+            config.kwork_inbox_night_poll_seconds,
+            config.kwork_inbox_night_start_hour,
+            config.kwork_inbox_night_end_hour,
+        ),
         name="kwork-inbox-monitor",
         daemon=True,
     )
@@ -1327,21 +1337,75 @@ def _start_kwork_inbox_monitor(storage: Storage, config: AppConfig) -> threading
 def _run_kwork_inbox_monitor(
     service: KworkInboxService,
     lock_path: Path,
-    poll_seconds: float,
+    day_poll_seconds: float,
+    night_poll_seconds: float,
+    night_start_hour: int,
+    night_end_hour: int,
 ) -> None:
-    delay = max(0.5, float(poll_seconds))
     while True:
         with _scan_execution_lock(lock_path) as acquired:
             if not acquired:
+                delay = _kwork_inbox_poll_delay(
+                    datetime.now(MOSCOW_TIMEZONE),
+                    day_seconds=day_poll_seconds,
+                    night_seconds=night_poll_seconds,
+                    night_start_hour=night_start_hour,
+                    night_end_hour=night_end_hour,
+                )
                 time.sleep(delay)
                 continue
-            logger.info("Kwork inbox auto-reply monitor started; poll interval %.1f sec", delay)
+            logger.info(
+                "Kwork inbox auto-reply monitor started; day %.1f sec, night %.1f sec (%02d:00-%02d:00 MSK)",
+                max(0.5, float(day_poll_seconds)),
+                max(0.5, float(night_poll_seconds)),
+                int(night_start_hour) % 24,
+                int(night_end_hour) % 24,
+            )
             while True:
                 try:
                     service.process_once()
                 except Exception:
                     logger.exception("Kwork inbox auto-reply poll failed")
+                delay = _kwork_inbox_poll_delay(
+                    datetime.now(MOSCOW_TIMEZONE),
+                    day_seconds=day_poll_seconds,
+                    night_seconds=night_poll_seconds,
+                    night_start_hour=night_start_hour,
+                    night_end_hour=night_end_hour,
+                )
                 time.sleep(delay)
+
+
+def _kwork_inbox_poll_delay(
+    now: datetime,
+    *,
+    day_seconds: float,
+    night_seconds: float,
+    night_start_hour: int,
+    night_end_hour: int,
+) -> float:
+    local_now = now.astimezone(MOSCOW_TIMEZONE)
+    start_hour = int(night_start_hour) % 24
+    end_hour = int(night_end_hour) % 24
+    if start_hour == end_hour:
+        return max(0.5, float(day_seconds))
+
+    if start_hour < end_hour:
+        is_night = start_hour <= local_now.hour < end_hour
+    else:
+        is_night = local_now.hour >= start_hour or local_now.hour < end_hour
+
+    interval = max(0.5, float(night_seconds if is_night else day_seconds))
+    boundary_hour = end_hour if is_night else start_hour
+    boundary = local_now.replace(
+        hour=boundary_hour,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    if boundary <= local_now:
+        boundary += timedelta(days=1)
+    return min(interval, max(0.5, (boundary - local_now).total_seconds()))
 
 
 def _configure_runtime_logging(

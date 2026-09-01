@@ -1,7 +1,9 @@
 import logging
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -43,6 +45,42 @@ def test_proposal_price_uses_fifteen_percent_below_kwork_maximum():
     assert _proposal_price_from_kwork_max(6150) == 5200
     assert _proposal_price_from_kwork_max(500) == 500
     assert _proposal_price_from_kwork_max(None) is None
+
+
+def test_kwork_inbox_poll_delay_uses_five_minutes_during_moscow_daytime():
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+
+    assert main_module._kwork_inbox_poll_delay(
+        now,
+        day_seconds=300,
+        night_seconds=14_400,
+        night_start_hour=0,
+        night_end_hour=8,
+    ) == 300
+
+
+def test_kwork_inbox_poll_delay_uses_four_hours_during_moscow_night():
+    now = datetime(2026, 9, 1, 2, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+
+    assert main_module._kwork_inbox_poll_delay(
+        now,
+        day_seconds=300,
+        night_seconds=14_400,
+        night_start_hour=0,
+        night_end_hour=8,
+    ) == 14_400
+
+
+def test_kwork_inbox_poll_delay_wakes_at_end_of_night_window():
+    now = datetime(2026, 9, 1, 7, 59, 30, tzinfo=ZoneInfo("Europe/Moscow"))
+
+    assert main_module._kwork_inbox_poll_delay(
+        now,
+        day_seconds=300,
+        night_seconds=14_400,
+        night_start_hour=0,
+        night_end_hour=8,
+    ) == 30
 
 
 def test_mobile_command_rejects_price_below_kwork_minimum():
